@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: meetstream_companion_db
+    environment:
+      POSTGRES_DB: meetstream_companion
+      POSTGRES_USER: meetstream
+      POSTGRES_PASSWORD: meetstream_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meetstream -d meetstream_companion"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+    driver: local

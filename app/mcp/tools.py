@@ -1,0 +1,586 @@
+"""
+MCP Tool Implementations.
+Exposes persistent meeting memory, decisions, action items, and past discussions
+to the MeetStream MIA agent during active meetings.
+"""
+import uuid
+from datetime import date
+from typing import Dict, Any, List, Optional
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.database.connection import get_db_context
+from app.database.repositories import MeetingRepository, MemoryRepository, ActionItemRepository
+from app.rag.meeting_memory import meeting_memory_rag
+from app.models.database import MemoryType
+from app.models.schemas import ActionItemUpdate
+
+
+# Tool Schemas for MCP Tool Discovery
+MCP_TOOL_DEFINITIONS = [
+    {
+        "name": "search_meeting_memory",
+        "description": "Semantic search across previous meeting transcripts, discussions, and structured memories (decisions, requirements, commitments). Use this whenever asked what happened in past calls or what someone said.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The natural language question or topic to search for (e.g. 'What are Acme requirements for SSO?')"
+                },
+                "customer_name": {
+                    "type": "string",
+                    "description": "Optional filter by customer or company name (e.g. 'Acme')"
+                },
+                "project_name": {
+                    "type": "string",
+                    "description": "Optional filter by project name"
+                },
+                "speaker": {
+                    "type": "string",
+                    "description": "Optional filter by who spoke or committed to the item (e.g. 'Sarah')"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of search results to return (default: 5, max: 10)",
+                    "default": 5
+                }
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "get_meeting",
+        "description": "Retrieve comprehensive details, summary, participants, and memories of a specific meeting by ID or title.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meeting_id": {
+                    "type": "string",
+                    "description": "UUID of the meeting to look up"
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Title of the meeting if ID is not known"
+                }
+            }
+        }
+    },
+    {
+        "name": "get_previous_meetings",
+        "description": "List recent previous meetings, optionally filtered by customer or project name.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "customer_name": {
+                    "type": "string",
+                    "description": "Optional filter by customer name"
+                },
+                "project_name": {
+                    "type": "string",
+                    "description": "Optional filter by project name"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Number of meetings to retrieve (default: 5)",
+                    "default": 5
+                }
+            }
+        }
+    },
+    {
+        "name": "get_action_items",
+        "description": "List open or completed action items and tasks assigned during previous meetings.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "owner": {
+                    "type": "string",
+                    "description": "Optional filter by owner name (e.g. 'Sarah')"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["open", "in_progress", "completed", "cancelled"],
+                    "description": "Filter by task status (default: open)",
+                    "default": "open"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum action items to return (default: 10)",
+                    "default": 10
+                }
+            }
+        }
+    },
+    {
+        "name": "add_meeting_memory",
+        "description": "Record a new structured memory (decision, requirement, concern, fact, etc.) for the current meeting. Use this to persist something important the agent just heard so future meetings can recall it. Do not use for trivial remarks.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meeting_id": {
+                    "type": "string",
+                    "description": "UUID of the meeting this memory belongs to"
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [t.value for t in MemoryType],
+                    "description": "Category of memory being recorded"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Clear, standalone statement capturing the memory with all necessary context"
+                },
+                "speaker": {
+                    "type": "string",
+                    "description": "Name of the person who said or committed to it, if known"
+                },
+                "importance": {
+                    "type": "integer",
+                    "description": "1-10, 10 being a critical business/technical blocker or top decision (default: 5)",
+                    "default": 5
+                }
+            },
+            "required": ["meeting_id", "type", "content"]
+        }
+    },
+    {
+        "name": "add_meeting_note",
+        "description": "Record a general free-form note or fact about the current meeting that doesn't fit a more specific memory type. Simpler than add_meeting_memory for quick contextual notes.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meeting_id": {
+                    "type": "string",
+                    "description": "UUID of the meeting this note belongs to"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "The note text"
+                },
+                "speaker": {
+                    "type": "string",
+                    "description": "Name of the person the note is attributed to, if known"
+                }
+            },
+            "required": ["meeting_id", "content"]
+        }
+    },
+    {
+        "name": "create_action_item",
+        "description": "Create a new tracked task or commitment from the current meeting, with an owner and optional due date.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "meeting_id": {
+                    "type": "string",
+                    "description": "UUID of the meeting this action item belongs to"
+                },
+                "task": {
+                    "type": "string",
+                    "description": "Specific actionable description of the task"
+                },
+                "owner": {
+                    "type": "string",
+                    "description": "Name of the person responsible, if known"
+                },
+                "due_date": {
+                    "type": "string",
+                    "description": "Due date in YYYY-MM-DD format, if mentioned"
+                },
+                "priority": {
+                    "type": "string",
+                    "enum": ["low", "medium", "high", "critical"],
+                    "description": "Priority of the task (default: medium)",
+                    "default": "medium"
+                }
+            },
+            "required": ["meeting_id", "task"]
+        }
+    },
+    {
+        "name": "update_action_item",
+        "description": "Update the status, owner, due date, or notes of an existing action item (e.g. mark it completed).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action_item_id": {
+                    "type": "string",
+                    "description": "UUID of the action item to update"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["open", "in_progress", "completed", "cancelled"],
+                    "description": "New status for the action item"
+                },
+                "owner": {
+                    "type": "string",
+                    "description": "Reassign the action item to a different owner"
+                },
+                "due_date": {
+                    "type": "string",
+                    "description": "New due date in YYYY-MM-DD format"
+                },
+                "notes": {
+                    "type": "string",
+                    "description": "Additional notes or context about the update"
+                }
+            },
+            "required": ["action_item_id"]
+        }
+    }
+]
+
+
+async def execute_tool(
+    org_id: uuid.UUID,
+    tool_name: str,
+    arguments: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Dispatcher for executing MCP tools with strict organization isolation.
+    """
+    async with get_db_context() as db:
+        if tool_name == "search_meeting_memory":
+            return await _tool_search_meeting_memory(db, org_id, arguments)
+        elif tool_name == "get_meeting":
+            return await _tool_get_meeting(db, org_id, arguments)
+        elif tool_name == "get_previous_meetings":
+            return await _tool_get_previous_meetings(db, org_id, arguments)
+        elif tool_name == "get_action_items":
+            return await _tool_get_action_items(db, org_id, arguments)
+        elif tool_name == "add_meeting_memory":
+            return await _tool_add_meeting_memory(db, org_id, arguments)
+        elif tool_name == "add_meeting_note":
+            return await _tool_add_meeting_note(db, org_id, arguments)
+        elif tool_name == "create_action_item":
+            return await _tool_create_action_item(db, org_id, arguments)
+        elif tool_name == "update_action_item":
+            return await _tool_update_action_item(db, org_id, arguments)
+        else:
+            return {"error": f"Unknown tool: {tool_name}"}
+
+
+async def _tool_search_meeting_memory(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    args: Dict[str, Any],
+) -> Dict[str, Any]:
+    query = args.get("query", "")
+    customer_name = args.get("customer_name")
+    project_name = args.get("project_name")
+    speaker = args.get("speaker")
+    limit = min(args.get("limit", 5), 10)
+
+    results = await meeting_memory_rag.search(
+        db=db,
+        org_id=org_id,
+        query=query,
+        customer_name=customer_name,
+        project_name=project_name,
+        speaker=speaker,
+        limit=limit,
+    )
+
+    formatted_results = []
+    for r in results:
+        formatted_results.append({
+            "content": r.content,
+            "source_type": r.source_type,
+            "meeting_title": r.meeting_title,
+            "meeting_date": r.meeting_date,
+            "speaker": r.speaker,
+            "customer_name": r.customer_name,
+            "memory_type": r.memory_type,
+            "relevance_score": r.similarity,
+        })
+
+    return {
+        "query": query,
+        "results_count": len(formatted_results),
+        "results": formatted_results,
+    }
+
+
+async def _tool_get_meeting(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    args: Dict[str, Any],
+) -> Dict[str, Any]:
+    meeting_id_str = args.get("meeting_id")
+    meeting_repo = MeetingRepository(db)
+
+    if meeting_id_str:
+        try:
+            m_uuid = uuid.UUID(meeting_id_str)
+            meeting = await meeting_repo.get_by_id(org_id, m_uuid)
+        except ValueError:
+            return {"error": "Invalid meeting UUID format"}
+    else:
+        title = args.get("title")
+        meetings = await meeting_repo.list_meetings(org_id, limit=1)
+        meeting = meetings[0] if meetings else None
+
+    if not meeting:
+        return {"error": "Meeting not found"}
+
+    return {
+        "id": str(meeting.id),
+        "title": meeting.title,
+        "customer_name": meeting.customer_name,
+        "project_name": meeting.project_name,
+        "started_at": str(meeting.started_at) if meeting.started_at else None,
+        "summary": meeting.summary,
+        "status": meeting.status,
+        "memories_count": len(meeting.memories) if meeting.memories else 0,
+        "action_items_count": len(meeting.action_items) if meeting.action_items else 0,
+    }
+
+
+async def _tool_get_previous_meetings(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    args: Dict[str, Any],
+) -> Dict[str, Any]:
+    meeting_repo = MeetingRepository(db)
+    customer_name = args.get("customer_name")
+    project_name = args.get("project_name")
+    limit = min(args.get("limit", 5), 20)
+
+    meetings = await meeting_repo.list_meetings(
+        org_id=org_id,
+        customer_name=customer_name,
+        project_name=project_name,
+        limit=limit,
+    )
+
+    items = []
+    for m in meetings:
+        items.append({
+            "id": str(m.id),
+            "title": m.title,
+            "customer_name": m.customer_name,
+            "project_name": m.project_name,
+            "started_at": str(m.started_at) if m.started_at else None,
+            "summary_preview": (m.summary[:200] + "...") if m.summary and len(m.summary) > 200 else m.summary,
+            "status": m.status,
+        })
+
+    return {
+        "count": len(items),
+        "meetings": items,
+    }
+
+
+async def _tool_get_action_items(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    args: Dict[str, Any],
+) -> Dict[str, Any]:
+    action_repo = ActionItemRepository(db)
+    owner = args.get("owner")
+    status_filter = args.get("status", "open")
+    limit = min(args.get("limit", 10), 50)
+
+    actions = await action_repo.list_action_items(
+        org_id=org_id,
+        owner=owner,
+        status=status_filter,
+        limit=limit,
+    )
+
+    items = []
+    for a in actions:
+        items.append({
+            "id": str(a.id),
+            "task": a.task,
+            "owner": a.owner,
+            "due_date": str(a.due_date) if a.due_date else None,
+            "status": a.status,
+            "priority": a.priority,
+        })
+
+    return {
+        "count": len(items),
+        "action_items": items,
+    }
+
+
+async def _tool_add_meeting_memory(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    args: Dict[str, Any],
+) -> Dict[str, Any]:
+    meeting_id_str = args.get("meeting_id")
+    type_str = args.get("type")
+    content = args.get("content")
+
+    if not meeting_id_str or not type_str or not content:
+        return {"error": "meeting_id, type, and content are required"}
+
+    try:
+        meeting_id = uuid.UUID(meeting_id_str)
+    except ValueError:
+        return {"error": "Invalid meeting_id UUID format"}
+
+    try:
+        memory_type = MemoryType(type_str)
+    except ValueError:
+        return {"error": f"Invalid memory type: {type_str}"}
+
+    meeting_repo = MeetingRepository(db)
+    # Server-side scoping: the memory can only be attached to a meeting that
+    # actually belongs to the authenticated organization.
+    meeting = await meeting_repo.get_by_id(org_id, meeting_id)
+    if not meeting:
+        return {"error": "Meeting not found"}
+
+    memory_repo = MemoryRepository(db)
+    memory = await memory_repo.create(
+        org_id=org_id,
+        meeting_id=meeting_id,
+        memory_type=memory_type,
+        content=content,
+        importance=min(max(args.get("importance", 5), 1), 10),
+        speaker=args.get("speaker"),
+        customer_name=meeting.customer_name,
+        project_name=meeting.project_name,
+    )
+
+    await meeting_memory_rag.index_memory(
+        db=db,
+        org_id=org_id,
+        meeting_id=meeting_id,
+        memory=memory,
+        meeting_metadata={"title": meeting.title, "customer_name": meeting.customer_name, "project_name": meeting.project_name},
+    )
+    await db.commit()
+
+    print(f"[AUDIT] add_meeting_memory org={org_id} meeting={meeting_id} type={memory_type.value} memory_id={memory.id}")
+
+    return {
+        "id": str(memory.id),
+        "type": memory.type.value,
+        "content": memory.content,
+        "status": "created",
+    }
+
+
+async def _tool_add_meeting_note(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    args: Dict[str, Any],
+) -> Dict[str, Any]:
+    # Convenience wrapper: a general note is stored as a FACT memory.
+    return await _tool_add_meeting_memory(
+        db,
+        org_id,
+        {
+            "meeting_id": args.get("meeting_id"),
+            "type": MemoryType.FACT.value,
+            "content": args.get("content"),
+            "speaker": args.get("speaker"),
+        },
+    )
+
+
+async def _tool_create_action_item(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    args: Dict[str, Any],
+) -> Dict[str, Any]:
+    meeting_id_str = args.get("meeting_id")
+    task = args.get("task")
+
+    if not meeting_id_str or not task:
+        return {"error": "meeting_id and task are required"}
+
+    try:
+        meeting_id = uuid.UUID(meeting_id_str)
+    except ValueError:
+        return {"error": "Invalid meeting_id UUID format"}
+
+    meeting_repo = MeetingRepository(db)
+    meeting = await meeting_repo.get_by_id(org_id, meeting_id)
+    if not meeting:
+        return {"error": "Meeting not found"}
+
+    due_date = None
+    due_date_str = args.get("due_date")
+    if due_date_str:
+        try:
+            due_date = date.fromisoformat(due_date_str)
+        except ValueError:
+            return {"error": f"Invalid due_date format, expected YYYY-MM-DD: {due_date_str}"}
+
+    action_repo = ActionItemRepository(db)
+    action = await action_repo.create(
+        org_id=org_id,
+        meeting_id=meeting_id,
+        task=task,
+        owner=args.get("owner"),
+        due_date=due_date,
+        priority=args.get("priority", "medium"),
+    )
+    await db.commit()
+
+    print(f"[AUDIT] create_action_item org={org_id} meeting={meeting_id} action_item_id={action.id} owner={action.owner}")
+
+    return {
+        "id": str(action.id),
+        "task": action.task,
+        "owner": action.owner,
+        "due_date": str(action.due_date) if action.due_date else None,
+        "status": action.status,
+        "priority": action.priority,
+    }
+
+
+async def _tool_update_action_item(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    args: Dict[str, Any],
+) -> Dict[str, Any]:
+    action_id_str = args.get("action_item_id")
+    if not action_id_str:
+        return {"error": "action_item_id is required"}
+
+    try:
+        action_id = uuid.UUID(action_id_str)
+    except ValueError:
+        return {"error": "Invalid action_item_id UUID format"}
+
+    update_fields: Dict[str, Any] = {}
+    if "status" in args and args["status"] is not None:
+        update_fields["status"] = args["status"]
+    if "owner" in args and args["owner"] is not None:
+        update_fields["owner"] = args["owner"]
+    if "notes" in args and args["notes"] is not None:
+        update_fields["notes"] = args["notes"]
+    if "due_date" in args and args["due_date"] is not None:
+        try:
+            update_fields["due_date"] = date.fromisoformat(args["due_date"])
+        except ValueError:
+            return {"error": f"Invalid due_date format, expected YYYY-MM-DD: {args['due_date']}"}
+
+    if not update_fields:
+        return {"error": "No updatable fields provided (status, owner, due_date, notes)"}
+
+    action_repo = ActionItemRepository(db)
+    # ActionItemRepository.update is org-scoped: an action item belonging to
+    # another organization will resolve to None here, not a cross-tenant leak.
+    action = await action_repo.update(org_id, action_id, ActionItemUpdate(**update_fields))
+    if not action:
+        return {"error": "Action item not found"}
+
+    await db.commit()
+
+    print(f"[AUDIT] update_action_item org={org_id} action_item_id={action_id} fields={list(update_fields.keys())}")
+
+    return {
+        "id": str(action.id),
+        "task": action.task,
+        "owner": action.owner,
+        "due_date": str(action.due_date) if action.due_date else None,
+        "status": action.status,
+        "priority": action.priority,
+        "notes": action.notes,
+    }
