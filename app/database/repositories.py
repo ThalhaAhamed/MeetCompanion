@@ -100,6 +100,33 @@ class MeetingRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def count_meetings(
+        self,
+        org_id: uuid.UUID,
+        customer_name: Optional[str] = None,
+        project_name: Optional[str] = None,
+        status: Optional[str] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+    ) -> int:
+        """True total count matching the same filters as list_meetings, ignoring limit/offset."""
+        conditions = [Meeting.organization_id == org_id]
+        if customer_name:
+            conditions.append(func.lower(Meeting.customer_name) == customer_name.lower())
+        if project_name:
+            conditions.append(func.lower(Meeting.project_name) == project_name.lower())
+        if status:
+            conditions.append(Meeting.status == status)
+        effective_date = func.coalesce(Meeting.started_at, Meeting.created_at)
+        if date_from:
+            conditions.append(effective_date >= datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc))
+        if date_to:
+            conditions.append(effective_date <= datetime.combine(date_to, datetime.max.time(), tzinfo=timezone.utc))
+
+        stmt = select(func.count(Meeting.id)).where(and_(*conditions))
+        result = await self.session.execute(stmt)
+        return result.scalar_one()
+
     async def create(
         self,
         org_id: uuid.UUID,

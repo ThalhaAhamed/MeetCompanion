@@ -66,7 +66,7 @@ MCP_TOOL_DEFINITIONS = [
     },
     {
         "name": "get_previous_meetings",
-        "description": "List recent previous meetings, optionally filtered by customer or project name.",
+        "description": "List and count previous meetings, optionally filtered by customer, project, or a date range. Use date_from/date_to (YYYY-MM-DD) to answer questions like 'how many meetings happened yesterday' - the response's total_count is the true total matching the filters, independent of limit.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -78,9 +78,17 @@ MCP_TOOL_DEFINITIONS = [
                     "type": "string",
                     "description": "Optional filter by project name"
                 },
+                "date_from": {
+                    "type": "string",
+                    "description": "Optional start date (inclusive), format YYYY-MM-DD. For 'yesterday', pass the same date as date_to."
+                },
+                "date_to": {
+                    "type": "string",
+                    "description": "Optional end date (inclusive), format YYYY-MM-DD."
+                },
                 "limit": {
                     "type": "integer",
-                    "description": "Number of meetings to retrieve (default: 5)",
+                    "description": "Max number of meetings to return in detail (default: 5). Does not affect total_count.",
                     "default": 5
                 }
             }
@@ -345,11 +353,23 @@ async def _tool_get_previous_meetings(
     project_name = args.get("project_name")
     limit = min(args.get("limit", 5), 20)
 
+    date_from = date.fromisoformat(args["date_from"]) if args.get("date_from") else None
+    date_to = date.fromisoformat(args["date_to"]) if args.get("date_to") else None
+
     meetings = await meeting_repo.list_meetings(
         org_id=org_id,
         customer_name=customer_name,
         project_name=project_name,
+        date_from=date_from,
+        date_to=date_to,
         limit=limit,
+    )
+    total_count = await meeting_repo.count_meetings(
+        org_id=org_id,
+        customer_name=customer_name,
+        project_name=project_name,
+        date_from=date_from,
+        date_to=date_to,
     )
 
     items = []
@@ -365,7 +385,8 @@ async def _tool_get_previous_meetings(
         })
 
     return {
-        "count": len(items),
+        "total_count": total_count,
+        "returned_count": len(items),
         "meetings": items,
     }
 
