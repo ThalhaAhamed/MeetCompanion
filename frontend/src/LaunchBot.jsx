@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { createMeeting } from './api'
+import { RocketIcon } from './icons'
 
 export default function LaunchBot({ onLaunched }) {
   const [open, setOpen] = useState(false)
@@ -31,7 +32,7 @@ export default function LaunchBot({ onLaunched }) {
   if (!open) {
     return (
       <button className="launch-btn" onClick={() => setOpen(true)}>
-        + Launch bot
+        <RocketIcon /> Launch bot
       </button>
     )
   }
@@ -60,7 +61,7 @@ export default function LaunchBot({ onLaunched }) {
         onChange={(e) => setTitle(e.target.value)}
       />
       <button type="submit" disabled={busy || !url.trim()}>
-        {busy ? 'Deploying…' : 'Deploy bot'}
+        <RocketIcon /> {busy ? 'Deploying…' : 'Deploy bot'}
       </button>
       {error && <div className="launch-error">{error}</div>}
       {success && (

@@ -2,10 +2,14 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { listMeetings, listDocuments, uploadDocument } from './api'
 import MeetingDetail from './MeetingDetail'
 import LaunchBot from './LaunchBot'
+import EmptyState from './EmptyState'
+import { UploadIcon, CalendarIcon, SearchIcon, InboxIcon, CursorClickIcon } from './icons'
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10)
 }
+
+const LIVE_STATUSES = new Set(['joining', 'in_meeting', 'recording', 'in_progress'])
 
 export default function DayView() {
   const [day, setDay] = useState(todayStr())
@@ -73,6 +77,12 @@ export default function DayView() {
     })
   }, [meetings, filterText, statusFilter])
 
+  const stats = useMemo(() => {
+    const completed = meetings.filter((m) => m.status === 'completed').length
+    const live = meetings.filter((m) => LIVE_STATUSES.has(m.status)).length
+    return { total: meetings.length, completed, live }
+  }, [meetings])
+
   return (
     <div className="app">
       <header className="topbar">
@@ -83,100 +93,142 @@ export default function DayView() {
         <div className="topbar-actions">
           <LaunchBot onLaunched={handleLaunched} />
           <label className="day-picker">
-            <span>Day</span>
+            <CalendarIcon className="day-picker-icon" />
             <input type="date" value={day} onChange={(e) => setDay(e.target.value)} />
           </label>
         </div>
       </header>
 
+      {!loading && meetings.length > 0 && (
+        <div className="stats-row">
+          <div className="stat-pill">
+            <span className="stat-value">{stats.total}</span>
+            <span className="stat-label">Meetings</span>
+          </div>
+          <div className="stat-pill">
+            <span className="stat-value stat-value-live">{stats.live}</span>
+            <span className="stat-label">Live now</span>
+          </div>
+          <div className="stat-pill">
+            <span className="stat-value stat-value-done">{stats.completed}</span>
+            <span className="stat-label">Completed</span>
+          </div>
+          <div className="stat-pill">
+            <span className="stat-value">{documents.length}</span>
+            <span className="stat-label">Documents</span>
+          </div>
+        </div>
+      )}
+
       {error && <div className="error">Failed to load: {error}</div>}
-      {loading && <div className="loading">Loading…</div>}
+      {loading && (
+        <div className="skeleton-list">
+          <div className="skeleton-line" style={{ width: '40%' }} />
+          <div className="skeleton-card" />
+          <div className="skeleton-card" />
+        </div>
+      )}
 
-      <div className="layout">
-        <div className="column">
-          <section>
-            <div className="section-head">
-              <h2>Meetings ({filteredMeetings.length}{filteredMeetings.length !== meetings.length ? ` / ${meetings.length}` : ''})</h2>
-            </div>
-            <div className="filter-row">
-              <input
-                type="text"
-                className="filter-input"
-                placeholder="Filter by title, customer, project…"
-                value={filterText}
-                onChange={(e) => setFilterText(e.target.value)}
-              />
-              <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-                {statuses.map((s) => (
-                  <option key={s} value={s}>{s === 'all' ? 'All statuses' : s}</option>
+      {!loading && (
+        <div className="layout">
+          <div className="column">
+            <section>
+              <div className="section-head">
+                <h2>Meetings ({filteredMeetings.length}{filteredMeetings.length !== meetings.length ? ` / ${meetings.length}` : ''})</h2>
+              </div>
+              <div className="filter-row">
+                <div className="filter-input-wrap">
+                  <SearchIcon className="filter-input-icon" />
+                  <input
+                    type="text"
+                    className="filter-input"
+                    placeholder="Filter by title, customer, project…"
+                    value={filterText}
+                    onChange={(e) => setFilterText(e.target.value)}
+                  />
+                </div>
+                <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                  {statuses.map((s) => (
+                    <option key={s} value={s}>{s === 'all' ? 'All statuses' : s}</option>
+                  ))}
+                </select>
+              </div>
+              {filteredMeetings.length === 0 && (
+                <EmptyState
+                  icon={<InboxIcon />}
+                  title={meetings.length === 0 ? 'No meetings on this day' : 'No matches'}
+                  subtitle={meetings.length === 0 ? 'Launch a bot into a call to see it show up here.' : 'Try a different filter or status.'}
+                />
+              )}
+              <ul className="list">
+                {filteredMeetings.map((m) => (
+                  <li
+                    key={m.id}
+                    className={`list-item ${selectedMeetingId === m.id ? 'selected' : ''}`}
+                    onClick={() => setSelectedMeetingId(m.id)}
+                  >
+                    <div className="list-item-title">{m.title || 'Untitled meeting'}</div>
+                    <div className="list-item-meta">
+                      <span className={`badge status-${m.status}`}>{m.status}</span>
+                      {m.customer_name && <span className="tag">{m.customer_name}</span>}
+                      {m.project_name && <span className="tag">{m.project_name}</span>}
+                      {m.started_at && (
+                        <span className="time">{new Date(m.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      )}
+                    </div>
+                  </li>
                 ))}
-              </select>
-            </div>
-            {filteredMeetings.length === 0 && !loading && (
-              <p className="empty">{meetings.length === 0 ? 'No meetings on this day.' : 'No meetings match this filter.'}</p>
-            )}
-            <ul className="list">
-              {filteredMeetings.map((m) => (
-                <li
-                  key={m.id}
-                  className={`list-item ${selectedMeetingId === m.id ? 'selected' : ''}`}
-                  onClick={() => setSelectedMeetingId(m.id)}
-                >
-                  <div className="list-item-title">{m.title || 'Untitled meeting'}</div>
-                  <div className="list-item-meta">
-                    <span className={`badge status-${m.status}`}>{m.status}</span>
-                    {m.customer_name && <span className="tag">{m.customer_name}</span>}
-                    {m.project_name && <span className="tag">{m.project_name}</span>}
-                    {m.started_at && (
-                      <span className="time">{new Date(m.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
+              </ul>
+            </section>
 
-          <section>
-            <div className="section-head">
-              <h2>Documents ({documents.length})</h2>
-              <button className="upload-btn" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-                {uploading ? 'Uploading…' : '+ Upload'}
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,.docx,.txt,.md,.csv"
-                onChange={handleFileChosen}
-                hidden
+            <section>
+              <div className="section-head">
+                <h2>Documents ({documents.length})</h2>
+                <button className="upload-btn" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+                  <UploadIcon /> {uploading ? 'Uploading…' : 'Upload'}
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.docx,.txt,.md,.csv"
+                  onChange={handleFileChosen}
+                  hidden
+                />
+              </div>
+              {uploadError && <div className="error">Upload failed: {uploadError}</div>}
+              {documents.length === 0 && (
+                <EmptyState icon={<InboxIcon />} title="No documents indexed" subtitle="Upload a PDF, doc, or note to add it to company knowledge." />
+              )}
+              <ul className="list">
+                {documents.map((d) => (
+                  <li key={d.document_id} className="list-item doc-item">
+                    <div className="list-item-title">{d.filename || 'Untitled document'}</div>
+                    <div className="list-item-meta">
+                      <span className="tag">{d.source_type}</span>
+                      <span className="tag">{d.chunks_count} chunks</span>
+                      {d.indexed_at && (
+                        <span className="time">{new Date(d.indexed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          </div>
+
+          <div className="column detail-column">
+            {selectedMeetingId ? (
+              <MeetingDetail meetingId={selectedMeetingId} />
+            ) : (
+              <EmptyState
+                icon={<CursorClickIcon />}
+                title="Select a meeting"
+                subtitle="Its transcript, decisions, and action items will show up here."
               />
-            </div>
-            {uploadError && <div className="error">Upload failed: {uploadError}</div>}
-            {documents.length === 0 && !loading && <p className="empty">No documents indexed on this day.</p>}
-            <ul className="list">
-              {documents.map((d) => (
-                <li key={d.document_id} className="list-item doc-item">
-                  <div className="list-item-title">{d.filename || 'Untitled document'}</div>
-                  <div className="list-item-meta">
-                    <span className="tag">{d.source_type}</span>
-                    <span className="tag">{d.chunks_count} chunks</span>
-                    {d.indexed_at && (
-                      <span className="time">{new Date(d.indexed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
+            )}
+          </div>
         </div>
-
-        <div className="column detail-column">
-          {selectedMeetingId ? (
-            <MeetingDetail meetingId={selectedMeetingId} />
-          ) : (
-            <div className="placeholder">Select a meeting to see its transcript, decisions, and action items.</div>
-          )}
-        </div>
-      </div>
+      )}
     </div>
   )
 }
