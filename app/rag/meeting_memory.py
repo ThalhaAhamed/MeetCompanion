@@ -46,7 +46,7 @@ class MeetingMemoryRAG:
         chunks = self.chunker.chunk_transcript_segments(transcript_segments)
         if chunks:
             chunk_texts = [c.text for c in chunks]
-            embeddings = self.embedding_service.embed_batch(chunk_texts)
+            embeddings = await self.embedding_service.embed_batch_async(chunk_texts)
 
             for chunk, emb in zip(chunks, embeddings):
                 chunk_meta = {
@@ -75,7 +75,7 @@ class MeetingMemoryRAG:
                 f"[{m.type.value.upper()}] (Speaker: {m.speaker or 'Unknown'}): {m.content}"
                 for m in memories
             ]
-            mem_embeddings = self.embedding_service.embed_batch(memory_texts)
+            mem_embeddings = await self.embedding_service.embed_batch_async(memory_texts)
 
             for mem, emb in zip(memories, mem_embeddings):
                 mem_meta = {
@@ -116,7 +116,7 @@ class MeetingMemoryRAG:
         vector_repo = VectorRepository(db)
         meta = meeting_metadata or {}
         text_repr = f"[{memory.type.value.upper()}] (Speaker: {memory.speaker or 'Unknown'}): {memory.content}"
-        embedding = self.embedding_service.embed_text(text_repr)
+        embedding = await self.embedding_service.embed_text_async(text_repr)
         mem_meta = {
             "customer_name": memory.customer_name or meta.get("customer_name"),
             "project_name": memory.project_name or meta.get("project_name"),
@@ -156,7 +156,7 @@ class MeetingMemoryRAG:
         fused via Reciprocal Rank Fusion so exact terms (names, dates, acronyms)
         aren't lost to embedding-only ranking.
         """
-        query_embedding = self.embedding_service.embed_text(query)
+        query_embedding = await self.embedding_service.embed_text_async(query)
         vector_repo = VectorRepository(db)
         candidate_pool = max(limit * 3, 20)
 

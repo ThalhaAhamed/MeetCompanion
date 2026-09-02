@@ -324,8 +324,15 @@ async def _tool_get_meeting(
             return {"error": "Invalid meeting UUID format"}
     else:
         title = args.get("title")
-        meetings = await meeting_repo.list_meetings(org_id, limit=1)
-        meeting = meetings[0] if meetings else None
+        if title:
+            meeting = await meeting_repo.get_by_title(org_id, title)
+        else:
+            # list_meetings() doesn't eager-load memories/action_items (it's used
+            # for lightweight listing elsewhere), so re-fetch the match via
+            # get_by_id, which does - touching those relations on a
+            # non-eager-loaded row crashes with a MissingGreenlet error.
+            recent = await meeting_repo.list_meetings(org_id, limit=1)
+            meeting = await meeting_repo.get_by_id(org_id, recent[0].id) if recent else None
 
     if not meeting:
         return {"error": "Meeting not found"}

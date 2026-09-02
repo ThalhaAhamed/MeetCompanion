@@ -55,7 +55,7 @@ class CompanyKnowledgeRAG:
             return 0
 
         texts = [c["text"] for c in chunks]
-        embeddings = self.embedding_service.embed_batch(texts)
+        embeddings = await self.embedding_service.embed_batch_async(texts)
 
         for chunk, emb in zip(chunks, embeddings):
             record = CompanyKnowledgeEmbedding(

@@ -56,6 +56,23 @@ class MeetingRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_title(self, org_id: uuid.UUID, title: str) -> Optional[Meeting]:
+        """Most recent meeting whose title contains the given text (case-insensitive)."""
+        stmt = (
+            select(Meeting)
+            .where(and_(Meeting.organization_id == org_id, Meeting.title.ilike(f"%{title}%")))
+            .options(
+                selectinload(Meeting.participants),
+                selectinload(Meeting.memories),
+                selectinload(Meeting.action_items),
+                selectinload(Meeting.transcript_segments),
+            )
+            .order_by(desc(Meeting.started_at), desc(Meeting.created_at))
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_by_bot_id(self, bot_id: str) -> Optional[Meeting]:
         stmt = select(Meeting).where(Meeting.meetstream_bot_id == bot_id)
         result = await self.session.execute(stmt)

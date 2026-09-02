@@ -10,7 +10,7 @@ import uuid
 import json
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, Request, Depends, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from app.mcp.auth import verify_mcp_token
 from app.mcp.tools import MCP_TOOL_DEFINITIONS, execute_tool
 
@@ -102,7 +102,14 @@ async def handle_mcp_jsonrpc(
 
     # 4. Notifications or unknown methods
     elif method and method.startswith("notifications/"):
-        return JSONResponse(status_code=204, content=None)
+        # A bare JSONResponse(content=None) serializes to a 4-byte b"null" body,
+        # but a 204 must have zero body bytes - Starlette drops the Content-Length
+        # header for 204 while still sending those bytes, so uvicorn raises
+        # "Response content longer than Content-Length" and kills the connection,
+        # breaking the MCP session right after the standard post-initialize
+        # notifications/initialized message. Response() with no content is the
+        # only correct way to send an empty body here.
+        return Response(status_code=204)
 
     else:
         return {

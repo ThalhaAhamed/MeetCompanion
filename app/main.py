@@ -13,12 +13,18 @@ from app.api.agent import router as agent_router
 from app.api.search import router as search_router
 from app.api.action_items import router as action_items_router
 from app.mcp.server import router as mcp_router
+from app.services.embedding import embedding_service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup and shutdown procedures."""
     print(f"[{settings.APP_NAME}] Application starting up in {settings.APP_ENV} mode...")
+    # Load the embedding model now, in a background thread, so the first real
+    # search/index request isn't the one paying the multi-second model load
+    # cost (and blocking the event loop while it loads).
+    import asyncio
+    asyncio.create_task(embedding_service.warmup_async())
     yield
     print(f"[{settings.APP_NAME}] Application shutting down...")
 
