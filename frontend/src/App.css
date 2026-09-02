@@ -3,21 +3,21 @@
 * { box-sizing: border-box; }
 
 :root {
-  --bg: #08090b;
-  --panel: rgba(255,255,255,0.035);
-  --panel-2: rgba(255,255,255,0.055);
+  --bg: #0a0a0c;
+  --panel: #131316;
+  --panel-2: #18181c;
   --panel-solid: #131417;
-  --border: rgba(255,255,255,0.09);
-  --border-soft: rgba(255,255,255,0.06);
+  --border: #26262b;
+  --border-soft: #1c1c20;
   --text: #f2f2f3;
   --text-dim: #9a9aa4;
   --text-faint: #67676f;
   --accent: #f97316;
   --accent-2: #fb923c;
   --accent-glow: rgba(249,115,22,0.35);
-  --radius: 14px;
-  --radius-sm: 9px;
-  --shadow: 0 8px 24px rgba(0,0,0,0.35);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 4px 14px rgba(0,0,0,0.3);
 }
 
 * { scrollbar-width: thin; scrollbar-color: #3a3b42 transparent; }
@@ -47,18 +47,15 @@ body {
   position: fixed;
   inset: 0;
   z-index: -1;
-  background:
-    radial-gradient(700px 420px at 14% -8%, var(--accent-glow), transparent 60%),
-    radial-gradient(900px 600px at 100% 0%, rgba(99,102,241,0.10), transparent 55%);
-  opacity: 0.55;
+  background: radial-gradient(600px 320px at 10% -10%, var(--accent-glow), transparent 60%);
+  opacity: 0.18;
   pointer-events: none;
 }
 
 .sidebar {
   width: 232px;
   flex-shrink: 0;
-  background: rgba(10,11,13,0.6);
-  backdrop-filter: blur(18px);
+  background: #0c0c0e;
   border-right: 1px solid var(--border-soft);
   padding: 22px 16px;
 }
@@ -195,7 +192,6 @@ body {
   flex-direction: column;
   gap: 8px;
   background: var(--panel);
-  backdrop-filter: blur(14px);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 14px;
@@ -277,7 +273,6 @@ body {
   font-weight: 500;
   color: var(--text-dim);
   background: var(--panel);
-  backdrop-filter: blur(10px);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 9px 14px;
@@ -357,7 +352,6 @@ body {
 
 .list-item {
   background: var(--panel);
-  backdrop-filter: blur(10px);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 14px 16px;
@@ -447,7 +441,6 @@ body {
 
 .detail-column {
   background: var(--panel);
-  backdrop-filter: blur(14px);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 26px;
@@ -908,4 +901,38 @@ body {
 
 .search-result .list-item-meta {
   margin-bottom: 8px;
+}
+
+/* Small uppercase section label with an accent dot, matching MeetStream's own dashboard */
+.field-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.field-label::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.field-required {
+  font-size: 9.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  background: rgba(249,115,22,0.14);
+  border: 1px solid rgba(249,115,22,0.3);
+  padding: 1px 6px;
+  border-radius: 4px;
 }

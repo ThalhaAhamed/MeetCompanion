@@ -42,16 +42,20 @@ export default function LaunchBot({ onLaunched }) {
         <span>Launch a bot into a meeting</span>
         <button type="button" className="launch-close" onClick={() => setOpen(false)}>×</button>
       </div>
+      <label className="field-label">
+        Meeting link <span className="field-required">Required</span>
+      </label>
       <input
         type="url"
-        placeholder="Meeting URL (Google Meet, Zoom, Teams)"
+        placeholder="https://meet.google.com/xxx-xxxx-xxx"
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         required
       />
+      <label className="field-label">Title</label>
       <input
         type="text"
-        placeholder="Title (optional)"
+        placeholder="Optional"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
       />
