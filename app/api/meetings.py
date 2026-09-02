@@ -128,6 +128,22 @@ async def list_meetings(
     return meetings
 
 
+@router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_meeting(
+    meeting_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a meeting record (e.g. one whose bot deployment failed and never
+    actually joined a call). Cascades to its participants, transcript segments,
+    memories, action items, and vector embeddings."""
+    org_id = uuid.UUID(settings.DEFAULT_ORG_ID)
+    meeting_repo = MeetingRepository(db)
+    deleted = await meeting_repo.delete(org_id, meeting_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
+    await db.commit()
+
+
 @router.get("/{meeting_id}", response_model=MeetingDetailResponse)
 async def get_meeting(
     meeting_id: uuid.UUID,

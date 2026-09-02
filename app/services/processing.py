@@ -8,7 +8,7 @@ from app.config import settings
 from app.database.connection import get_db_context
 from app.database.repositories import (
     MeetingRepository, TranscriptRepository, MemoryRepository,
-    ActionItemRepository, ProcessingJobRepository
+    ActionItemRepository, ProcessingJobRepository, ParticipantRepository
 )
 from app.services.meetstream import meetstream_client
 from app.services.memory import memory_extractor
@@ -36,6 +36,7 @@ class MeetingProcessingPipeline:
             memory_repo = MemoryRepository(db)
             action_repo = ActionItemRepository(db)
             job_repo = ProcessingJobRepository(db)
+            participant_repo = ParticipantRepository(db)
 
             # 1. Fetch meeting
             meeting = await meeting_repo.get_by_id(uuid.UUID(settings.DEFAULT_ORG_ID), meeting_id)
@@ -104,6 +105,10 @@ class MeetingProcessingPipeline:
 
                 # 3. Store transcript segments in database
                 await transcript_repo.add_segments(meeting.id, raw_segments)
+                await participant_repo.sync_from_speaker_names(
+                    meeting.id,
+                    [s.get("speaker", "") for s in raw_segments],
+                )
                 await db.commit()
 
                 # 4. Format transcript text for LLM memory extraction

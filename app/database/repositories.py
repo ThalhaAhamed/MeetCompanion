@@ -117,6 +117,17 @@ class MeetingRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def delete(self, org_id: uuid.UUID, meeting_id: uuid.UUID) -> bool:
+        """Delete a meeting and everything cascading from it (participants, segments,
+        memories, action items, processing jobs). Does not remove vector embeddings
+        or its bot on MeetStream - callers handle those separately if needed."""
+        meeting = await self.get_by_id(org_id, meeting_id)
+        if not meeting:
+            return False
+        await self.session.delete(meeting)
+        await self.session.flush()
+        return True
+
     async def count_meetings(
         self,
         org_id: uuid.UUID,
@@ -205,6 +216,39 @@ class MeetingRepository:
 
         await self.session.flush()
         return meeting
+
+
+class ParticipantRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def sync_from_speaker_names(self, meeting_id: uuid.UUID, speaker_names: List[str]) -> List[Participant]:
+        """
+        Ensure one Participant row exists per distinct real speaker name seen in a
+        meeting's transcript. Transcript ingestion only ever populates the speaker
+        string on TranscriptSegment - nothing wrote to the participants table, so
+        every meeting showed zero participants regardless of who was in the call.
+        Skips generic/unknown placeholders that don't identify a real person.
+        """
+        distinct_names = {
+            name.strip() for name in speaker_names
+            if name and name.strip() and name.strip().lower() not in ("unknown", "speaker")
+        }
+        if not distinct_names:
+            return []
+
+        existing_stmt = select(Participant.name).where(Participant.meeting_id == meeting_id)
+        existing = {row[0] for row in (await self.session.execute(existing_stmt)).all()}
+
+        new_participants = []
+        for name in distinct_names - existing:
+            participant = Participant(meeting_id=meeting_id, name=name)
+            self.session.add(participant)
+            new_participants.append(participant)
+
+        if new_participants:
+            await self.session.flush()
+        return new_participants
 
 
 class TranscriptRepository:
