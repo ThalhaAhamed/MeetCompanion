@@ -133,9 +133,9 @@ body {
 
 .app {
   flex: 1;
-  max-width: 1200px;
+  max-width: 1680px;
   margin: 0 auto;
-  padding: 36px 36px 60px;
+  padding: 36px 48px 60px;
   width: 100%;
   min-width: 0;
 }
@@ -319,7 +319,7 @@ body {
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 380px) minmax(0, 1fr);
+  grid-template-columns: minmax(320px, 34%) minmax(0, 1fr);
   gap: 22px;
   align-items: start;
 }
@@ -651,7 +651,7 @@ body {
 }
 
 .agent-panel {
-  max-width: 640px;
+  max-width: 860px;
 }
 
 .agent-form {
