@@ -10,6 +10,8 @@ from app.api.webhooks import router as webhooks_router
 from app.api.meetings import router as meetings_router
 from app.api.documents import router as documents_router
 from app.api.agent import router as agent_router
+from app.api.search import router as search_router
+from app.api.action_items import router as action_items_router
 from app.mcp.server import router as mcp_router
 
 
@@ -43,6 +45,8 @@ app.include_router(webhooks_router)
 app.include_router(meetings_router)
 app.include_router(documents_router)
 app.include_router(agent_router)
+app.include_router(search_router)
+app.include_router(action_items_router)
 app.include_router(mcp_router)
 
 

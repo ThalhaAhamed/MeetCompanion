@@ -1,10 +1,18 @@
 import { useState } from 'react'
 import DayView from './DayView'
 import AgentSettings from './AgentSettings'
+import MemorySearch from './MemorySearch'
 import './App.css'
+
+const PAGES = {
+  day: { label: 'Day view', icon: '▦', Component: DayView },
+  search: { label: 'Search memory', icon: '⌕', Component: MemorySearch },
+  agent: { label: 'Agent', icon: '◈', Component: AgentSettings },
+}
 
 export default function App() {
   const [page, setPage] = useState('day')
+  const Page = PAGES[page].Component
 
   return (
     <div className="shell">
@@ -19,16 +27,19 @@ export default function App() {
           <span className="brand-name">MeetStream <span className="brand-sub">Companion</span></span>
         </div>
         <nav className="nav">
-          <div className={`nav-item ${page === 'day' ? 'active' : ''}`} onClick={() => setPage('day')}>
-            <span className="nav-icon">▦</span> Day view
-          </div>
-          <div className={`nav-item ${page === 'agent' ? 'active' : ''}`} onClick={() => setPage('agent')}>
-            <span className="nav-icon">◈</span> Agent
-          </div>
+          {Object.entries(PAGES).map(([key, { label, icon }]) => (
+            <div
+              key={key}
+              className={`nav-item ${page === key ? 'active' : ''}`}
+              onClick={() => setPage(key)}
+            >
+              <span className="nav-icon">{icon}</span> {label}
+            </div>
+          ))}
         </nav>
       </aside>
 
-      {page === 'day' ? <DayView /> : <AgentSettings />}
+      <Page />
     </div>
   )
 }

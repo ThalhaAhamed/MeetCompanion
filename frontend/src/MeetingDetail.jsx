@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { getMeeting, getTranscript, getMeetingBot } from './api'
+import { getMeeting, getTranscript, getMeetingBot, stopMeetingBot, updateActionItem } from './api'
+
+const ACTION_STATUSES = ['open', 'in_progress', 'completed', 'cancelled']
 
 export default function MeetingDetail({ meetingId }) {
   const [meeting, setMeeting] = useState(null)
@@ -9,6 +11,7 @@ export default function MeetingDetail({ meetingId }) {
   const [bot, setBot] = useState(null)
   const [botError, setBotError] = useState(null)
   const [botLoading, setBotLoading] = useState(false)
+  const [actionItems, setActionItems] = useState([])
 
   useEffect(() => {
     setMeeting(null)
@@ -17,13 +20,22 @@ export default function MeetingDetail({ meetingId }) {
     setTab('summary')
     setBot(null)
     setBotError(null)
+    setActionItems([])
     Promise.all([getMeeting(meetingId), getTranscript(meetingId)])
       .then(([m, t]) => {
         setMeeting(m)
         setTranscript(t)
+        setActionItems(m.action_items)
       })
       .catch((e) => setError(e.message))
   }, [meetingId])
+
+  function handleActionStatusChange(actionId, newStatus) {
+    setActionItems((items) => items.map((a) => (a.id === actionId ? { ...a, status: newStatus } : a)))
+    updateActionItem(actionId, { status: newStatus }).catch((e) => {
+      setError(`Failed to update action item: ${e.message}`)
+    })
+  }
 
   useEffect(() => {
     if (tab !== 'bot' || bot || botLoading) return
@@ -56,7 +68,7 @@ export default function MeetingDetail({ meetingId }) {
           Decisions & Memories ({meeting.memories.length})
         </button>
         <button className={tab === 'actions' ? 'active' : ''} onClick={() => setTab('actions')}>
-          Action Items ({meeting.action_items.length})
+          Action Items ({actionItems.length})
         </button>
         <button className={tab === 'transcript' ? 'active' : ''} onClick={() => setTab('transcript')}>
           Transcript ({transcript.length})
@@ -102,13 +114,21 @@ export default function MeetingDetail({ meetingId }) {
 
       {tab === 'actions' && (
         <div className="tab-panel">
-          {meeting.action_items.length === 0 ? (
+          {actionItems.length === 0 ? (
             <p className="empty">No action items.</p>
           ) : (
             <ul className="actions">
-              {meeting.action_items.map((a) => (
+              {actionItems.map((a) => (
                 <li key={a.id} className="action-item">
-                  <span className={`badge status-${a.status}`}>{a.status}</span>
+                  <select
+                    className={`status-select status-${a.status}`}
+                    value={a.status}
+                    onChange={(e) => handleActionStatusChange(a.id, e.target.value)}
+                  >
+                    {ACTION_STATUSES.map((s) => (
+                      <option key={s} value={s}>{s.replace('_', ' ')}</option>
+                    ))}
+                  </select>
                   <p>{a.task}</p>
                   <div className="list-item-meta">
                     {a.owner && <span className="tag">{a.owner}</span>}
@@ -141,24 +161,55 @@ export default function MeetingDetail({ meetingId }) {
         <div className="tab-panel">
           {botLoading && <p className="loading">Loading bot status…</p>}
           {botError && <div className="error">Failed to load bot: {botError}</div>}
-          {bot && <BotPanel bot={bot.bot_details || bot} />}
+          {bot && (
+            <BotPanel
+              bot={bot.bot_details || bot}
+              meetingId={meetingId}
+              meetingStatus={meeting.status}
+              onStopped={() => setBot(null)}
+            />
+          )}
         </div>
       )}
     </div>
   )
 }
 
-function BotPanel({ bot }) {
+function BotPanel({ bot, meetingId, meetingStatus, onStopped }) {
+  const [stopping, setStopping] = useState(false)
+  const [stopError, setStopError] = useState(null)
   const phases = Object.entries(bot.StatusChanges || {})
     .filter(([, v]) => v && v.status)
     .sort((a, b) => (a[1].timestamp || 0) - (b[1].timestamp || 0))
   const agentConfig = bot.AgentConfig || {}
   const model = agentConfig.model || {}
   const agentBlock = agentConfig.agent || {}
+  const isLive = !['completed', 'stopped', 'failed'].includes(meetingStatus)
+
+  async function handleStop() {
+    setStopping(true)
+    setStopError(null)
+    try {
+      await stopMeetingBot(meetingId)
+      onStopped?.()
+    } catch (e) {
+      setStopError(e.message)
+    } finally {
+      setStopping(false)
+    }
+  }
 
   return (
     <div className="bot-panel">
-      <h3>Bot</h3>
+      <div className="bot-panel-head">
+        <h3>Bot</h3>
+        {isLive && (
+          <button className="stop-btn" onClick={handleStop} disabled={stopping}>
+            {stopping ? 'Stopping…' : 'Stop bot'}
+          </button>
+        )}
+      </div>
+      {stopError && <div className="error">Failed to stop bot: {stopError}</div>}
       <dl className="kv">
         <div className="kv-row"><dt>Bot ID</dt><dd>{bot.BotID}</dd></div>
         <div className="kv-row"><dt>Meeting link</dt><dd>{bot.MeetingLink}</dd></div>

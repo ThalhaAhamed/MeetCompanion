@@ -50,3 +50,29 @@ export function updateAgent(patch) {
     body: JSON.stringify(patch),
   })
 }
+
+export function stopMeetingBot(id) {
+  return req(`/meetings/${id}/stop`, { method: 'POST' })
+}
+
+export function searchMemory(query, opts = {}) {
+  return req('/search/memory', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, ...opts }),
+  })
+}
+
+export function updateActionItem(id, patch) {
+  return req(`/action-items/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+}
+
+export function uploadDocument(file) {
+  const form = new FormData()
+  form.append('file', file)
+  return req('/documents/upload', { method: 'POST', body: form })
+}

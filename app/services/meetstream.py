@@ -82,6 +82,16 @@ class MeetStreamClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def remove_bot(self, bot_id: str) -> Dict[str, Any]:
+        """Send a stop signal to remove a bot from its meeting."""
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{self.base_url}/api/v1/bots/{bot_id}/remove_bot",
+                headers=self.headers,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
     async def get_transcript(self, transcript_id: str, raw: bool = False) -> List[Dict[str, Any]] | Dict[str, Any]:
         """
         Retrieve formatted or raw transcript segments for a completed call.

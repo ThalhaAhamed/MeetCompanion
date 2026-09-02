@@ -202,3 +202,27 @@ async def get_meeting_bot(
         return _redact_secrets(bot)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
+
+
+@router.post("/{meeting_id}/stop")
+async def stop_meeting_bot(
+    meeting_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove the bot from its meeting (stops recording immediately)."""
+    org_id = uuid.UUID(settings.DEFAULT_ORG_ID)
+    meeting_repo = MeetingRepository(db)
+    meeting = await meeting_repo.get_by_id(org_id, meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
+    if not meeting.meetstream_bot_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No bot deployed for this meeting")
+
+    try:
+        result = await meetstream_client.remove_bot(meeting.meetstream_bot_id)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
+
+    await meeting_repo.update_status(meeting.id, status="stopped")
+    await db.commit()
+    return result
