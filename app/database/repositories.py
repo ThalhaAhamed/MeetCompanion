@@ -82,6 +82,24 @@ class MeetingRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_id_unscoped(self, meeting_id: uuid.UUID) -> Optional[Meeting]:
+        """Like get_by_id but without an org filter - for contexts (webhooks,
+        background processing) that only have a meeting_id and don't yet know
+        which workspace it belongs to; the caller reads it off the returned
+        row (meeting.organization_id) instead."""
+        stmt = (
+            select(Meeting)
+            .where(Meeting.id == meeting_id)
+            .options(
+                selectinload(Meeting.participants),
+                selectinload(Meeting.memories),
+                selectinload(Meeting.action_items),
+                selectinload(Meeting.transcript_segments),
+            )
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_by_bot_id(self, bot_id: str) -> Optional[Meeting]:
         stmt = select(Meeting).where(Meeting.meetstream_bot_id == bot_id)
         result = await self.session.execute(stmt)

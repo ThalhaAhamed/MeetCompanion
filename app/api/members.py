@@ -1,20 +1,24 @@
 """
-Member roster: add/remove the people who can sign into the hub.
+Member roster and workspace membership.
 
-Signup is open by design - POST /api/members (create an account) needs no
-session and no passphrase, so anyone with the link can create their own
-account. Listing, removing, and self-updates still require being signed in.
+Every meeting, memory, and MCP tool call is scoped to a workspace
+(Organization) - there's no cross-workspace visibility. Signing up requires
+either creating a brand new workspace or joining an existing one via its
+join code, so a stranger can no longer land in someone else's data just by
+signing up. Adding a teammate from the Members page (while already signed
+in) always adds them to your own current workspace, no code needed.
 """
+import secrets
 import uuid
 from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
 from passlib.context import CryptContext
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.config import settings
 from app.database.connection import get_db
 from app.models.database import User, Organization
 from app.middleware.auth_gate import COOKIE_NAME, decode_session
+from app.api.deps import get_current_org_id, get_current_user
 
 router = APIRouter(prefix="/api/members", tags=["members"])
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -29,14 +33,26 @@ async def _current_user_id(request: Request, db: AsyncSession) -> "uuid.UUID | N
     return result.scalar_one_or_none()
 
 
-async def _org_id(db: AsyncSession) -> uuid.UUID:
-    org_id = uuid.UUID(settings.DEFAULT_ORG_ID)
-    existing = await db.execute(select(Organization.id).where(Organization.id == org_id))
-    if existing.scalar_one_or_none():
-        return org_id
-    db.add(Organization(id=org_id, name=settings.APP_NAME, slug="default"))
+def _new_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _new_join_code() -> str:
+    return secrets.token_hex(4)  # 8 hex chars - short enough to read aloud/type
+
+
+async def _create_workspace(db: AsyncSession, name: str) -> Organization:
+    slug_base = name.strip().lower().replace(" ", "-")[:80] or "workspace"
+    slug = slug_base
+    suffix = 1
+    while (await db.execute(select(Organization.id).where(Organization.slug == slug))).scalar_one_or_none():
+        suffix += 1
+        slug = f"{slug_base}-{suffix}"
+
+    org = Organization(name=name.strip(), slug=slug, mcp_token=_new_token(), join_code=_new_join_code())
+    db.add(org)
     await db.flush()
-    return org_id
+    return org
 
 
 class MemberOut(BaseModel):
@@ -49,6 +65,8 @@ class CreateMemberRequest(BaseModel):
     name: str
     email: str
     password: str
+    workspace_name: str | None = None  # create a new workspace (self-signup only)
+    join_code: str | None = None       # join an existing workspace (self-signup only)
 
 
 class UpdateSelfRequest(BaseModel):
@@ -57,24 +75,26 @@ class UpdateSelfRequest(BaseModel):
     password: str | None = None
 
 
+@router.get("/workspace")
+async def get_workspace(org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
+    """This workspace's name and join code, so a member can invite others."""
+    result = await db.execute(select(Organization).where(Organization.id == org_id))
+    org = result.scalar_one_or_none()
+    if not org:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+    return {"name": org.name, "join_code": org.join_code}
+
+
 @router.get("")
-async def list_members(request: Request, db: AsyncSession = Depends(get_db)):
-    if not await _current_user_id(request, db):
-        raise HTTPException(status_code=401, detail="Sign in required.")
-    result = await db.execute(select(User).where(User.is_active.is_(True)).order_by(User.created_at))
+async def list_members(org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(User).where(User.organization_id == org_id, User.is_active.is_(True)).order_by(User.created_at)
+    )
     return {"members": [MemberOut(id=str(u.id), name=u.name, email=u.email) for u in result.scalars().all()]}
 
 
 @router.post("")
 async def add_member(body: CreateMemberRequest, request: Request, db: AsyncSession = Depends(get_db)):
-    # Open self-signup was live briefly and turned out to be dangerous: every
-    # member currently shares one workspace's worth of meeting data (there's
-    # no per-user data isolation - see the multi-tenancy note in mcp/auth.py),
-    # so anyone who could sign up could read everyone else's meetings. Closed
-    # again until real per-user workspaces exist.
-    if not await _current_user_id(request, db):
-        raise HTTPException(status_code=401, detail="Sign in required to add a member.")
-
     email = body.email.strip().lower()
     if "@" not in email or "." not in email.split("@")[-1]:
         raise HTTPException(status_code=400, detail="Invalid email address.")
@@ -85,7 +105,27 @@ async def add_member(body: CreateMemberRequest, request: Request, db: AsyncSessi
     if len(body.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
 
-    org_id = await _org_id(db)
+    current_user_id = await _current_user_id(request, db)
+    if current_user_id:
+        # Already signed in - adding a teammate straight into your own workspace.
+        current = (await db.execute(select(User).where(User.id == current_user_id))).scalar_one()
+        org_id = current.organization_id
+    else:
+        # Self-signup - must explicitly create a new workspace or join one by code.
+        if bool(body.workspace_name) == bool(body.join_code):
+            raise HTTPException(
+                status_code=400,
+                detail="Provide exactly one of workspace_name (create a new workspace) or join_code (join an existing one).",
+            )
+        if body.workspace_name:
+            org = await _create_workspace(db, body.workspace_name)
+            org_id = org.id
+        else:
+            result = await db.execute(select(Organization.id).where(Organization.join_code == body.join_code.strip()))
+            org_id = result.scalar_one_or_none()
+            if not org_id:
+                raise HTTPException(status_code=404, detail="No workspace found with that join code.")
+
     user = User(
         organization_id=org_id,
         email=email,
@@ -99,18 +139,12 @@ async def add_member(body: CreateMemberRequest, request: Request, db: AsyncSessi
 
 
 @router.patch("/me")
-async def update_self(body: UpdateSelfRequest, request: Request, db: AsyncSession = Depends(get_db)):
-    user_id = await _current_user_id(request, db)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Sign in required.")
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one()
-
+async def update_self(body: UpdateSelfRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     if body.email is not None:
         email = body.email.strip().lower()
         if "@" not in email or "." not in email.split("@")[-1]:
             raise HTTPException(status_code=400, detail="Invalid email address.")
-        existing = await db.execute(select(User.id).where(User.email == email, User.id != user_id))
+        existing = await db.execute(select(User.id).where(User.email == email, User.id != user.id))
         if existing.scalar_one_or_none():
             raise HTTPException(status_code=409, detail="A member with that email already exists.")
         user.email = email
@@ -128,20 +162,21 @@ async def update_self(body: UpdateSelfRequest, request: Request, db: AsyncSessio
 
 
 @router.delete("/{member_id}")
-async def remove_member(member_id: str, request: Request, db: AsyncSession = Depends(get_db)):
-    if not await _current_user_id(request, db):
-        raise HTTPException(status_code=401, detail="Sign in required.")
-
+async def remove_member(member_id: str, org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
     try:
         target_id = uuid.UUID(member_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid member id")
 
-    count_result = await db.execute(select(func.count()).select_from(User).where(User.is_active.is_(True)))
+    count_result = await db.execute(
+        select(func.count()).select_from(User).where(User.organization_id == org_id, User.is_active.is_(True))
+    )
     if count_result.scalar_one() <= 1:
         raise HTTPException(status_code=400, detail="Can't remove the last remaining member.")
 
-    result = await db.execute(select(User).where(User.id == target_id, User.is_active.is_(True)))
+    result = await db.execute(
+        select(User).where(User.id == target_id, User.organization_id == org_id, User.is_active.is_(True))
+    )
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Member not found.")

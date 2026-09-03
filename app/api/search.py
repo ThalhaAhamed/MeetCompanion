@@ -6,10 +6,10 @@ as a plain REST endpoint for the dashboard.
 import uuid
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.config import settings
 from app.database.connection import get_db
 from app.models.schemas import SearchMeetingMemoryQuery, SearchMeetingMemoryResponse
 from app.rag.meeting_memory import meeting_memory_rag
+from app.api.deps import get_current_org_id
 
 router = APIRouter(prefix="/api/search", tags=["search"])
 
@@ -17,10 +17,10 @@ router = APIRouter(prefix="/api/search", tags=["search"])
 @router.post("/memory", response_model=SearchMeetingMemoryResponse)
 async def search_meeting_memory(
     query_in: SearchMeetingMemoryQuery,
+    org_id: uuid.UUID = Depends(get_current_org_id),
     db: AsyncSession = Depends(get_db),
 ):
     """Hybrid (vector + keyword) search across indexed meeting transcripts and memories."""
-    org_id = uuid.UUID(settings.DEFAULT_ORG_ID)
     results = await meeting_memory_rag.search(
         db=db,
         org_id=org_id,

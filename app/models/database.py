@@ -38,6 +38,13 @@ class Organization(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     settings: Mapped[Dict[str, Any]] = mapped_column(JSONB, default=dict)
+    # Bearer token this workspace's MCP tool calls (and chat-relay calls) are
+    # authenticated with - each workspace gets its own so tool calls resolve
+    # to the right organization instead of everyone sharing one global token.
+    mcp_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, unique=True)
+    # Short code other people use to join this workspace instead of creating
+    # their own.
+    join_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 

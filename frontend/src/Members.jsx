@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { listMembers, addMember, removeMember, checkAuth } from './api'
+import { listMembers, addMember, removeMember, checkAuth, getWorkspace } from './api'
 import EmptyState from './EmptyState'
 import { InboxIcon } from './icons'
 
@@ -8,6 +8,7 @@ export default function Members() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [self, setSelf] = useState(null)
+  const [workspace, setWorkspace] = useState(null)
 
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState('')
@@ -25,6 +26,7 @@ export default function Members() {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false))
     checkAuth().then((d) => d.member && setSelf(d.member))
+    getWorkspace().then(setWorkspace).catch(() => {})
   }
 
   useEffect(load, [])
@@ -66,7 +68,9 @@ export default function Members() {
       <header className="topbar">
         <div>
           <h1>Members</h1>
-          <p className="subtitle">Everyone who can sign into this hub.</p>
+          <p className="subtitle">
+            {workspace ? `Everyone in "${workspace.name}".` : 'Everyone who can sign into this workspace.'}
+          </p>
         </div>
         <div className="topbar-actions">
           <button className="launch-btn" onClick={() => setShowForm((v) => !v)}>
@@ -74,6 +78,15 @@ export default function Members() {
           </button>
         </div>
       </header>
+
+      {workspace && (
+        <div className="empty-state" style={{ padding: '14px 18px', marginBottom: 20, alignItems: 'flex-start', textAlign: 'left' }}>
+          <div className="list-item-title" style={{ marginBottom: 4 }}>Invite people to this workspace</div>
+          <p className="subtitle" style={{ margin: 0 }}>
+            Share this join code — anyone can use it on the "Create account" screen to join this same workspace: <span className="tag">{workspace.join_code}</span>
+          </p>
+        </div>
+      )}
 
       {showForm && (
         <form className="launch-panel new-agent-panel" onSubmit={submit} style={{ maxWidth: 380 }}>

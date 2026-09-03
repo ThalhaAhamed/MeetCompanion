@@ -15,6 +15,8 @@ from app.config import settings
 from app.database.connection import get_db
 from app.database.repositories import OrganizationRepository
 from app.services.meetstream import meetstream_client, _share_in_chat_function
+from app.api.deps import get_current_org_id
+from app.mcp.auth import resolve_org_by_mcp_token
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
@@ -96,15 +98,19 @@ def _mask_secret(value: Optional[str]) -> Optional[str]:
 
 
 @router.get("/credentials")
-async def get_agent_credentials():
+async def get_agent_credentials(org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
     """
     Masked view of the provider credentials this deployment is actually
     configured with - the MIA agent's own model/voice provider is visible
     already via GET /api/agent (MeetStream doesn't expose that provider's API
     key to us at all, they hold it), but the credentials our own backend uses
     (MeetStream API access, the LLM that extracts meeting memory, MCP auth)
-    were previously invisible anywhere in the dashboard.
+    were previously invisible anywhere in the dashboard. The MCP token shown
+    is this workspace's own, not a global shared one.
     """
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_by_id(org_id)
+    mcp_token = org.mcp_token if org else None
     return {
         "meetstream_api_key": {
             "configured": bool(settings.MEETSTREAM_API_KEY),
@@ -129,8 +135,8 @@ async def get_agent_credentials():
             }.get(settings.LLM_PROVIDER)),
         },
         "mcp_auth_token": {
-            "configured": bool(settings.MCP_AUTH_TOKEN),
-            "masked_value": _mask_secret(settings.MCP_AUTH_TOKEN),
+            "configured": bool(mcp_token),
+            "masked_value": _mask_secret(mcp_token),
         },
         "mcp_server_url": settings.MCP_SERVER_URL,
     }
@@ -143,16 +149,16 @@ class ChatRelayRequest(BaseModel):
 
 
 @router.post("/chat-relay")
-async def chat_relay(body: ChatRelayRequest, authorization: Optional[str] = Header(default=None)):
+async def chat_relay(body: ChatRelayRequest, authorization: Optional[str] = Header(default=None), db: AsyncSession = Depends(get_db)):
     """
     Custom-function endpoint registered on the agent (see build_agent_system_prompt
     / create_mia_agent) as "share_in_chat" - the only way the agent can post text
     into the meeting chat. Exempted from the browser session gate (MeetStream
-    calls this directly, not a browser) but still requires the same bearer
-    token the MCP endpoints use, so it can't be hit by anyone else.
+    calls this directly, not a browser) but still requires a valid workspace's
+    own MCP bearer token, so it can't be hit by anyone else.
     """
-    expected = f"Bearer {settings.MCP_AUTH_TOKEN}"
-    if not settings.MCP_AUTH_TOKEN or authorization != expected:
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not token or not await resolve_org_by_mcp_token(token, db):
         raise HTTPException(status_code=401, detail="Invalid or missing bearer token")
 
     bot_id = (body.bot or {}).get("bot_id")
@@ -168,20 +174,25 @@ async def chat_relay(body: ChatRelayRequest, authorization: Optional[str] = Head
     return {"status": "sent"}
 
 
-async def get_active_agent_config_id(db: AsyncSession) -> Optional[str]:
-    """The agent new bots should launch with: org-settings override if set, else the
-    MEETSTREAM_AGENT_CONFIG_ID this app was originally configured with."""
-    org_id = uuid.UUID(settings.DEFAULT_ORG_ID)
+async def get_active_agent_config_id(db: AsyncSession, org_id: uuid.UUID) -> Optional[str]:
+    """The agent new bots should launch with: this workspace's org-settings
+    override if set, else the MEETSTREAM_AGENT_CONFIG_ID this app was
+    originally configured with (only meaningful for the original default
+    workspace, since that's a single global env var)."""
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_by_id(org_id)
     override = (org.settings or {}).get("active_agent_config_id") if org else None
-    return override or settings.MEETSTREAM_AGENT_CONFIG_ID or None
+    if override:
+        return override
+    if str(org_id) == settings.DEFAULT_ORG_ID:
+        return settings.MEETSTREAM_AGENT_CONFIG_ID or None
+    return None
 
 
 @router.get("")
-async def get_current_agent(db: AsyncSession = Depends(get_db)):
-    """Fetch the currently active agent config."""
-    agent_config_id = await get_active_agent_config_id(db)
+async def get_current_agent(org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
+    """Fetch this workspace's currently active agent config."""
+    agent_config_id = await get_active_agent_config_id(db, org_id)
     if not agent_config_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active agent configured")
     try:
@@ -192,13 +203,18 @@ async def get_current_agent(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/list")
-async def list_agents(db: AsyncSession = Depends(get_db)):
-    """List every MIA agent config on this MeetStream account, flagging the active one."""
+async def list_agents(org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
+    """
+    List MIA agent configs, flagging this workspace's active one. Note: this
+    still lists every agent on the underlying MeetStream account (MeetStream
+    itself has no workspace concept), not just ones this workspace created -
+    only the active-agent flag and MCP wiring are workspace-scoped.
+    """
     try:
         agents = await meetstream_client.list_mia_agents()
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
-    active_id = await get_active_agent_config_id(db)
+    active_id = await get_active_agent_config_id(db, org_id)
     result = _redact_secrets(agents)
     for cfg in result.get("agent_configs", []):
         cfg["IsActive"] = cfg.get("AgentConfigID") == active_id
@@ -220,11 +236,17 @@ class AgentCreateRequest(BaseModel):
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create_agent(body: AgentCreateRequest, db: AsyncSession = Depends(get_db)):
-    """Create a brand new MIA agent, pre-wired to our MCP server so it can recall
-    meeting memory immediately. Set activate=false to create without switching to it."""
+async def create_agent(body: AgentCreateRequest, org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
+    """Create a brand new MIA agent, pre-wired to this workspace's own MCP
+    token so it can recall this workspace's meeting memory immediately. Set
+    activate=false to create without switching to it."""
     if not settings.MCP_SERVER_URL:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="MCP_SERVER_URL is not configured on this deployment")
+
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_by_id(org_id)
+    if not org or not org.mcp_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This workspace has no MCP token configured")
 
     first_message = body.first_message.strip() or _DEFAULT_FIRST_MESSAGE.format(agent_name=body.agent_name)
 
@@ -239,7 +261,7 @@ async def create_agent(body: AgentCreateRequest, db: AsyncSession = Depends(get_
             temperature=body.temperature,
             mode=body.mode,
             mcp_server_url=settings.MCP_SERVER_URL,
-            mcp_auth_token=settings.MCP_AUTH_TOKEN,
+            mcp_auth_token=org.mcp_token,
             response_modality=body.response_modality,
             tool_results_to_chat=body.tool_results_to_chat,
         )
@@ -248,8 +270,6 @@ async def create_agent(body: AgentCreateRequest, db: AsyncSession = Depends(get_
 
     new_id = (result.get("agent_config") or result).get("AgentConfigID")
     if body.activate and new_id:
-        org_id = uuid.UUID(settings.DEFAULT_ORG_ID)
-        org_repo = OrganizationRepository(db)
         await org_repo.update_settings(org_id, {"active_agent_config_id": new_id})
         await db.commit()
 
@@ -260,16 +280,17 @@ class ActivateRequest(BaseModel):
     agent_config_id: str
 
 
-async def _ensure_mcp_wired(agent_config_id: str) -> None:
+async def _ensure_mcp_wired(agent_config_id: str, mcp_token: Optional[str]) -> None:
     """
     Only agents created through this app's "New agent" form get wired to our
     MCP server (database access) at creation time - an agent set up any other
     way (MeetStream's own dashboard, an older test agent) can be activated
     here with zero access to meeting memory, and nothing would surface that
     until it silently failed to recall anything. Patch the wiring in
-    on every activation so that trap can't happen.
+    on every activation so that trap can't happen. Wires it to the activating
+    workspace's own mcp_token so tool calls resolve to the right workspace.
     """
-    if not settings.MCP_SERVER_URL:
+    if not settings.MCP_SERVER_URL or not mcp_token:
         return
     try:
         current = await meetstream_client.get_mia_agent(agent_config_id)
@@ -280,7 +301,12 @@ async def _ensure_mcp_wired(agent_config_id: str) -> None:
     mcp_servers = list(current_agent.get("mcp_servers") or [])
     custom_functions = list(current_agent.get("custom_functions") or [])
 
-    mcp_ok = bool(mcp_servers) and mcp_servers[0].get("active") and mcp_servers[0].get("url") == settings.MCP_SERVER_URL
+    mcp_ok = (
+        bool(mcp_servers)
+        and mcp_servers[0].get("active")
+        and mcp_servers[0].get("url") == settings.MCP_SERVER_URL
+        and (mcp_servers[0].get("headers") or {}).get("Authorization") == f"Bearer {mcp_token}"
+    )
     chat_fn_ok = any(f.get("name") == "share_in_chat" for f in custom_functions)
     if mcp_ok and chat_fn_ok:
         return
@@ -294,13 +320,12 @@ async def _ensure_mcp_wired(agent_config_id: str) -> None:
             "timeout": 30,
             "active": True,
             "allowed_tools": sorted(existing_tools | default_tools),
+            "headers": {"Authorization": f"Bearer {mcp_token}"},
         }
-        if settings.MCP_AUTH_TOKEN:
-            server_config["headers"] = {"Authorization": f"Bearer {settings.MCP_AUTH_TOKEN}"}
         current_agent["mcp_servers"] = [server_config]
 
     if not chat_fn_ok:
-        custom_functions.append(_share_in_chat_function(settings.MCP_SERVER_URL, settings.MCP_AUTH_TOKEN))
+        custom_functions.append(_share_in_chat_function(settings.MCP_SERVER_URL, mcp_token))
         current_agent["custom_functions"] = custom_functions
 
     try:
@@ -310,15 +335,14 @@ async def _ensure_mcp_wired(agent_config_id: str) -> None:
 
 
 @router.post("/activate")
-async def activate_agent(body: ActivateRequest, db: AsyncSession = Depends(get_db)):
-    """Switch which agent new bots launch with, without touching env vars or redeploying."""
-    org_id = uuid.UUID(settings.DEFAULT_ORG_ID)
+async def activate_agent(body: ActivateRequest, org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
+    """Switch which agent this workspace's new bots launch with, without touching env vars or redeploying."""
     org_repo = OrganizationRepository(db)
     org = await org_repo.update_settings(org_id, {"active_agent_config_id": body.agent_config_id})
     if not org:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
     await db.commit()
-    await _ensure_mcp_wired(body.agent_config_id)
+    await _ensure_mcp_wired(body.agent_config_id, org.mcp_token)
     return {"active_agent_config_id": body.agent_config_id}
 
 
@@ -336,13 +360,14 @@ class AgentUpdateRequest(BaseModel):
 
 
 @router.put("")
-async def update_current_agent(body: AgentUpdateRequest, db: AsyncSession = Depends(get_db)):
+async def update_current_agent(body: AgentUpdateRequest, org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
     """
-    Partially update an MIA agent's model/agent blocks (the active one, unless
-    agent_config_id is given explicitly). MeetStream replaces each block wholesale,
-    so we fetch the current config first and merge the requested fields in.
+    Partially update an MIA agent's model/agent blocks (this workspace's
+    active one, unless agent_config_id is given explicitly). MeetStream
+    replaces each block wholesale, so we fetch the current config first and
+    merge the requested fields in.
     """
-    agent_config_id = body.agent_config_id or await get_active_agent_config_id(db)
+    agent_config_id = body.agent_config_id or await get_active_agent_config_id(db, org_id)
     if not agent_config_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No agent_config_id provided or configured")
 
@@ -381,9 +406,14 @@ async def update_current_agent(body: AgentUpdateRequest, db: AsyncSession = Depe
                 "allowed_tools": sorted(existing_tools | {"get_current_datetime"}),
             }
         else:
-            mcp_servers = [{"url": body.mcp_server_url, "timeout": 10, "allowed_tools": [
+            org_repo = OrganizationRepository(db)
+            org = await org_repo.get_by_id(org_id)
+            new_server: Dict[str, Any] = {"url": body.mcp_server_url, "timeout": 10, "allowed_tools": [
                 "get_current_datetime", "search_meeting_memory", "get_meeting", "get_previous_meetings", "get_action_items"
-            ]}]
+            ]}
+            if org and org.mcp_token:
+                new_server["headers"] = {"Authorization": f"Bearer {org.mcp_token}"}
+            mcp_servers = [new_server]
         current_agent["mcp_servers"] = mcp_servers
 
     try:

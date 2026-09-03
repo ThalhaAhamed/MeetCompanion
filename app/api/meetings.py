@@ -16,6 +16,7 @@ from app.models.schemas import (
 )
 from app.services.meetstream import meetstream_client
 from app.api.agent import get_active_agent_config_id, _DEFAULT_FIRST_MESSAGE
+from app.api.deps import get_current_org_id
 
 router = APIRouter(prefix="/api/meetings", tags=["meetings"])
 
@@ -38,12 +39,12 @@ def _redact_secrets(value):
 async def create_meeting(
     meeting_in: MeetingCreate,
     deploy_bot: bool = Query(default=True, description="Whether to immediately deploy the MeetStream bot"),
+    org_id: uuid.UUID = Depends(get_current_org_id),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Register a meeting and optionally launch a MeetStream bot into the call.
     """
-    org_id = uuid.UUID(settings.DEFAULT_ORG_ID)
     meeting_repo = MeetingRepository(db)
 
     # 1. Create meeting record
@@ -62,7 +63,7 @@ async def create_meeting(
     # 2. Deploy bot if requested and API key is present
     if deploy_bot and settings.MEETSTREAM_API_KEY:
         try:
-            active_agent_config_id = meeting_in.agent_config_id or await get_active_agent_config_id(db)
+            active_agent_config_id = meeting_in.agent_config_id or await get_active_agent_config_id(db, org_id)
 
             # The bot's visible in-meeting name must match the name the agent's
             # own system prompt listens for in its ACTIVATION RULE ("only
@@ -133,13 +134,13 @@ async def list_meetings(
     day: Optional[date] = Query(None, description="Shortcut for date_from=date_to=day"),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    org_id: uuid.UUID = Depends(get_current_org_id),
     db: AsyncSession = Depends(get_db),
 ):
     """List meetings with optional filtering, including by a single day."""
     if day:
         date_from = date_to = day
 
-    org_id = uuid.UUID(settings.DEFAULT_ORG_ID)
     meeting_repo = MeetingRepository(db)
     meetings = await meeting_repo.list_meetings(
         org_id=org_id,
@@ -157,12 +158,12 @@ async def list_meetings(
 @router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_meeting(
     meeting_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_org_id),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a meeting record (e.g. one whose bot deployment failed and never
     actually joined a call). Cascades to its participants, transcript segments,
     memories, action items, and vector embeddings."""
-    org_id = uuid.UUID(settings.DEFAULT_ORG_ID)
     meeting_repo = MeetingRepository(db)
     deleted = await meeting_repo.delete(org_id, meeting_id)
     if not deleted:
@@ -173,10 +174,10 @@ async def delete_meeting(
 @router.get("/{meeting_id}", response_model=MeetingDetailResponse)
 async def get_meeting(
     meeting_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_org_id),
     db: AsyncSession = Depends(get_db),
 ):
     """Retrieve full meeting details including memories and action items."""
-    org_id = uuid.UUID(settings.DEFAULT_ORG_ID)
     meeting_repo = MeetingRepository(db)
     meeting = await meeting_repo.get_by_id(org_id, meeting_id)
     if not meeting:
@@ -211,10 +212,10 @@ async def get_meeting(
 @router.get("/{meeting_id}/transcript", response_model=List[TranscriptSegmentResponse])
 async def get_meeting_transcript(
     meeting_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_org_id),
     db: AsyncSession = Depends(get_db),
 ):
     """Retrieve the full ordered transcript for a meeting."""
-    org_id = uuid.UUID(settings.DEFAULT_ORG_ID)
     meeting_repo = MeetingRepository(db)
     meeting = await meeting_repo.get_by_id(org_id, meeting_id)
     if not meeting:
@@ -228,10 +229,10 @@ async def get_meeting_transcript(
 @router.get("/{meeting_id}/bot")
 async def get_meeting_bot(
     meeting_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_org_id),
     db: AsyncSession = Depends(get_db),
 ):
     """Retrieve live bot status/metadata from MeetStream for this meeting."""
-    org_id = uuid.UUID(settings.DEFAULT_ORG_ID)
     meeting_repo = MeetingRepository(db)
     meeting = await meeting_repo.get_by_id(org_id, meeting_id)
     if not meeting:
@@ -249,10 +250,10 @@ async def get_meeting_bot(
 @router.post("/{meeting_id}/stop")
 async def stop_meeting_bot(
     meeting_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_org_id),
     db: AsyncSession = Depends(get_db),
 ):
     """Remove the bot from its meeting (stops recording immediately)."""
-    org_id = uuid.UUID(settings.DEFAULT_ORG_ID)
     meeting_repo = MeetingRepository(db)
     meeting = await meeting_repo.get_by_id(org_id, meeting_id)
     if not meeting:

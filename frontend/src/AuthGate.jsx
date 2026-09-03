@@ -1,10 +1,15 @@
 import { useEffect, useState } from 'react'
-import { checkAuth, login } from './api'
+import { checkAuth, login, addMember } from './api'
 
 export default function AuthGate({ children }) {
   const [status, setStatus] = useState('checking') // checking | gate | open
+  const [mode, setMode] = useState('signin') // signin | signup
+  const [workspaceMode, setWorkspaceMode] = useState('create') // create | join
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [name, setName] = useState('')
+  const [workspaceName, setWorkspaceName] = useState('')
+  const [joinCode, setJoinCode] = useState('')
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
 
@@ -21,6 +26,11 @@ export default function AuthGate({ children }) {
     return () => window.removeEventListener('hub:unauthorized', onUnauthorized)
   }, [])
 
+  function switchMode(next) {
+    setMode(next)
+    setError(null)
+  }
+
   async function submitLogin(e) {
     e.preventDefault()
     setBusy(true)
@@ -36,6 +46,32 @@ export default function AuthGate({ children }) {
     }
   }
 
+  async function submitSignup(e) {
+    e.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      await addMember({
+        name,
+        email,
+        password,
+        workspace_name: workspaceMode === 'create' ? workspaceName : undefined,
+        join_code: workspaceMode === 'join' ? joinCode : undefined,
+      })
+      await login(email, password)
+      setPassword('')
+      setStatus('open')
+    } catch (e) {
+      setError(
+        e.message.includes('409') ? 'That email is already a member — try signing in.'
+        : e.message.includes('404') ? 'No workspace found with that join code.'
+        : 'Could not create the account.'
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
   if (status === 'checking') {
     return <div className="gate-screen">Loading…</div>
   }
@@ -45,15 +81,47 @@ export default function AuthGate({ children }) {
       <div className="gate-screen">
         <div className="gate-card">
           <div className="gate-title">MeetStream Companion</div>
-          <form onSubmit={submitLogin}>
-            <div className="gate-subtitle">Sign in to open the hub. Everyone signed in shares the same meeting data, so new members are added by an existing member from the Members page - there's no self-serve signup.</div>
-            <input type="email" autoFocus placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-            <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
-            <button type="submit" disabled={busy || !email || !password}>
-              {busy ? 'Signing in…' : 'Sign in'}
-            </button>
-            {error && <div className="gate-error">{error}</div>}
-          </form>
+          <div className="gate-tabs">
+            <button type="button" className={mode === 'signin' ? 'active' : ''} onClick={() => switchMode('signin')}>Sign in</button>
+            <button type="button" className={mode === 'signup' ? 'active' : ''} onClick={() => switchMode('signup')}>Create account</button>
+          </div>
+
+          {mode === 'signin' ? (
+            <form onSubmit={submitLogin}>
+              <div className="gate-subtitle">Sign in to open your workspace.</div>
+              <input type="email" autoFocus placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
+              <button type="submit" disabled={busy || !email || !password}>
+                {busy ? 'Signing in…' : 'Sign in'}
+              </button>
+              {error && <div className="gate-error">{error}</div>}
+            </form>
+          ) : (
+            <form onSubmit={submitSignup}>
+              <div className="gate-subtitle">Every workspace is private — you'll only see meetings from the workspace you create or join.</div>
+              <input type="text" placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} />
+              <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <input type="password" placeholder="Choose a password (8+ characters)" value={password} onChange={(e) => setPassword(e.target.value)} />
+
+              <div className="gate-tabs">
+                <button type="button" className={workspaceMode === 'create' ? 'active' : ''} onClick={() => setWorkspaceMode('create')}>Create workspace</button>
+                <button type="button" className={workspaceMode === 'join' ? 'active' : ''} onClick={() => setWorkspaceMode('join')}>Join workspace</button>
+              </div>
+              {workspaceMode === 'create' ? (
+                <input type="text" placeholder="Workspace name (e.g. your team's name)" value={workspaceName} onChange={(e) => setWorkspaceName(e.target.value)} />
+              ) : (
+                <input type="text" placeholder="Join code (ask an existing member)" value={joinCode} onChange={(e) => setJoinCode(e.target.value)} />
+              )}
+
+              <button
+                type="submit"
+                disabled={busy || !name || !email || !password || (workspaceMode === 'create' ? !workspaceName : !joinCode)}
+              >
+                {busy ? 'Creating…' : 'Create account'}
+              </button>
+              {error && <div className="gate-error">{error}</div>}
+            </form>
+          )}
         </div>
       </div>
     )

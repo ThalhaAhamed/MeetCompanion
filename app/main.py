@@ -31,6 +31,26 @@ async def _ensure_schema():
     async with engine.begin() as conn:
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)"))
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE"))
+        await conn.execute(text("ALTER TABLE organizations ADD COLUMN IF NOT EXISTS mcp_token VARCHAR(255) UNIQUE"))
+        await conn.execute(text("ALTER TABLE organizations ADD COLUMN IF NOT EXISTS join_code VARCHAR(50) UNIQUE"))
+        # The existing default-org workspace's live MeetStream agent is already
+        # wired with the single global MCP_AUTH_TOKEN from before per-workspace
+        # tokens existed - backfill it as that org's own mcp_token so its agent
+        # keeps working without needing to be re-wired.
+        if settings.MCP_AUTH_TOKEN:
+            await conn.execute(
+                text(
+                    "UPDATE organizations SET mcp_token = :token "
+                    "WHERE id = :org_id AND mcp_token IS NULL"
+                ),
+                {"token": settings.MCP_AUTH_TOKEN, "org_id": settings.DEFAULT_ORG_ID},
+            )
+        await conn.execute(
+            text(
+                "UPDATE organizations SET join_code = substr(md5(random()::text), 1, 8) "
+                "WHERE join_code IS NULL"
+            )
+        )
 
 
 @asynccontextmanager

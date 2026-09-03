@@ -38,8 +38,10 @@ class MeetingProcessingPipeline:
             job_repo = ProcessingJobRepository(db)
             participant_repo = ParticipantRepository(db)
 
-            # 1. Fetch meeting
-            meeting = await meeting_repo.get_by_id(uuid.UUID(settings.DEFAULT_ORG_ID), meeting_id)
+            # 1. Fetch meeting - no org context available yet at webhook time,
+            # so look it up unscoped and read its real organization_id off
+            # the row itself for every downstream org-scoped call below.
+            meeting = await meeting_repo.get_by_id_unscoped(meeting_id)
             if not meeting:
                 raise ValueError(f"Meeting {meeting_id} not found")
 

@@ -15,6 +15,7 @@ from app.config import settings
 from app.database.connection import get_db
 from app.models.database import CompanyKnowledgeEmbedding
 from app.rag.company_knowledge import company_knowledge_rag
+from app.api.deps import get_current_org_id
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -24,6 +25,7 @@ SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md", ".csv"}
 @router.post("/upload", status_code=status.HTTP_202_ACCEPTED)
 async def upload_company_document(
     file: UploadFile = File(...),
+    org_id: uuid.UUID = Depends(get_current_org_id),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -58,7 +60,6 @@ async def upload_company_document(
     if not text_content.strip():
         raise HTTPException(status_code=400, detail="Document contains no extractable text")
 
-    org_id = uuid.UUID(settings.DEFAULT_ORG_ID)
     doc_id = uuid.uuid4()
 
     chunks_count = await company_knowledge_rag.index_document(
@@ -82,11 +83,10 @@ async def upload_company_document(
 @router.get("")
 async def list_documents(
     day: Optional[date] = Query(None, description="Filter to documents indexed on this day"),
+    org_id: uuid.UUID = Depends(get_current_org_id),
     db: AsyncSession = Depends(get_db),
 ):
     """List distinct company knowledge documents, most recently indexed first."""
-    org_id = uuid.UUID(settings.DEFAULT_ORG_ID)
-
     conditions = [CompanyKnowledgeEmbedding.organization_id == org_id]
     if day:
         day_start = datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)

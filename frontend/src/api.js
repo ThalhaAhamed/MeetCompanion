@@ -36,12 +36,16 @@ export function listMembers() {
   return req('/members')
 }
 
-export function addMember({ name, email, password }) {
+export function addMember({ name, email, password, workspace_name, join_code }) {
   return req('/members', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, email, password }),
+    body: JSON.stringify({ name, email, password, workspace_name, join_code }),
   })
+}
+
+export function getWorkspace() {
+  return req('/members/workspace')
 }
 
 export function removeMember(id) {
