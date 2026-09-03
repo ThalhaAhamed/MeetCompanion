@@ -1,5 +1,7 @@
 # MeetStream Companion 🎙️🧠
 
+**[▶ Try it now](https://frontend-production-1102c.up.railway.app)** — sign in, or create an account with the shared passphrase, and launch a bot into a real meeting.
+
 > **Persistent AI Meeting Companion** — deploys a voice agent into your meetings via **MeetStream MIA**, remembers everything across every call using **PostgreSQL + pgvector**, and exposes that memory back to the live agent through **MCP (Model Context Protocol)** — plus a hosted web dashboard the whole team can sign into.
 
 Most meeting bots hand you a transcript and forget everything the moment the call ends. MeetStream Companion is different: it deploys a bot that joins your call, records and transcribes it, runs the transcript through an LLM to extract structured memory (decisions, commitments, action items, concerns), and makes that memory queryable — both by a **live in-meeting AI agent** ("MeetStream Companion, what did we decide about pricing three weeks ago?") and by a **web dashboard** for browsing meetings, searching memory, and managing the agent's configuration.
@@ -27,46 +29,48 @@ The backend and frontend are deployed on Railway (not a local-only dev tool), an
 ## 🏗️ Architecture Overview
 
 ```
-                          MeetStream Platform
-             ┌───────────────┬─────────────────┬──────────────┐
-             │  Bots (Calls) │  MIA Agent (AI) │ Transcript    │
-             └───────┬───────┴────────┬────────┴──────┬───────┘
-                     │                │               │
-                 Webhooks       MCP (HTTP)       Webhooks
-                     │                │               │
-                     ▼                ▼               ▼
-          ┌───────────────────────────────────────────────────────┐
-          │               FastAPI Companion Server                │
-          │                                                        │
-          │  ┌──────────────┐  ┌─────────────┐  ┌──────────────┐  │
-          │  │ Webhook API  │  │ MCP Server  │  │ Meeting API  │  │
-          │  └───────┬──────┘  └──────┬──────┘  └──────┬───────┘  │
-          │          │                │                │          │
-          │          ▼                ▼                ▼          │
-          │  ┌─────────────────────────────────────────────────┐  │
-          │  │                   Services                       │  │
-          │  │  • MeetStream Client   • Memory Extractor        │  │
-          │  │  • Ingestion Pipeline  • Embedding Service       │  │
-          │  └────────────────────────┬────────────────────────┘  │
-          │                           │                            │
-          │                           ▼                            │
-          │  ┌─────────────────────────────────────────────────┐  │
-          │  │           PostgreSQL 17 + pgvector               │  │
-          │  │  • meetings, participants   • memories           │  │
-          │  │  • transcript_segments      • action_items       │  │
-          │  │  • meeting_memory_embeddings (vector 384)        │  │
-          │  │  • company_knowledge_embeddings                  │  │
-          │  └─────────────────────────────────────────────────┘  │
-          └────────────────────────────────────────────────────────┘
-                           ▲
-                           │ REST API
-                           │
-                  ┌─────────────────┐
-                  │  React Dashboard │  (frontend/ — Railway service in prod, Vite dev server on :3000 locally)
-                  └─────────────────┘
+                              MeetStream Platform
+        ┌────────────────┬──────────────────┬─────────────────┐
+        │   Bots (Calls) │   MIA Agent (AI) │    Transcript    │
+        └───────┬────────┴────────┬─────────┴────────┬────────┘
+                │                 │                   │
+             Webhooks      MCP + chat-relay        Webhooks
+                │           (both HTTP)                │
+                ▼                 ▼                   ▼
+   ┌──────────────────────────────────────────────────────────────┐
+   │                FastAPI Backend  ·  Railway service            │
+   │                                                                 │
+   │  ┌────────────┐ ┌─────────────┐ ┌────────────┐ ┌─────────────┐│
+   │  │ Webhook API│ │ MCP Server  │ │ Meeting API│ │ Auth/Members││
+   │  │            │ │ (9 tools +  │ │            │ │     API     ││
+   │  │            │ │ chat-relay) │ │            │ │             ││
+   │  └──────┬─────┘ └──────┬──────┘ └─────┬──────┘ └──────┬──────┘│
+   │         │              │              │               │       │
+   │         ▼              ▼              ▼               ▼       │
+   │  ┌───────────────────────────────────────────────────────┐   │
+   │  │                        Services                        │   │
+   │  │  • MeetStream Client   • Memory Extractor              │   │
+   │  │  • Embedding Service   • Ingestion Pipeline             │   │
+   │  └────────────────────────────┬────────────────────────────┘   │
+   │                               ▼                                │
+   │  ┌───────────────────────────────────────────────────────┐   │
+   │  │                PostgreSQL 17 + pgvector                 │   │
+   │  │  • users (members)          • memories, action_items   │   │
+   │  │  • meetings, participants   • meeting_memory_embeddings │   │
+   │  │  • transcript_segments      • company_knowledge_embeds  │   │
+   │  └───────────────────────────────────────────────────────┘   │
+   └─────────────────────────────────────────────────────────────┘
+                                ▲
+                                │ REST API (session-cookie authenticated)
+                                │
+                 ┌───────────────────────────────┐
+                 │   React Dashboard · Railway     │
+                 │   Day view · Search · Agent ·   │
+                 │   Members · sign-in gate        │
+                 └───────────────────────────────┘
 ```
 
-In production, the backend and frontend are separate Railway services with stable public URLs — no tunnel involved. Local development still uses a **Cloudflare Tunnel** to give MeetStream a public URL to reach your dev machine's MCP server and webhooks; see [Local development](#-local-development) below.
+The MCP Server handles both the 9 read/write memory tools and the `share_in_chat` chat-relay call (the agent's only path to post into meeting chat, and only on explicit request) — both are called by MeetStream's MIA agent over HTTP, authenticated by the same bearer token. In production, the backend and frontend are separate Railway services with stable public URLs — no tunnel involved. Local development still uses a **Cloudflare Tunnel** to give MeetStream a public URL to reach your dev machine's MCP server and webhooks; see [Local development](#-local-development) below.
 
 ---
 
