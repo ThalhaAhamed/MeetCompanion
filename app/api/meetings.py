@@ -63,6 +63,23 @@ async def create_meeting(
     if deploy_bot and settings.MEETSTREAM_API_KEY:
         try:
             active_agent_config_id = meeting_in.agent_config_id or await get_active_agent_config_id(db)
+
+            # The bot's visible in-meeting name must match the name the agent's
+            # own system prompt listens for in its ACTIVATION RULE ("only
+            # respond when addressed by <AgentName>") - it used to fall back to
+            # the free-text meeting title instead, so a meeting titled "Agent P"
+            # made the bot show up as "Agent P" while it was still only
+            # listening for "MeetStream Companion", and it stayed silent no
+            # matter what anyone said. The title field is purely our own
+            # dashboard label now; it never reaches MeetStream as bot_name.
+            bot_name = "MeetStream Companion"
+            if active_agent_config_id:
+                try:
+                    agent_cfg = await meetstream_client.get_mia_agent(active_agent_config_id)
+                    bot_name = agent_cfg.get("agent_config", agent_cfg).get("AgentName") or bot_name
+                except Exception:
+                    pass
+
             bot_resp = await meetstream_client.create_bot(
                 meeting_link=meeting.meeting_url,
                 agent_config_id=active_agent_config_id,
@@ -73,7 +90,7 @@ async def create_meeting(
                     "customer_name": meeting.customer_name,
                     "project_name": meeting.project_name,
                 },
-                bot_name=meeting_in.title or "MeetStream Companion",
+                bot_name=bot_name,
             )
             bot_id = bot_resp.get("bot_id") or bot_resp.get("id")
             transcript_id = bot_resp.get("transcript_id")

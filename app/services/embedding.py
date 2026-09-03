@@ -28,6 +28,13 @@ class EmbeddingService:
             if self._initialized:
                 return
             try:
+                # On a constrained/shared-vCPU container (e.g. Railway's default
+                # plan), PyTorch's default of spawning one thread per visible CPU
+                # causes severe contention rather than speedup - each encode()
+                # call was taking 14+ seconds instead of the expected tens of
+                # milliseconds. Pinning to a single thread removes that overhead.
+                import torch
+                torch.set_num_threads(1)
                 from sentence_transformers import SentenceTransformer
                 self._model = SentenceTransformer(self.model_name)
                 self._initialized = True

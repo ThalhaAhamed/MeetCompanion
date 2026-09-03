@@ -56,7 +56,7 @@ export default function LaunchBot({ onLaunched }) {
       <label className="field-label">Title</label>
       <input
         type="text"
-        placeholder="Optional"
+        placeholder="Optional — just a label for this dashboard, not the bot's name in the meeting"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
       />
