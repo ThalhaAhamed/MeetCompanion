@@ -274,7 +274,12 @@ async def update_current_agent(body: AgentUpdateRequest, db: AsyncSession = Depe
     if body.mcp_server_url is not None:
         mcp_servers = list(current_agent.get("mcp_servers") or [])
         if mcp_servers:
-            mcp_servers[0] = {**mcp_servers[0], "url": body.mcp_server_url}
+            existing_tools = set(mcp_servers[0].get("allowed_tools") or [])
+            mcp_servers[0] = {
+                **mcp_servers[0],
+                "url": body.mcp_server_url,
+                "allowed_tools": sorted(existing_tools | {"get_current_datetime"}),
+            }
         else:
             mcp_servers = [{"url": body.mcp_server_url, "timeout": 10, "allowed_tools": [
                 "get_current_datetime", "search_meeting_memory", "get_meeting", "get_previous_meetings", "get_action_items"
