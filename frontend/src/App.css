@@ -175,6 +175,36 @@ body {
   font-weight: 500;
 }
 
+.sidebar-user-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.sidebar-user-email {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-bottom: 8px;
+  overflow-wrap: anywhere;
+}
+
+.sidebar-signout {
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  padding: 7px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sidebar-signout:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
 .app {
   flex: 1;
   max-width: 1680px;

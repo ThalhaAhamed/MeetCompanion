@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import DayView from './DayView'
 import AgentSettings from './AgentSettings'
 import MemorySearch from './MemorySearch'
 import Members from './Members'
 import AuthGate from './AuthGate'
+import { checkAuth, logout } from './api'
 import './App.css'
 
 const ICONS = {
@@ -44,7 +45,17 @@ const PAGES = {
 
 export default function App() {
   const [page, setPage] = useState('day')
+  const [me, setMe] = useState(null)
   const Page = PAGES[page].Component
+
+  useEffect(() => {
+    checkAuth().then((d) => d.member && setMe(d.member)).catch(() => {})
+  }, [])
+
+  async function handleSignOut() {
+    await logout().catch(() => {})
+    window.location.reload()
+  }
 
   return (
     <AuthGate>
@@ -73,6 +84,16 @@ export default function App() {
             </div>
           ))}
         </nav>
+
+        {me && (
+          <div className="sidebar-footer">
+            <div className="sidebar-user">
+              <div className="sidebar-user-name">{me.name || me.email}</div>
+              <div className="sidebar-user-email">{me.email}</div>
+            </div>
+            <button className="sidebar-signout" onClick={handleSignOut}>Sign out</button>
+          </div>
+        )}
       </aside>
 
       <Page />
