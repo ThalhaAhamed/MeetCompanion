@@ -54,6 +54,12 @@ class CreateMemberRequest(BaseModel):
     passphrase: str | None = None  # only used for the very first member
 
 
+class UpdateSelfRequest(BaseModel):
+    name: str | None = None
+    email: str | None = None
+    password: str | None = None
+
+
 @router.get("/bootstrap-status")
 async def bootstrap_status(db: AsyncSession = Depends(get_db)):
     """Public: does the hub gate show a sign-in form or a 'create the first
@@ -101,6 +107,35 @@ async def add_member(body: CreateMemberRequest, request: Request, db: AsyncSessi
         is_active=True,
     )
     db.add(user)
+    await db.commit()
+    return MemberOut(id=str(user.id), name=user.name, email=user.email)
+
+
+@router.patch("/me")
+async def update_self(body: UpdateSelfRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    user_id = await _current_user_id(request, db)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Sign in required.")
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one()
+
+    if body.email is not None:
+        email = body.email.strip().lower()
+        if "@" not in email or "." not in email.split("@")[-1]:
+            raise HTTPException(status_code=400, detail="Invalid email address.")
+        existing = await db.execute(select(User.id).where(User.email == email, User.id != user_id))
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="A member with that email already exists.")
+        user.email = email
+
+    if body.name is not None:
+        user.name = body.name.strip()
+
+    if body.password is not None:
+        if len(body.password) < 8:
+            raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+        user.password_hash = pwd_context.hash(body.password)
+
     await db.commit()
     return MemberOut(id=str(user.id), name=user.name, email=user.email)
 

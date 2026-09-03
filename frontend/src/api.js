@@ -52,6 +52,14 @@ export function removeMember(id) {
   return req(`/members/${id}`, { method: 'DELETE' })
 }
 
+export function updateSelf(patch) {
+  return req('/members/me', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+}
+
 export function listMeetings(day) {
   const qs = day ? `?day=${day}&limit=100` : '?limit=100'
   return req(`/meetings${qs}`)
