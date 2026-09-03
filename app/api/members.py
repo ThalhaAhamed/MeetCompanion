@@ -1,12 +1,10 @@
 """
 Member roster: add/remove the people who can sign into the hub.
 
-Bootstrapping is the one special case - POST /api/members works without a
-session as long as no members exist yet, using SHARED_PASSPHRASE as one-time
-proof of ownership instead. Every other request here (list, add, remove)
-requires an active member session.
+There's no self-serve signup - every request here (list, add, remove)
+requires an active member session. New members are added by an
+already-logged-in member from the Members page.
 """
-import hmac
 import uuid
 from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
@@ -51,21 +49,12 @@ class CreateMemberRequest(BaseModel):
     name: str
     email: str
     password: str
-    passphrase: str | None = None  # only used for the very first member
 
 
 class UpdateSelfRequest(BaseModel):
     name: str | None = None
     email: str | None = None
     password: str | None = None
-
-
-@router.get("/bootstrap-status")
-async def bootstrap_status(db: AsyncSession = Depends(get_db)):
-    """Public: does the hub gate show a sign-in form or a 'create the first
-    member' form? Reveals nothing beyond a boolean."""
-    count_result = await db.execute(select(func.count()).select_from(User).where(User.is_active.is_(True)))
-    return {"has_members": count_result.scalar_one() > 0}
 
 
 @router.get("")
@@ -78,13 +67,8 @@ async def list_members(request: Request, db: AsyncSession = Depends(get_db)):
 
 @router.post("")
 async def add_member(body: CreateMemberRequest, request: Request, db: AsyncSession = Depends(get_db)):
-    # Two ways to be authorized to create a member: already signed in as an
-    # existing member (adding a teammate from the Members page), or knowing
-    # the shared passphrase (self-service signup - anyone with the passphrase
-    # can create their own account without an existing member adding them).
-    has_passphrase = bool(settings.SHARED_PASSPHRASE) and bool(body.passphrase) and hmac.compare_digest(body.passphrase, settings.SHARED_PASSPHRASE)
-    if not has_passphrase and not await _current_user_id(request, db):
-        raise HTTPException(status_code=401, detail="Sign in, or provide the shared passphrase, to create an account.")
+    if not await _current_user_id(request, db):
+        raise HTTPException(status_code=401, detail="Sign in required.")
 
     email = body.email.strip().lower()
     if "@" not in email or "." not in email.split("@")[-1]:

@@ -7,7 +7,7 @@ async function req(path, options) {
   const res = await fetch(`${BASE}${path}`, { credentials: 'include', ...options })
   if (res.status === 401) {
     window.dispatchEvent(new Event('hub:unauthorized'))
-    throw new Error('401 Unauthorized: passphrase required')
+    throw new Error('401 Unauthorized: sign-in required')
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '')
@@ -32,19 +32,15 @@ export function logout() {
   return req('/auth/logout', { method: 'POST' })
 }
 
-export function getBootstrapStatus() {
-  return req('/members/bootstrap-status')
-}
-
 export function listMembers() {
   return req('/members')
 }
 
-export function addMember({ name, email, password, passphrase }) {
+export function addMember({ name, email, password }) {
   return req('/members', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, email, password, passphrase }),
+    body: JSON.stringify({ name, email, password }),
   })
 }
 

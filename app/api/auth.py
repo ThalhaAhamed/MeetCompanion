@@ -1,8 +1,6 @@
 """
-Per-member login. There's no self-serve signup - the very first member is
-created via POST /api/members using the SHARED_PASSPHRASE as one-time proof
-of ownership (see app/api/members.py); everyone after that is added by an
-already-logged-in member from the Members page.
+Per-member login. There's no self-serve signup - members are added by an
+already-logged-in member from the Members page (see app/api/members.py).
 """
 import time
 import uuid
