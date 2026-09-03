@@ -74,6 +74,10 @@ export function updateActionItem(id, patch) {
   })
 }
 
+export function getAgentCredentials() {
+  return req('/agent/credentials')
+}
+
 export function listAgents() {
   return req('/agent/list')
 }

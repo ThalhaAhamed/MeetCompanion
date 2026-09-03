@@ -20,6 +20,38 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
 
 _SECRET_KEY_PATTERN = ("key", "secret", "token", "password", "authorization")
 
+# Prepended to every newly created agent's system prompt. Covers behavior that
+# has to live in the prompt because the platform doesn't expose a dedicated
+# wake-word/activation-gate field on agent config: name-gated activation (stay
+# silent unless addressed by name), resolving relative dates via
+# get_current_datetime (the model has no built-in notion of "today"),
+# synthesizing a coherent answer from get_meeting's real data instead of
+# isolated facts, refusing to invent unavailable information, and avoiding
+# redundant tool calls (each one adds latency the realtime voice pipeline has
+# to wait through, which is also when it's most likely to drop out).
+_ACTIVATION_POLICY_TEMPLATE = """You are {agent_name}, a persistent AI meeting assistant with access to real, stored meeting memory tools.
+
+ACTIVATION RULE (critical, always follow this): Only respond when a speaker explicitly addresses you by name ("{agent_name}"). If your name is not said, remain completely silent - do not respond, do not call any tools, do not generate any output at all, even if a question seems directed at an assistant in general. Wait until you are addressed by name before doing anything.
+
+DATE REASONING: You do not automatically know the current date. Whenever a question uses a relative date ("yesterday", "today", "last Monday", "this week"), call get_current_datetime first, compute the actual date yourself, and only then call get_previous_meetings or get_meeting with that date.
+
+ANSWERING QUESTIONS ABOUT PAST MEETINGS: To say who attended a meeting or summarize it, call get_meeting (via get_previous_meetings first if you only have a date, not an id) and use its real participants, summary, memories, and action_items fields. Give one coherent, well-organized answer covering what's actually relevant - discussions, decisions, commitments, requirements, concerns, action items - not just a single isolated fact, unless only one fact was asked for.
+
+NEVER INVENT INFORMATION: Only state what the tools actually returned. Never guess or make up participant names, dates, decisions, or any other detail. If something was asked for but isn't in the data, say plainly that it could not be found - do not fill the gap with a guess.
+
+BE EFFICIENT: Use the minimum tool calls needed to answer. Don't call the same tool twice for one question. Don't use search_meeting_memory when you already know which specific meeting is being asked about - call get_meeting directly instead. Every extra tool call adds delay before you can respond.
+
+Keep spoken responses concise and natural.
+
+"""
+
+
+def build_agent_system_prompt(agent_name: str, custom_instructions: str = "") -> str:
+    """Wrap the activation/date/no-hallucination policy around whatever
+    additional instructions the caller wants this agent to have."""
+    policy = _ACTIVATION_POLICY_TEMPLATE.format(agent_name=agent_name or "the assistant")
+    return policy + (custom_instructions or "").strip()
+
 
 def _redact_secrets(value):
     """Recursively strip anything that looks like a credential before it leaves our API."""
@@ -31,6 +63,59 @@ def _redact_secrets(value):
     if isinstance(value, list):
         return [_redact_secrets(v) for v in value]
     return value
+
+
+def _mask_secret(value: Optional[str]) -> Optional[str]:
+    """Show enough of a credential to identify it (which key is configured, and
+    that it's the right one) without ever exposing the full value. Short values
+    (under 10 chars) are fully redacted rather than partially shown, since a
+    short secret's middle chars aren't enough to hide the rest."""
+    if not value:
+        return None
+    if len(value) < 10:
+        return "***"
+    return f"{value[:6]}…{value[-4:]}"
+
+
+@router.get("/credentials")
+async def get_agent_credentials():
+    """
+    Masked view of the provider credentials this deployment is actually
+    configured with - the MIA agent's own model/voice provider is visible
+    already via GET /api/agent (MeetStream doesn't expose that provider's API
+    key to us at all, they hold it), but the credentials our own backend uses
+    (MeetStream API access, the LLM that extracts meeting memory, MCP auth)
+    were previously invisible anywhere in the dashboard.
+    """
+    return {
+        "meetstream_api_key": {
+            "configured": bool(settings.MEETSTREAM_API_KEY),
+            "masked_value": _mask_secret(settings.MEETSTREAM_API_KEY),
+        },
+        "memory_extraction_llm": {
+            "provider": settings.LLM_PROVIDER,
+            "model": {
+                "openai": settings.OPENAI_MODEL,
+                "groq": settings.GROQ_MODEL,
+                "anthropic": settings.ANTHROPIC_MODEL,
+            }.get(settings.LLM_PROVIDER),
+            "api_key_configured": bool({
+                "openai": settings.OPENAI_API_KEY,
+                "groq": settings.GROQ_API_KEY,
+                "anthropic": settings.ANTHROPIC_API_KEY,
+            }.get(settings.LLM_PROVIDER)),
+            "masked_api_key": _mask_secret({
+                "openai": settings.OPENAI_API_KEY,
+                "groq": settings.GROQ_API_KEY,
+                "anthropic": settings.ANTHROPIC_API_KEY,
+            }.get(settings.LLM_PROVIDER)),
+        },
+        "mcp_auth_token": {
+            "configured": bool(settings.MCP_AUTH_TOKEN),
+            "masked_value": _mask_secret(settings.MCP_AUTH_TOKEN),
+        },
+        "mcp_server_url": settings.MCP_SERVER_URL,
+    }
 
 
 async def get_active_agent_config_id(db: AsyncSession) -> Optional[str]:
@@ -72,7 +157,7 @@ async def list_agents(db: AsyncSession = Depends(get_db)):
 
 class AgentCreateRequest(BaseModel):
     agent_name: str
-    system_prompt: str = "You are a helpful AI meeting assistant with access to persistent meeting memory tools. Keep responses concise and natural."
+    system_prompt: str = ""
     first_message: str = "Hello! I am your persistent meeting companion. I remember past discussions, action items, and decisions."
     provider: str = "openai"
     model: str = "gpt-4.1"
@@ -94,7 +179,7 @@ async def create_agent(body: AgentCreateRequest, db: AsyncSession = Depends(get_
     try:
         result = await meetstream_client.create_mia_agent(
             agent_name=body.agent_name,
-            system_prompt=body.system_prompt,
+            system_prompt=build_agent_system_prompt(body.agent_name, body.system_prompt),
             first_message=body.first_message,
             provider=body.provider,
             model=body.model,

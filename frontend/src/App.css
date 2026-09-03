@@ -1195,3 +1195,25 @@ body {
   padding: 8px 10px;
   font-family: inherit;
 }
+
+.credentials-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin: 20px 0 10px;
+  font-weight: 700;
+}
+
+.credentials-panel {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+
+.credentials-panel dd {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

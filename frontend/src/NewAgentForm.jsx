@@ -9,7 +9,7 @@ const defaults = {
   voice: 'alloy',
   mode: 'realtime',
   temperature: 0.8,
-  system_prompt: 'You are a helpful AI meeting assistant with access to persistent meeting memory tools. Keep responses concise and natural.',
+  system_prompt: '',
   first_message: 'Hello! I am your persistent meeting companion. I remember past discussions, action items, and decisions.',
   activate: true,
 }
@@ -78,8 +78,13 @@ export default function NewAgentForm({ onCreated, onClose }) {
         </label>
       </div>
 
-      <label className="field-label">System prompt</label>
-      <textarea rows={3} value={form.system_prompt} onChange={(e) => update('system_prompt', e.target.value)} />
+      <label className="field-label">Extra instructions (optional)</label>
+      <textarea
+        rows={3}
+        value={form.system_prompt}
+        onChange={(e) => update('system_prompt', e.target.value)}
+        placeholder="Added on top of the built-in behavior every agent gets: name-gated activation, date reasoning, no-hallucination, coherent summaries."
+      />
 
       <label className="field-label">First message</label>
       <textarea rows={2} value={form.first_message} onChange={(e) => update('first_message', e.target.value)} />

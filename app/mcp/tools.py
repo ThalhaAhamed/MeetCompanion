@@ -17,6 +17,11 @@ from app.models.schemas import ActionItemUpdate
 # Tool Schemas for MCP Tool Discovery
 MCP_TOOL_DEFINITIONS = [
     {
+        "name": "get_current_datetime",
+        "description": "Get the current date and time. Call this FIRST whenever a question uses a relative date like 'yesterday', 'today', 'this week', or 'last Monday', then compute the actual date yourself before calling get_previous_meetings or get_meeting - the model has no reliable built-in sense of the current date otherwise.",
+        "inputSchema": {"type": "object", "properties": {}}
+    },
+    {
         "name": "search_meeting_memory",
         "description": "Semantic search across previous meeting transcripts, discussions, and structured memories (decisions, requirements, commitments). Use this whenever asked what happened in past calls or what someone said.",
         "inputSchema": {
@@ -49,7 +54,7 @@ MCP_TOOL_DEFINITIONS = [
     },
     {
         "name": "get_meeting",
-        "description": "Retrieve comprehensive details, summary, participants, and memories of a specific meeting by ID or title.",
+        "description": "Retrieve full details for ONE specific meeting: its stored summary, the actual list of participant names, and its recorded decisions/commitments/requirements/concerns and action items - use this to answer 'who attended' or 'summarize the meeting' questions. If you only know a relative date (e.g. 'yesterday'), call get_current_datetime then get_previous_meetings first to find the meeting_id, then call this once with that id - don't call get_meeting more than once per question.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -66,7 +71,7 @@ MCP_TOOL_DEFINITIONS = [
     },
     {
         "name": "get_previous_meetings",
-        "description": "List and count previous meetings, optionally filtered by customer, project, or a date range. Use date_from/date_to (YYYY-MM-DD) to answer questions like 'how many meetings happened yesterday' - the response's total_count is the true total matching the filters, independent of limit.",
+        "description": "List and count previous meetings, optionally filtered by customer, project, or a date range. Use date_from/date_to (YYYY-MM-DD) to answer questions like 'how many meetings happened yesterday' - the response's total_count is the true total matching the filters, independent of limit. Call get_current_datetime first to compute the actual date for any relative reference ('yesterday', 'last Monday', etc).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -246,6 +251,11 @@ async def execute_tool(
     """
     Dispatcher for executing MCP tools with strict organization isolation.
     """
+    if tool_name == "get_current_datetime":
+        # No DB needed - skip opening a session/connection for the cheapest,
+        # most frequently called tool (every relative-date question needs it).
+        return _tool_get_current_datetime()
+
     async with get_db_context() as db:
         if tool_name == "search_meeting_memory":
             return await _tool_search_meeting_memory(db, org_id, arguments)
@@ -265,6 +275,16 @@ async def execute_tool(
             return await _tool_update_action_item(db, org_id, arguments)
         else:
             return {"error": f"Unknown tool: {tool_name}"}
+
+
+def _tool_get_current_datetime() -> Dict[str, Any]:
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    return {
+        "current_date": now.date().isoformat(),
+        "current_datetime_utc": now.isoformat(),
+        "day_of_week": now.strftime("%A"),
+    }
 
 
 async def _tool_search_meeting_memory(
@@ -337,16 +357,43 @@ async def _tool_get_meeting(
     if not meeting:
         return {"error": "Meeting not found"}
 
+    # Previously this only returned counts (memories_count/action_items_count),
+    # not the actual participant names or memory/action-item content - so the
+    # agent had no real data to name attendees or synthesize a summary from,
+    # and would either stay silent or (worse) guess. Returns the real stored
+    # data now; if a field is genuinely empty, it stays empty rather than
+    # being backfilled with anything invented.
     return {
         "id": str(meeting.id),
         "title": meeting.title,
         "customer_name": meeting.customer_name,
         "project_name": meeting.project_name,
         "started_at": str(meeting.started_at) if meeting.started_at else None,
-        "summary": meeting.summary,
         "status": meeting.status,
-        "memories_count": len(meeting.memories) if meeting.memories else 0,
-        "action_items_count": len(meeting.action_items) if meeting.action_items else 0,
+        "summary": meeting.summary,
+        "participants": [
+            p.name or p.identifier or "Unknown participant"
+            for p in (meeting.participants or [])
+        ],
+        "memories": [
+            {
+                "type": m.type.value if hasattr(m.type, "value") else m.type,
+                "content": m.content,
+                "speaker": m.speaker,
+                "importance": m.importance,
+            }
+            for m in (meeting.memories or [])
+        ],
+        "action_items": [
+            {
+                "task": a.task,
+                "owner": a.owner,
+                "status": a.status,
+                "priority": a.priority,
+                "due_date": str(a.due_date) if a.due_date else None,
+            }
+            for a in (meeting.action_items or [])
+        ],
     }
 
 

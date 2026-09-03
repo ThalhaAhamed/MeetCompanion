@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getAgent, updateAgent, listAgents, activateAgent } from './api'
+import { getAgent, updateAgent, listAgents, activateAgent, getAgentCredentials } from './api'
 import NewAgentForm from './NewAgentForm'
 import EmptyState from './EmptyState'
 import { RocketIcon, InboxIcon } from './icons'
@@ -29,6 +29,9 @@ export default function AgentSettings() {
   const [agentsError, setAgentsError] = useState(null)
   const [activatingId, setActivatingId] = useState(null)
   const [showNewForm, setShowNewForm] = useState(false)
+
+  const [credentials, setCredentials] = useState(null)
+  const [credentialsError, setCredentialsError] = useState(null)
 
   function load() {
     setLoading(true)
@@ -65,6 +68,9 @@ export default function AgentSettings() {
 
   useEffect(load, [])
   useEffect(loadAgents, [])
+  useEffect(() => {
+    getAgentCredentials().catch((e) => setCredentialsError(e.message)).then((d) => d && setCredentials(d))
+  }, [])
 
   function update(field, value) {
     setForm((f) => ({ ...f, [field]: value }))
@@ -182,6 +188,33 @@ export default function AgentSettings() {
                 {mode && <span className="tag">{mode}</span>}
                 {agentConfigId && <span className="tag">{agentConfigId}</span>}
               </div>
+
+              <h3 className="credentials-title">System provider credentials</h3>
+              {credentialsError && <div className="error">Failed to load credentials: {credentialsError}</div>}
+              {credentials && (
+                <dl className="kv credentials-panel">
+                  <div className="kv-row">
+                    <dt>MeetStream API key</dt>
+                    <dd>{credentials.meetstream_api_key.configured ? credentials.meetstream_api_key.masked_value : 'Not configured'}</dd>
+                  </div>
+                  <div className="kv-row">
+                    <dt>Memory extraction LLM</dt>
+                    <dd>{credentials.memory_extraction_llm.provider} ({credentials.memory_extraction_llm.model})</dd>
+                  </div>
+                  <div className="kv-row">
+                    <dt>LLM API key</dt>
+                    <dd>{credentials.memory_extraction_llm.api_key_configured ? credentials.memory_extraction_llm.masked_api_key : 'Not configured'}</dd>
+                  </div>
+                  <div className="kv-row">
+                    <dt>MCP auth token</dt>
+                    <dd>{credentials.mcp_auth_token.configured ? credentials.mcp_auth_token.masked_value : 'Not configured'}</dd>
+                  </div>
+                  <div className="kv-row">
+                    <dt>MCP server URL</dt>
+                    <dd>{credentials.mcp_server_url}</dd>
+                  </div>
+                </dl>
+              )}
 
               <form className="agent-form" onSubmit={save}>
                 <label>
