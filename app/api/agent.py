@@ -210,6 +210,48 @@ class ActivateRequest(BaseModel):
     agent_config_id: str
 
 
+async def _ensure_mcp_wired(agent_config_id: str) -> None:
+    """
+    Only agents created through this app's "New agent" form get wired to our
+    MCP server (database access) at creation time - an agent set up any other
+    way (MeetStream's own dashboard, an older test agent) can be activated
+    here with zero access to meeting memory, and nothing would surface that
+    until it silently failed to recall anything. Patch the wiring in
+    on every activation so that trap can't happen.
+    """
+    if not settings.MCP_SERVER_URL:
+        return
+    try:
+        current = await meetstream_client.get_mia_agent(agent_config_id)
+    except Exception:
+        return
+    current_cfg = current.get("agent_config", current)
+    current_agent: Dict[str, Any] = dict(current_cfg.get("Agent") or {})
+    mcp_servers = list(current_agent.get("mcp_servers") or [])
+
+    already_wired = bool(mcp_servers) and mcp_servers[0].get("active") and mcp_servers[0].get("url") == settings.MCP_SERVER_URL
+    if already_wired:
+        return
+
+    existing_tools = set(mcp_servers[0].get("allowed_tools") or []) if mcp_servers else set()
+    default_tools = {"get_current_datetime", "search_meeting_memory", "get_meeting", "get_previous_meetings", "get_action_items"}
+    server_config = {
+        "name": "MeetStream Companion MCP",
+        "url": settings.MCP_SERVER_URL,
+        "timeout": 30,
+        "active": True,
+        "allowed_tools": sorted(existing_tools | default_tools),
+    }
+    if settings.MCP_AUTH_TOKEN:
+        server_config["headers"] = {"Authorization": f"Bearer {settings.MCP_AUTH_TOKEN}"}
+    current_agent["mcp_servers"] = [server_config]
+
+    try:
+        await meetstream_client.update_mia_agent_settings(agent_config_id=agent_config_id, agent=current_agent)
+    except Exception:
+        pass
+
+
 @router.post("/activate")
 async def activate_agent(body: ActivateRequest, db: AsyncSession = Depends(get_db)):
     """Switch which agent new bots launch with, without touching env vars or redeploying."""
@@ -219,6 +261,7 @@ async def activate_agent(body: ActivateRequest, db: AsyncSession = Depends(get_d
     if not org:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
     await db.commit()
+    await _ensure_mcp_wired(body.agent_config_id)
     return {"active_agent_config_id": body.agent_config_id}
 
 
