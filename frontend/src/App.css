@@ -1153,3 +1153,46 @@ body {
 .badge.status-in_meeting::before {
   animation: live-pulse 1.6s ease-in-out infinite;
 }
+
+.new-agent-panel {
+  width: 420px;
+}
+
+.new-agent-panel textarea {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 13.5px;
+  padding: 9px 11px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.new-agent-panel textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.new-agent-panel .agent-form-grid {
+  gap: 10px;
+}
+
+.new-agent-panel .agent-form-grid label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.new-agent-panel .agent-form-grid input {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 13px;
+  padding: 8px 10px;
+  font-family: inherit;
+}

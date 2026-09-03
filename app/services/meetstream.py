@@ -127,6 +127,72 @@ class MeetStreamClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def create_mia_agent(
+        self,
+        agent_name: str,
+        system_prompt: str,
+        first_message: str = "",
+        provider: str = "openai",
+        model: str = "gpt-4.1",
+        voice: str = "alloy",
+        temperature: float = 0.8,
+        mode: str = "realtime",
+        mcp_server_url: Optional[str] = None,
+        mcp_auth_token: Optional[str] = None,
+        response_modality: str = "text",
+        tool_results_to_chat: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Create a brand new MIA agent, pre-wired to our own MCP server the same way
+        the one existing agent this app was originally configured with is wired -
+        so a freshly created agent can recall meeting memory immediately, not just
+        after someone manually fixes its MCP config afterward.
+        """
+        mcp_servers = []
+        if mcp_server_url:
+            server_config: Dict[str, Any] = {
+                "url": mcp_server_url,
+                "name": "MeetStream Companion MCP",
+                "timeout": 30,
+                "active": True,
+                "allowed_tools": [
+                    "search_meeting_memory",
+                    "get_meeting",
+                    "get_previous_meetings",
+                    "get_action_items",
+                ],
+            }
+            if mcp_auth_token:
+                server_config["headers"] = {"Authorization": f"Bearer {mcp_auth_token}"}
+            mcp_servers.append(server_config)
+
+        payload = {
+            "agent_name": agent_name,
+            "mode": mode,
+            "model": {
+                "provider": provider,
+                "model": model,
+                "voice": voice,
+                "system_prompt": system_prompt,
+                "first_message": first_message,
+                "temperature": temperature,
+            },
+            "agent": {
+                "mcp_servers": mcp_servers,
+                "tool_results_to_chat": tool_results_to_chat,
+                "response_modality": response_modality,
+            },
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{self.base_url}/api/v1/mia",
+                json=payload,
+                headers=self.headers,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
     async def update_mia_agent_settings(
         self,
         agent_config_id: str,

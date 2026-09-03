@@ -37,6 +37,15 @@ class OrganizationRepository:
         await self.session.flush()
         return org
 
+    async def update_settings(self, org_id: uuid.UUID, patch: Dict[str, Any]) -> Optional[Organization]:
+        """Merge `patch` into the org's settings JSONB (shallow merge, one level)."""
+        org = await self.get_by_id(org_id)
+        if not org:
+            return None
+        org.settings = {**(org.settings or {}), **patch}
+        await self.session.flush()
+        return org
+
 
 class MeetingRepository:
     def __init__(self, session: AsyncSession):

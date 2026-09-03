@@ -74,6 +74,26 @@ export function updateActionItem(id, patch) {
   })
 }
 
+export function listAgents() {
+  return req('/agent/list')
+}
+
+export function createAgent(payload) {
+  return req('/agent', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function activateAgent(agent_config_id) {
+  return req('/agent/activate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agent_config_id }),
+  })
+}
+
 export function uploadDocument(file) {
   const form = new FormData()
   form.append('file', file)

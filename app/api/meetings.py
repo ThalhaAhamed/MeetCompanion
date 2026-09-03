@@ -15,6 +15,7 @@ from app.models.schemas import (
     ParticipantResponse, MemoryResponse, ActionItemResponse, TranscriptSegmentResponse
 )
 from app.services.meetstream import meetstream_client
+from app.api.agent import get_active_agent_config_id
 
 router = APIRouter(prefix="/api/meetings", tags=["meetings"])
 
@@ -61,9 +62,10 @@ async def create_meeting(
     # 2. Deploy bot if requested and API key is present
     if deploy_bot and settings.MEETSTREAM_API_KEY:
         try:
+            active_agent_config_id = meeting_in.agent_config_id or await get_active_agent_config_id(db)
             bot_resp = await meetstream_client.create_bot(
                 meeting_link=meeting.meeting_url,
-                agent_config_id=meeting_in.agent_config_id or settings.MEETSTREAM_AGENT_CONFIG_ID,
+                agent_config_id=active_agent_config_id,
                 callback_url=f"{settings.MCP_SERVER_URL.replace('/mcp', '')}/api/webhooks/meetstream",
                 custom_attributes={
                     "organization_id": str(org_id),
