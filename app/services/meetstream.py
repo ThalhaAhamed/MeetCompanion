@@ -61,6 +61,7 @@ class MeetStreamClient:
         callback_url: Optional[str] = None,
         custom_attributes: Optional[Dict[str, Any]] = None,
         bot_name: Optional[str] = None,
+        bot_message: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Deploy a MeetStream bot into a meeting.
@@ -92,6 +93,9 @@ class MeetStreamClient:
 
         if bot_name:
             payload["bot_name"] = bot_name
+
+        if bot_message:
+            payload["bot_message"] = bot_message
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(

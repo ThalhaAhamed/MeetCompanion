@@ -15,7 +15,7 @@ from app.models.schemas import (
     ParticipantResponse, MemoryResponse, ActionItemResponse, TranscriptSegmentResponse
 )
 from app.services.meetstream import meetstream_client
-from app.api.agent import get_active_agent_config_id
+from app.api.agent import get_active_agent_config_id, _DEFAULT_FIRST_MESSAGE
 
 router = APIRouter(prefix="/api/meetings", tags=["meetings"])
 
@@ -80,10 +80,17 @@ async def create_meeting(
                 except Exception:
                     pass
 
+            # Posted to the meeting chat the instant the bot joins - reliable
+            # and independent of the realtime model's own behavior, unlike
+            # trying to get the LLM to proactively speak an introduction
+            # (which realtime voice agents don't do consistently).
+            bot_message = _DEFAULT_FIRST_MESSAGE.format(agent_name=bot_name)
+
             bot_resp = await meetstream_client.create_bot(
                 meeting_link=meeting.meeting_url,
                 agent_config_id=active_agent_config_id,
                 callback_url=f"{settings.MCP_SERVER_URL.replace('/mcp', '')}/api/webhooks/meetstream",
+                bot_message=bot_message,
                 custom_attributes={
                     "organization_id": str(org_id),
                     "meeting_id": str(meeting.id),

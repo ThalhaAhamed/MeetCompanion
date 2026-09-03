@@ -31,9 +31,7 @@ _SECRET_KEY_PATTERN = ("key", "secret", "token", "password", "authorization")
 # to wait through, which is also when it's most likely to drop out).
 _ACTIVATION_POLICY_TEMPLATE = """You are {agent_name}, a persistent AI meeting assistant with access to real, stored meeting memory tools.
 
-INTRODUCTION (the one exception to the activation rule below): The very first time you detect that the meeting has started - as soon as you can speak, before anyone has said anything to you - say exactly this once, unprompted: "{intro}" After that single introduction, follow the ACTIVATION RULE strictly for the rest of the meeting.
-
-ACTIVATION RULE (critical, always follow this): Only respond when a speaker explicitly addresses you by name ("{agent_name}"). If your name is not said, remain completely silent - do not respond, do not call any tools, do not generate any output at all, even if a question seems directed at an assistant in general. Wait until you are addressed by name before doing anything.
+ACTIVATION RULE (critical, always follow this): Only respond when a speaker explicitly addresses you by name ("{agent_name}"). If your name is not said, remain completely silent - do not respond, do not call any tools, do not generate any output at all, even if a question seems directed at an assistant in general. Wait until you are addressed by name before doing anything. Your introduction is handled separately by a chat message posted when you join - do not introduce yourself out loud.
 
 DATE REASONING: You do not automatically know the current date. Whenever a question uses a relative date ("yesterday", "today", "last Monday", "this week"), call get_current_datetime first, compute the actual date yourself, and only then call get_previous_meetings or get_meeting with that date.
 
@@ -62,15 +60,14 @@ def build_agent_system_prompt(agent_name: str, custom_instructions: str = "") ->
     """Wrap the activation/date/no-hallucination policy around whatever
     additional instructions the caller wants this agent to have.
 
-    The join greeting has to be spoken via a system-prompt instruction rather
-    than the model.first_message field - that field is documented for
-    pipeline-mode agents only and MeetStream's realtime-mode agents (the mode
-    this app actually uses) silently ignore it, so setting it alone produces
-    no spoken greeting at all.
+    The join greeting is a chat message (bot_message on create_bot, see
+    meetings.py) rather than something spoken - model.first_message is
+    documented for pipeline-mode agents only and this app's realtime-mode
+    agents silently ignore it, and prompting the model to self-initiate
+    speech turned out to be unreliable in practice.
     """
     name = agent_name or "the assistant"
-    intro = _DEFAULT_FIRST_MESSAGE.format(agent_name=name)
-    policy = _ACTIVATION_POLICY_TEMPLATE.format(agent_name=name, intro=intro)
+    policy = _ACTIVATION_POLICY_TEMPLATE.format(agent_name=name)
     return policy + (custom_instructions or "").strip()
 
 
