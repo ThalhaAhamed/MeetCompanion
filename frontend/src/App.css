@@ -1213,7 +1213,27 @@ body {
   margin-bottom: 20px;
 }
 
+/* Values here are short single tokens (masked keys, URLs) with no natural
+   break points - the shared .kv layout's overflow-wrap:anywhere (tuned for
+   long UUIDs in the Bot panel) forces them to wrap one character per line
+   when this column gets narrow. Keep them on one line and let them scroll
+   horizontally within the panel instead. */
+.credentials-panel .kv-row {
+  flex-direction: row !important;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.credentials-panel dt {
+  flex: 0 0 150px;
+}
+
 .credentials-panel dd {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: normal;
+  white-space: nowrap;
+  overflow-x: auto;
   font-variant-numeric: tabular-nums;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
