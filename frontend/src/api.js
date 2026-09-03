@@ -20,16 +20,36 @@ export function checkAuth() {
   return req('/auth/check')
 }
 
-export function login(passphrase) {
+export function login(email, password) {
   return req('/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ passphrase }),
+    body: JSON.stringify({ email, password }),
   })
 }
 
 export function logout() {
   return req('/auth/logout', { method: 'POST' })
+}
+
+export function getBootstrapStatus() {
+  return req('/members/bootstrap-status')
+}
+
+export function listMembers() {
+  return req('/members')
+}
+
+export function addMember({ name, email, password, passphrase }) {
+  return req('/members', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, email, password, passphrase }),
+  })
+}
+
+export function removeMember(id) {
+  return req(`/members/${id}`, { method: 'DELETE' })
 }
 
 export function listMeetings(day) {

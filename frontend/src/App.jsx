@@ -2,7 +2,8 @@ import { useState } from 'react'
 import DayView from './DayView'
 import AgentSettings from './AgentSettings'
 import MemorySearch from './MemorySearch'
-import PassphraseGate from './PassphraseGate'
+import Members from './Members'
+import AuthGate from './AuthGate'
 import './App.css'
 
 const ICONS = {
@@ -24,12 +25,21 @@ const ICONS = {
       <path d="M9 2.5v3M6.5 9.5v1M11.5 9.5v1" strokeLinecap="round" />
     </svg>
   ),
+  members: (
+    <svg viewBox="0 0 18 18" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <circle cx="6.5" cy="6" r="2.4" />
+      <path d="M2.2 15c0-2.4 1.9-4.3 4.3-4.3s4.3 1.9 4.3 4.3" strokeLinecap="round" />
+      <circle cx="13" cy="6.5" r="1.9" />
+      <path d="M11.5 10.9c1.9.2 3.4 1.9 3.4 4" strokeLinecap="round" />
+    </svg>
+  ),
 }
 
 const PAGES = {
   day: { label: 'Day view', Component: DayView },
   search: { label: 'Search memory', Component: MemorySearch },
   agent: { label: 'Agent', Component: AgentSettings },
+  members: { label: 'Members', Component: Members },
 }
 
 export default function App() {
@@ -37,7 +47,7 @@ export default function App() {
   const Page = PAGES[page].Component
 
   return (
-    <PassphraseGate>
+    <AuthGate>
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
@@ -67,6 +77,6 @@ export default function App() {
 
       <Page />
     </div>
-    </PassphraseGate>
+    </AuthGate>
   )
 }

@@ -40,6 +40,7 @@ python-dotenv==1.1.0
 
 # ---- Security ----
 passlib==1.7.4
+bcrypt==4.2.1
 
 # ---- Logging ----
 structlog==25.4.0

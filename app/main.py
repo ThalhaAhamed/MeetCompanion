@@ -13,15 +13,31 @@ from app.api.agent import router as agent_router
 from app.api.search import router as search_router
 from app.api.action_items import router as action_items_router
 from app.api.auth import router as auth_router
+from app.api.members import router as members_router
 from app.mcp.server import router as mcp_router
 from app.middleware.auth_gate import AuthGateMiddleware
 from app.services.embedding import embedding_service
+from app.database.connection import engine
+from sqlalchemy import text
+
+
+async def _ensure_schema():
+    """
+    Idempotent additive schema patches for columns added after the initial
+    migrations/001_initial_schema.sql was applied - there's no migration
+    runner wired into deploys, so new columns are added here with
+    IF NOT EXISTS guards rather than requiring a manual psql step per deploy.
+    """
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)"))
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE"))
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup and shutdown procedures."""
     print(f"[{settings.APP_NAME}] Application starting up in {settings.APP_ENV} mode...")
+    await _ensure_schema()
     # Load the embedding model now, in a background thread, so the first real
     # search/index request isn't the one paying the multi-second model load
     # cost (and blocking the event loop while it loads).
@@ -47,13 +63,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Shared-passphrase gate (no-op unless SHARED_PASSPHRASE is set)
+# Per-member session gate (see app/middleware/auth_gate.py)
 app.add_middleware(AuthGateMiddleware)
 
 # Routers
 app.include_router(health_router)
 app.include_router(webhooks_router)
 app.include_router(auth_router)
+app.include_router(members_router)
 app.include_router(meetings_router)
 app.include_router(documents_router)
 app.include_router(agent_router)
