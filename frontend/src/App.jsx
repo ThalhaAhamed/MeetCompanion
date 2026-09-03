@@ -41,8 +41,8 @@ export default function App() {
         <div className="brand">
           <span className="brand-mark">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect x="2" y="2" width="13" height="13" rx="4" fill="#fff" />
-              <rect x="9" y="9" width="13" height="13" rx="4" fill="#fff" fillOpacity="0.55" />
+              <path d="M6 2.5h9.5L20 7v13a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 6 20V4a1.5 1.5 0 0 1 0-1.5Z" fill="#fff" />
+              <path d="M15.5 2.5V6a1 1 0 0 0 1 1H20" fill="#f97316" />
             </svg>
           </span>
           <span className="brand-name">MeetStream <span className="brand-sub">Companion</span></span>
@@ -60,11 +60,6 @@ export default function App() {
             </div>
           ))}
         </nav>
-
-        <div className="sidebar-footer">
-          <div className="sidebar-footer-label">Environment</div>
-          <div className="sidebar-footer-value">Local development</div>
-        </div>
       </aside>
 
       <Page />
