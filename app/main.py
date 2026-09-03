@@ -54,6 +54,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Per-member session gate (see app/middleware/auth_gate.py). Registered
+# BEFORE CORSMiddleware so that CORS ends up as the outermost layer -
+# Starlette wraps middleware in reverse registration order, and a 401 this
+# gate returns directly (short-circuiting call_next) never reaches an inner
+# CORSMiddleware to get CORS headers added, which the browser then reports
+# as an opaque "Failed to fetch" / CORS error instead of a real 401.
+app.add_middleware(AuthGateMiddleware)
+
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
@@ -62,9 +70,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Per-member session gate (see app/middleware/auth_gate.py)
-app.add_middleware(AuthGateMiddleware)
 
 # Routers
 app.include_router(health_router)
