@@ -1216,20 +1216,21 @@ body {
 /* Values here are short single tokens (masked keys, URLs) with no natural
    break points - the shared .kv layout's overflow-wrap:anywhere (tuned for
    long UUIDs in the Bot panel) forces them to wrap one character per line
-   when this column gets narrow. Keep them on one line and let them scroll
-   horizontally within the panel instead. */
+   when this column gets narrow. This sidebar column is itself only ~190px
+   wide, too narrow for a fixed-width label + value row, so stack the label
+   above the value instead and let the value scroll horizontally if needed. */
 .credentials-panel .kv-row {
-  flex-direction: row !important;
-  align-items: baseline;
-  gap: 12px;
+  flex-direction: column !important;
+  align-items: stretch;
+  gap: 2px;
 }
 
 .credentials-panel dt {
-  flex: 0 0 150px;
+  flex: none;
 }
 
 .credentials-panel dd {
-  flex: 1;
+  flex: none;
   min-width: 0;
   overflow-wrap: normal;
   white-space: nowrap;
