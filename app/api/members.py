@@ -66,7 +66,15 @@ async def list_members(request: Request, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("")
-async def add_member(body: CreateMemberRequest, db: AsyncSession = Depends(get_db)):
+async def add_member(body: CreateMemberRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    # Open self-signup was live briefly and turned out to be dangerous: every
+    # member currently shares one workspace's worth of meeting data (there's
+    # no per-user data isolation - see the multi-tenancy note in mcp/auth.py),
+    # so anyone who could sign up could read everyone else's meetings. Closed
+    # again until real per-user workspaces exist.
+    if not await _current_user_id(request, db):
+        raise HTTPException(status_code=401, detail="Sign in required to add a member.")
+
     email = body.email.strip().lower()
     if "@" not in email or "." not in email.split("@")[-1]:
         raise HTTPException(status_code=400, detail="Invalid email address.")
