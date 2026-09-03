@@ -28,16 +28,23 @@ async def init_db():
     with open(schema_file, "r", encoding="utf-8") as f:
         schema_sql = f.read()
 
-    async with engine.begin() as conn:
-        print("[SETUP] Executing initial schema migration...")
-        # Execute each statement
-        statements = [stmt.strip() for stmt in schema_sql.split(";") if stmt.strip()]
-        for stmt in statements:
-            try:
+    print("[SETUP] Executing initial schema migration...")
+    statements = [stmt.strip() for stmt in schema_sql.split(";") if stmt.strip()]
+    for stmt in statements:
+        # Each statement gets its own transaction. A single shared transaction
+        # (the previous behavior) meant one "already exists" error on a rerun
+        # (this script runs on every container boot so it's idempotent for
+        # fresh databases) would poison the whole transaction, turning every
+        # statement after the first failure into a cascading
+        # InFailedSqlTransactionError even though nothing was actually wrong
+        # with them.
+        try:
+            async with engine.begin() as conn:
                 await conn.execute(text(stmt))
-            except Exception as e:
-                # Some objects might already exist or need notice handling
-                print(f"[WARN] Statement notice/warning: {e}")
+        except Exception as e:
+            # Genuinely expected on a rerun: tables/indexes/extensions that
+            # already exist from a previous boot.
+            print(f"[WARN] Statement notice/warning: {e}")
 
     await engine.dispose()
     print("[SETUP] Database initialization completed successfully!")
