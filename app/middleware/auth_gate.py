@@ -26,7 +26,7 @@ from app.config import settings
 COOKIE_NAME = "hub_session"
 SESSION_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
 
-EXEMPT_PREFIXES = ("/api/auth/", "/api/members", "/api/webhooks", "/mcp", "/health", "/docs", "/openapi.json", "/redoc")
+EXEMPT_PREFIXES = ("/api/auth/", "/api/members", "/api/agent/chat-relay", "/api/webhooks", "/mcp", "/health", "/docs", "/openapi.json", "/redoc")
 
 
 def _key() -> bytes:

@@ -8,13 +8,13 @@ doesn't require an env var change + redeploy.
 """
 import uuid
 from typing import Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Header
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database.connection import get_db
 from app.database.repositories import OrganizationRepository
-from app.services.meetstream import meetstream_client
+from app.services.meetstream import meetstream_client, _share_in_chat_function
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
@@ -41,11 +41,19 @@ NEVER INVENT INFORMATION: Only state what the tools actually returned. Never gue
 
 BE EFFICIENT: Use the minimum tool calls needed to answer. Don't call the same tool twice for one question. Don't use search_meeting_memory when you already know which specific meeting is being asked about - call get_meeting directly instead. Every extra tool call adds delay before you can respond.
 
-MEETING CHAT: When a tool you call returns data, a plain-text summary of it is also posted to the meeting chat automatically - you don't need to do anything extra for that. If someone explicitly asks you to "put that in chat" or "show that in the chat", still answer them by voice as normal; the chat message appears alongside it. Never read out or speak raw field names, brackets, or JSON-looking syntax - always speak in plain natural sentences.
+MEETING CHAT: You have a tool called share_in_chat that posts text into the meeting's chat panel. Only call it when someone explicitly asks you to "share that in chat", "put that in the chat", "post it to chat", or the same in different words. Never call it on your own initiative, and never call it just because you called another tool - answering by voice is always the default. When you do call it, write a short, clean, natural-language message (plain sentences, no field names, no brackets, no JSON-looking syntax) - not a raw dump of what a tool returned.
 
-Keep spoken responses concise and natural.
+Keep spoken responses concise and natural. Never read out or speak raw field names, brackets, or JSON-looking syntax either - always speak in plain natural sentences.
 
 """
+
+_DEFAULT_FIRST_MESSAGE = (
+    "Hi, I'm {agent_name}, your meeting companion. "
+    "To talk to me, say my name and then your question - like, "
+    "\"{agent_name}, what did we decide last time?\" "
+    "I can tell you who attended a meeting, summarize what was discussed, and track action items. "
+    "I'll stay quiet the rest of the time so I don't interrupt you."
+)
 
 
 def build_agent_system_prompt(agent_name: str, custom_instructions: str = "") -> str:
@@ -120,6 +128,38 @@ async def get_agent_credentials():
     }
 
 
+class ChatRelayRequest(BaseModel):
+    name: Optional[str] = None
+    bot: Optional[Dict[str, Any]] = None
+    args: Optional[Dict[str, Any]] = None
+
+
+@router.post("/chat-relay")
+async def chat_relay(body: ChatRelayRequest, authorization: Optional[str] = Header(default=None)):
+    """
+    Custom-function endpoint registered on the agent (see build_agent_system_prompt
+    / create_mia_agent) as "share_in_chat" - the only way the agent can post text
+    into the meeting chat. Exempted from the browser session gate (MeetStream
+    calls this directly, not a browser) but still requires the same bearer
+    token the MCP endpoints use, so it can't be hit by anyone else.
+    """
+    expected = f"Bearer {settings.MCP_AUTH_TOKEN}"
+    if not settings.MCP_AUTH_TOKEN or authorization != expected:
+        raise HTTPException(status_code=401, detail="Invalid or missing bearer token")
+
+    bot_id = (body.bot or {}).get("bot_id")
+    message = (body.args or {}).get("message")
+    if not bot_id or not message:
+        raise HTTPException(status_code=400, detail="bot.bot_id and args.message are required")
+
+    try:
+        await meetstream_client.send_bot_message(bot_id, message)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"MeetStream API error: {e}")
+
+    return {"status": "sent"}
+
+
 async def get_active_agent_config_id(db: AsyncSession) -> Optional[str]:
     """The agent new bots should launch with: org-settings override if set, else the
     MEETSTREAM_AGENT_CONFIG_ID this app was originally configured with."""
@@ -160,14 +200,14 @@ async def list_agents(db: AsyncSession = Depends(get_db)):
 class AgentCreateRequest(BaseModel):
     agent_name: str
     system_prompt: str = ""
-    first_message: str = "Hello! I am your persistent meeting companion. I remember past discussions, action items, and decisions."
+    first_message: str = ""  # empty -> auto-filled with a name/how-to-use greeting
     provider: str = "openai"
     model: str = "gpt-4.1"
     voice: str = "alloy"
     temperature: float = 0.8
     mode: str = "realtime"
     response_modality: str = "text"
-    tool_results_to_chat: bool = True
+    tool_results_to_chat: bool = False
     activate: bool = True
 
 
@@ -178,11 +218,13 @@ async def create_agent(body: AgentCreateRequest, db: AsyncSession = Depends(get_
     if not settings.MCP_SERVER_URL:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="MCP_SERVER_URL is not configured on this deployment")
 
+    first_message = body.first_message.strip() or _DEFAULT_FIRST_MESSAGE.format(agent_name=body.agent_name)
+
     try:
         result = await meetstream_client.create_mia_agent(
             agent_name=body.agent_name,
             system_prompt=build_agent_system_prompt(body.agent_name, body.system_prompt),
-            first_message=body.first_message,
+            first_message=first_message,
             provider=body.provider,
             model=body.model,
             voice=body.voice,
@@ -228,23 +270,30 @@ async def _ensure_mcp_wired(agent_config_id: str) -> None:
     current_cfg = current.get("agent_config", current)
     current_agent: Dict[str, Any] = dict(current_cfg.get("Agent") or {})
     mcp_servers = list(current_agent.get("mcp_servers") or [])
+    custom_functions = list(current_agent.get("custom_functions") or [])
 
-    already_wired = bool(mcp_servers) and mcp_servers[0].get("active") and mcp_servers[0].get("url") == settings.MCP_SERVER_URL
-    if already_wired:
+    mcp_ok = bool(mcp_servers) and mcp_servers[0].get("active") and mcp_servers[0].get("url") == settings.MCP_SERVER_URL
+    chat_fn_ok = any(f.get("name") == "share_in_chat" for f in custom_functions)
+    if mcp_ok and chat_fn_ok:
         return
 
-    existing_tools = set(mcp_servers[0].get("allowed_tools") or []) if mcp_servers else set()
-    default_tools = {"get_current_datetime", "search_meeting_memory", "get_meeting", "get_previous_meetings", "get_action_items"}
-    server_config = {
-        "name": "MeetStream Companion MCP",
-        "url": settings.MCP_SERVER_URL,
-        "timeout": 30,
-        "active": True,
-        "allowed_tools": sorted(existing_tools | default_tools),
-    }
-    if settings.MCP_AUTH_TOKEN:
-        server_config["headers"] = {"Authorization": f"Bearer {settings.MCP_AUTH_TOKEN}"}
-    current_agent["mcp_servers"] = [server_config]
+    if not mcp_ok:
+        existing_tools = set(mcp_servers[0].get("allowed_tools") or []) if mcp_servers else set()
+        default_tools = {"get_current_datetime", "search_meeting_memory", "get_meeting", "get_previous_meetings", "get_action_items"}
+        server_config = {
+            "name": "MeetStream Companion MCP",
+            "url": settings.MCP_SERVER_URL,
+            "timeout": 30,
+            "active": True,
+            "allowed_tools": sorted(existing_tools | default_tools),
+        }
+        if settings.MCP_AUTH_TOKEN:
+            server_config["headers"] = {"Authorization": f"Bearer {settings.MCP_AUTH_TOKEN}"}
+        current_agent["mcp_servers"] = [server_config]
+
+    if not chat_fn_ok:
+        custom_functions.append(_share_in_chat_function(settings.MCP_SERVER_URL, settings.MCP_AUTH_TOKEN))
+        current_agent["custom_functions"] = custom_functions
 
     try:
         await meetstream_client.update_mia_agent_settings(agent_config_id=agent_config_id, agent=current_agent)

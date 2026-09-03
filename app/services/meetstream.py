@@ -10,6 +10,36 @@ from typing import Optional, Dict, Any, List
 from app.config import settings
 
 
+def _share_in_chat_function(mcp_server_url: str, mcp_auth_token: Optional[str]) -> Dict[str, Any]:
+    """
+    Custom-function definition for the "share_in_chat" tool - the only path
+    the agent has to post into the meeting chat, so it never happens unless
+    the LLM explicitly decides to call it (i.e. only when asked). Points at
+    our own /api/agent/chat-relay endpoint, which relays to MeetStream's
+    send_message API using the actual live bot_id MeetStream supplies.
+    """
+    relay_url = mcp_server_url.replace("/mcp", "/api/agent/chat-relay")
+    func: Dict[str, Any] = {
+        "name": "share_in_chat",
+        "description": "Post a short message into the meeting's chat panel. Only call this when a speaker explicitly asks you to share, post, or put something in the chat - never on your own initiative.",
+        "url": relay_url,
+        "method": "POST",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "The exact plain-text message to post into the meeting chat - natural language, no field names or JSON-like syntax.",
+                }
+            },
+            "required": ["message"],
+        },
+    }
+    if mcp_auth_token:
+        func["headers"] = {"Authorization": f"Bearer {mcp_auth_token}"}
+    return func
+
+
 class MeetStreamClient:
     def __init__(
         self,
@@ -77,6 +107,17 @@ class MeetStreamClient:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
                 f"{self.base_url}/api/v1/bots/{bot_id}",
+                headers=self.headers,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def send_bot_message(self, bot_id: str, message: str) -> Dict[str, Any]:
+        """Post a message into the live meeting chat as the bot."""
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{self.base_url}/api/v1/bots/{bot_id}/send_message",
+                json={"message": message},
                 headers=self.headers,
             )
             resp.raise_for_status()
@@ -167,6 +208,10 @@ class MeetStreamClient:
                 server_config["headers"] = {"Authorization": f"Bearer {mcp_auth_token}"}
             mcp_servers.append(server_config)
 
+        custom_functions = []
+        if mcp_server_url:
+            custom_functions.append(_share_in_chat_function(mcp_server_url, mcp_auth_token))
+
         payload = {
             "agent_name": agent_name,
             "mode": mode,
@@ -180,6 +225,7 @@ class MeetStreamClient:
             },
             "agent": {
                 "mcp_servers": mcp_servers,
+                "custom_functions": custom_functions,
                 "tool_results_to_chat": tool_results_to_chat,
                 "response_modality": response_modality,
             },
