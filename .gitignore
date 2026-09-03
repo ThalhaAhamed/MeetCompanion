@@ -33,8 +33,10 @@ desktop.ini
 # Docker
 pgdata/
 
-# Model cache
-models/
+# Model cache (root-level only - a bare "models/" here also matched app/models/,
+# our actual ORM models and schemas package, silently excluding it from every
+# commit since this repo's first commit)
+/models/
 *.bin
 *.onnx
 
