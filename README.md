@@ -1,12 +1,12 @@
 # MeetStream Companion 🎙️🧠
 
-**[▶ Try it now](https://frontend-production-1102c.up.railway.app)** — create an account (no invite needed) and launch a bot into a real meeting.
+**[▶ Try it now](https://frontend-production-1102c.up.railway.app)** — create your own private workspace (or join one with a code) and launch a bot into a real meeting.
 
 > **Persistent AI Meeting Companion** — deploys a voice agent into your meetings via **MeetStream MIA**, remembers everything across every call using **PostgreSQL + pgvector**, and exposes that memory back to the live agent through **MCP (Model Context Protocol)** — plus a hosted web dashboard the whole team can sign into.
 
 Most meeting bots hand you a transcript and forget everything the moment the call ends. MeetStream Companion is different: it deploys a bot that joins your call, records and transcribes it, runs the transcript through an LLM to extract structured memory (decisions, commitments, action items, concerns), and makes that memory queryable — both by a **live in-meeting AI agent** ("MeetStream Companion, what did we decide about pricing three weeks ago?") and by a **web dashboard** for browsing meetings, searching memory, and managing the agent's configuration.
 
-The backend and frontend are deployed on Railway (not a local-only dev tool), and the dashboard is gated by real per-member accounts rather than being wide open.
+The backend and frontend are deployed on Railway (not a local-only dev tool). It's genuinely multi-tenant: every meeting, memory, and agent belongs to a specific **workspace**, and signing up means creating a brand new empty workspace or joining an existing one by its join code — nobody sees another workspace's data by default.
 
 ---
 
@@ -18,11 +18,12 @@ The backend and frontend are deployed on Railway (not a local-only dev tool), an
 - **On-demand chat sharing** — the agent has a `share_in_chat` tool it only calls when a speaker explicitly asks it to post something to the meeting chat; it never dumps tool output into chat automatically.
 - **Chat-based join greeting** — when the bot joins, it posts an intro to the meeting chat explaining who it is, how to address it, and what it can do (realtime voice models don't reliably self-introduce out loud, so this is deliberately chat-based, not spoken).
 - **Automated memory extraction** — post-call transcripts are analyzed by an LLM (Groq / OpenAI) into categorized memories (decisions, requirements, commitments, concerns, facts, unresolved questions) and tracked action items.
-- **Web dashboard with real accounts** — open self-signup (anyone with the link can create their own account) plus a Members page for adding/removing who can sign in; removing someone revokes their session immediately, not just future logins.
-- **Multi-agent management** — create, switch between, and activate multiple MIA agent configs from the dashboard; activating an agent auto-repairs its MCP/database wiring if it was ever set up outside this app (e.g. directly in MeetStream's dashboard).
-- **Masked credentials panel** — Agent Settings shows which provider credentials are configured (MeetStream API key, memory-extraction LLM, MCP auth token) without ever exposing full secret values.
+- **Real multi-tenant workspaces** — every meeting, memory, document, and agent belongs to one workspace; signup creates a new one or joins an existing one by join code, and each workspace's MCP tool calls are authenticated with their own bearer token so one workspace's agent can never read another's data.
+- **Web dashboard with real accounts** — a Members page for adding/removing who's in your workspace, and for sharing the join code that lets someone else join it; removing someone revokes their session immediately, not just future logins.
+- **Multi-agent management** — create, switch between, and activate multiple MIA agent configs from the dashboard; activating an agent auto-repairs its MCP/database wiring to your workspace if it was ever set up outside this app (e.g. directly in MeetStream's dashboard).
+- **Masked credentials panel** — Agent Settings shows which provider credentials are configured (MeetStream API key, memory-extraction LLM, this workspace's own MCP auth token) without ever exposing full secret values.
 - **Company knowledge RAG** — upload PDFs/docs/notes as a separate knowledge base the agent can also draw on.
-- **Secure multi-tenant architecture** — every table is scoped by `organization_id`; HMAC-signed webhooks with replay protection; secrets are redacted server-side before any MeetStream API response reaches the browser.
+- **Secure by construction** — every table is scoped by `organization_id` and every API route resolves it from your session, not a hardcoded default; HMAC-signed webhooks with replay protection; secrets are redacted server-side before any MeetStream API response reaches the browser.
 
 ---
 
@@ -70,7 +71,7 @@ The backend and frontend are deployed on Railway (not a local-only dev tool), an
                  └───────────────────────────────┘
 ```
 
-The MCP Server handles both the 9 read/write memory tools and the `share_in_chat` chat-relay call (the agent's only path to post into meeting chat, and only on explicit request) — both are called by MeetStream's MIA agent over HTTP, authenticated by the same bearer token. In production, the backend and frontend are separate Railway services with stable public URLs — no tunnel involved. Local development still uses a **Cloudflare Tunnel** to give MeetStream a public URL to reach your dev machine's MCP server and webhooks; see [Local development](#-local-development) below.
+The MCP Server handles both the 9 read/write memory tools and the `share_in_chat` chat-relay call (the agent's only path to post into meeting chat, and only on explicit request) — both are called by MeetStream's MIA agent over HTTP, authenticated by that workspace's own bearer token (not one token shared by every workspace), which is how a tool call gets scoped to the right workspace's data. In production, the backend and frontend are separate Railway services with stable public URLs — no tunnel involved. Local development still uses a **Cloudflare Tunnel** to give MeetStream a public URL to reach your dev machine's MCP server and webhooks; see [Local development](#-local-development) below.
 
 ---
 
@@ -79,10 +80,10 @@ The MCP Server handles both the 9 read/write memory tools and the `share_in_chat
 The dashboard is already deployed — you don't need to run anything locally just to use it.
 
 1. Open the frontend URL.
-2. Use the **Create account** tab to sign yourself up (no invite or passphrase needed), or sign in if you already have one.
+2. Use the **Create account** tab: either **create a new workspace** (you're the only member until you invite others) or **join an existing one** with its join code, or sign in if you already have an account.
 3. From there: launch bots into meetings, browse history, search memory, and manage agents from the dashboard as described below.
 
-Removing a member from the Members page kills their session immediately, so access control is real, not just a UI convenience.
+Every workspace is isolated — you only ever see meetings, memories, and agents that belong to your own workspace. Share your workspace's join code from the **Members** page to invite teammates into it; removing a member from that page kills their session immediately, so access control is real, not just a UI convenience.
 
 ---
 
@@ -101,15 +102,15 @@ Set these on your backend service (see `app/config.py` for the full list):
 | `DATABASE_URL` | Postgres connection string (with pgvector extension available) |
 | `MEETSTREAM_API_KEY` | Your MeetStream account API key |
 | `MEETSTREAM_AGENT_CONFIG_ID` | Fallback MIA agent config id (the dashboard can override which agent is active without this) |
-| `MCP_SERVER_URL` | This backend's own public `/mcp` URL — MeetStream's agent calls back into it |
-| `MCP_AUTH_TOKEN` | Any random string — authenticates MCP tool calls and the `share_in_chat` chat-relay endpoint |
+| `MCP_SERVER_URL` | This backend's own public `/mcp` URL — MeetStream's agents call back into it |
+| `MCP_AUTH_TOKEN` | Any random string — used only as the *first* workspace's MCP token at startup (see below); every workspace after that gets its own, generated automatically |
 | `GROQ_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Whichever `LLM_PROVIDER` you set, for memory extraction |
 | `CORS_ORIGINS` | JSON list including your deployed frontend's origin |
 | `API_KEY_SALT` | Used to sign member session cookies — set this to a real secret in production |
 
 Deploy the backend from the repo root (it builds from the top-level `Dockerfile`) and the frontend from `frontend/` with `VITE_API_BASE_URL` set to the backend's public origin at build time.
 
-Signup is open — the first person to visit a fresh deployment can just use the **Create account** tab, no invite or passphrase needed. If you'd rather seed an account without exposing the app publicly first, `python scripts/create_first_member.py "Your Name" you@example.com yourpassword` creates one directly against the database.
+Signup is open — the first person to visit a fresh deployment just uses the **Create account** tab to create a new workspace (no invite needed), and everyone after that either joins that workspace with its join code or creates their own. Each workspace's MCP token is generated automatically the moment it's created; `MCP_AUTH_TOKEN` only seeds the original default workspace so an existing deployment's already-wired agent doesn't break when this feature is added. If you'd rather seed an account without exposing the app publicly first, `python scripts/create_first_member.py "Your Name" you@example.com yourpassword "Workspace Name"` creates one directly against the database.
 
 ### 3. Local development
 ```bash
@@ -133,7 +134,7 @@ You'll also need a tunnel (e.g. `cloudflared tunnel --url http://localhost:8000`
 2. Click into a meeting to see its **Summary**, **Decisions & Memories**, **Action Items** (editable status), **Transcript**, and live **Bot** status — with a **Stop bot** button while it's still recording.
 3. **Search memory** — semantic + keyword search across every indexed meeting, ranked by match %.
 4. **Agent** — view and edit the live MIA agent's system prompt, voice, model, and response settings; create additional agents and switch which one is active; see masked provider credentials.
-5. **Members** — see who can sign into the hub, add someone directly, or remove someone (revokes their session immediately).
+5. **Members** — see your workspace's join code (for inviting people directly into it), add someone yourself, or remove someone (revokes their session immediately).
 6. Upload company documents (PDF/DOCX/TXT/MD/CSV) from the Day view's Documents panel to add them to the company-knowledge RAG.
 
 ### From a live meeting
@@ -159,7 +160,7 @@ Most `/api/*` routes require an authenticated member session (sign in via `POST 
 
 ## 🛠️ MCP Tools Reference
 
-Exposed at `POST /mcp` (JSON-RPC 2.0) and individually at `POST /mcp/tools/{tool_name}`, authenticated with `Authorization: Bearer <MCP_AUTH_TOKEN>`. Every tool's response is rendered as plain natural-language text, not raw JSON — it's what the agent reads and, on request, what can end up in meeting chat.
+Exposed at `POST /mcp` (JSON-RPC 2.0) and individually at `POST /mcp/tools/{tool_name}`, authenticated with `Authorization: Bearer <token>` — that token is looked up against the `organizations` table to resolve which workspace's data the call can touch, so each workspace's agent needs its own token (shown, masked, in Agent Settings → credentials). Every tool's response is rendered as plain natural-language text, not raw JSON — it's what the agent reads and, on request, what can end up in meeting chat.
 
 **Read tools**
 
@@ -212,7 +213,8 @@ python scripts/test_memory_pipeline.py
 ```
 app/
   api/          REST endpoints (meetings, documents, agent, members, auth, search, action items, webhooks, health)
-  mcp/          MCP server (JSON-RPC + REST tool endpoints) and tool implementations
+  api/deps.py   Shared dependency that resolves the signed-in member's own workspace (org_id) from the session
+  mcp/          MCP server (JSON-RPC + REST tool endpoints), tool implementations, and per-workspace token auth
   middleware/   Per-member session gate (auth_gate.py)
   services/     MeetStream API client, LLM memory extraction, embedding service, ingestion pipeline
   rag/          Hybrid vector+keyword search (meeting memory) and company knowledge RAG
