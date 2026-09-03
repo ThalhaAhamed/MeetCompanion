@@ -1,6 +1,6 @@
 # MeetStream Companion 🎙️🧠
 
-**[▶ Try it now](https://frontend-production-1102c.up.railway.app)** — sign in, or create an account with the shared passphrase, and launch a bot into a real meeting.
+**[▶ Try it now](https://frontend-production-1102c.up.railway.app)** — sign in with an existing account, or ask a member to add you from the Members page.
 
 > **Persistent AI Meeting Companion** — deploys a voice agent into your meetings via **MeetStream MIA**, remembers everything across every call using **PostgreSQL + pgvector**, and exposes that memory back to the live agent through **MCP (Model Context Protocol)** — plus a hosted web dashboard the whole team can sign into.
 
@@ -18,7 +18,7 @@ The backend and frontend are deployed on Railway (not a local-only dev tool), an
 - **On-demand chat sharing** — the agent has a `share_in_chat` tool it only calls when a speaker explicitly asks it to post something to the meeting chat; it never dumps tool output into chat automatically.
 - **Chat-based join greeting** — when the bot joins, it posts an intro to the meeting chat explaining who it is, how to address it, and what it can do (realtime voice models don't reliably self-introduce out loud, so this is deliberately chat-based, not spoken).
 - **Automated memory extraction** — post-call transcripts are analyzed by an LLM (Groq / OpenAI) into categorized memories (decisions, requirements, commitments, concerns, facts, unresolved questions) and tracked action items.
-- **Web dashboard with real accounts** — a Members page for adding/removing who can sign in (self-signup with a shared passphrase, or added directly by an existing member); removing someone revokes their session immediately, not just future logins.
+- **Web dashboard with real accounts** — a Members page for adding/removing who can sign in; no self-serve signup, an existing member has to add you; removing someone revokes their session immediately, not just future logins.
 - **Multi-agent management** — create, switch between, and activate multiple MIA agent configs from the dashboard; activating an agent auto-repairs its MCP/database wiring if it was ever set up outside this app (e.g. directly in MeetStream's dashboard).
 - **Masked credentials panel** — Agent Settings shows which provider credentials are configured (MeetStream API key, memory-extraction LLM, MCP auth token) without ever exposing full secret values.
 - **Company knowledge RAG** — upload PDFs/docs/notes as a separate knowledge base the agent can also draw on.
@@ -79,9 +79,8 @@ The MCP Server handles both the 9 read/write memory tools and the `share_in_chat
 The dashboard is already deployed — you don't need to run anything locally just to use it.
 
 1. Open the frontend URL (ask whoever set up your organization's deployment for the link).
-2. **First time / no members yet**: use the "Create account" tab and the shared passphrase to make the first account.
-3. **Already have members**: sign in, or have an existing member add you from the **Members** page — no passphrase needed once you're added directly.
-4. From there: launch bots into meetings, browse history, search memory, and manage agents from the dashboard as described below.
+2. Sign in with an account an existing member has already created for you, or have a member add you from the **Members** page — there's no self-serve signup.
+3. From there: launch bots into meetings, browse history, search memory, and manage agents from the dashboard as described below.
 
 Removing a member from the Members page kills their session immediately, so access control is real, not just a UI convenience.
 
@@ -105,11 +104,16 @@ Set these on your backend service (see `app/config.py` for the full list):
 | `MCP_SERVER_URL` | This backend's own public `/mcp` URL — MeetStream's agent calls back into it |
 | `MCP_AUTH_TOKEN` | Any random string — authenticates MCP tool calls and the `share_in_chat` chat-relay endpoint |
 | `GROQ_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Whichever `LLM_PROVIDER` you set, for memory extraction |
-| `SHARED_PASSPHRASE` | The passphrase used for self-signup / bootstrapping the first member |
 | `CORS_ORIGINS` | JSON list including your deployed frontend's origin |
 | `API_KEY_SALT` | Used to sign member session cookies — set this to a real secret in production |
 
 Deploy the backend from the repo root (it builds from the top-level `Dockerfile`) and the frontend from `frontend/` with `VITE_API_BASE_URL` set to the backend's public origin at build time.
+
+There's no self-serve signup or shared passphrase — a brand-new deployment has zero members and no way to create one through the UI, so bootstrap the very first account directly against the database once:
+```bash
+python scripts/create_first_member.py "Your Name" you@example.com yourpassword
+```
+Every member after that is added from the **Members** page by someone already signed in.
 
 ### 3. Local development
 ```bash
@@ -122,9 +126,7 @@ cd frontend
 npm install
 npm run dev
 ```
-You'll also need a tunnel (e.g. `cloudflared tunnel --url http://localhost:8000`) so MeetStream can reach your local `/mcp` endpoint and deliver webhooks — set `MCP_SERVER_URL` to that tunnel's `/mcp` URL and push it to your agent config via `PUT /api/agent`. On Windows, `.\start.ps1` automates all of the above (Docker, backend, a fresh tunnel, re-pointing the agent, and the frontend dev server); `.\stop.ps1` tears it down.
-
-Note: with `SHARED_PASSPHRASE` unset locally, the member-account gate still applies (there's no "open" mode) — set it in your local `.env` too so you can bootstrap the first account.
+You'll also need a tunnel (e.g. `cloudflared tunnel --url http://localhost:8000`) so MeetStream can reach your local `/mcp` endpoint and deliver webhooks — set `MCP_SERVER_URL` to that tunnel's `/mcp` URL and push it to your agent config via `PUT /api/agent`. On Windows, `.\start.ps1` automates all of the above (Docker, backend, a fresh tunnel, re-pointing the agent, and the frontend dev server); `.\stop.ps1` tears it down. Run `python scripts/create_first_member.py` once locally too, same as above.
 
 ---
 
@@ -135,7 +137,7 @@ Note: with `SHARED_PASSPHRASE` unset locally, the member-account gate still appl
 2. Click into a meeting to see its **Summary**, **Decisions & Memories**, **Action Items** (editable status), **Transcript**, and live **Bot** status — with a **Stop bot** button while it's still recording.
 3. **Search memory** — semantic + keyword search across every indexed meeting, ranked by match %.
 4. **Agent** — view and edit the live MIA agent's system prompt, voice, model, and response settings; create additional agents and switch which one is active; see masked provider credentials.
-5. **Members** — see who can sign into the hub, add someone directly (no passphrase needed once you're already signed in), or remove someone (revokes their session immediately).
+5. **Members** — see who can sign into the hub, add someone directly, or remove someone (revokes their session immediately).
 6. Upload company documents (PDF/DOCX/TXT/MD/CSV) from the Day view's Documents panel to add them to the company-knowledge RAG.
 
 ### From a live meeting
