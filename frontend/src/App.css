@@ -86,8 +86,7 @@ body {
   width: 34px;
   height: 34px;
   border-radius: 10px;
-  background: linear-gradient(145deg, var(--accent-2), #ea580c);
-  box-shadow: 0 4px 14px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.25);
+  box-shadow: 0 4px 14px var(--accent-glow);
   display: flex;
   align-items: center;
   justify-content: center;

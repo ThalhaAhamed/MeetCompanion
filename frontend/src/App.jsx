@@ -40,9 +40,10 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M6 2.5h9.5L20 7v13a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 6 20V4a1.5 1.5 0 0 1 0-1.5Z" fill="#fff" />
-              <path d="M15.5 2.5V6a1 1 0 0 0 1 1H20" fill="#f97316" />
+            <svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 32 32">
+              <rect x="0.478505" y="0.478505" width="31.043" height="31.043" rx="5.5215" fill="#FD6316" />
+              <path d="M7.1756 26.1754C6.42952 26.1754 5.82471 25.5705 5.82471 24.8245V16.2688C5.82471 15.5227 6.42952 14.9179 7.1756 14.9179H15.7313C16.4774 14.9179 17.0822 15.5227 17.0822 16.2688V24.8245C17.0822 25.5705 16.4774 26.1754 15.7313 26.1754H7.1756Z" fill="white" />
+              <path d="M18.7118 14.8007C17.834 14.9138 17.0864 14.1662 17.1994 13.2883L18.0847 6.41461C18.1564 5.8583 18.8357 5.62666 19.2323 6.02328L25.9769 12.7679C26.3735 13.1645 26.1418 13.8438 25.5855 13.9154L18.7118 14.8007Z" fill="white" />
             </svg>
           </span>
           <span className="brand-name">MeetStream <span className="brand-sub">Companion</span></span>
