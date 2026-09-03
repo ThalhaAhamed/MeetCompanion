@@ -48,7 +48,10 @@ async def login(body: LoginRequest, response: Response, db: AsyncSession = Depen
 
 @router.post("/logout")
 async def logout(response: Response):
-    response.delete_cookie(COOKIE_NAME)
+    # delete_cookie must be told the same SameSite/Secure attributes the
+    # cookie was set with, or the browser treats it as a different cookie
+    # and silently ignores the deletion.
+    response.delete_cookie(COOKIE_NAME, samesite="none", secure=True)
     return {"authenticated": False}
 
 
