@@ -1250,9 +1250,41 @@ body {
   box-shadow: var(--shadow);
 }
 
+.gate-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .gate-title {
   font-size: 18px;
   font-weight: 700;
+}
+
+.gate-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+}
+
+.gate-tabs button {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.gate-tabs button.active {
+  background: var(--accent);
+  color: #fff;
 }
 
 .gate-subtitle {

@@ -78,15 +78,13 @@ async def list_members(request: Request, db: AsyncSession = Depends(get_db)):
 
 @router.post("")
 async def add_member(body: CreateMemberRequest, request: Request, db: AsyncSession = Depends(get_db)):
-    count_result = await db.execute(select(func.count()).select_from(User).where(User.is_active.is_(True)))
-    member_count = count_result.scalar_one()
-
-    if member_count == 0:
-        if not settings.SHARED_PASSPHRASE or not body.passphrase or not hmac.compare_digest(body.passphrase, settings.SHARED_PASSPHRASE):
-            raise HTTPException(status_code=401, detail="First member requires the shared passphrase.")
-    else:
-        if not await _current_user_id(request, db):
-            raise HTTPException(status_code=401, detail="Sign in required.")
+    # Two ways to be authorized to create a member: already signed in as an
+    # existing member (adding a teammate from the Members page), or knowing
+    # the shared passphrase (self-service signup - anyone with the passphrase
+    # can create their own account without an existing member adding them).
+    has_passphrase = bool(settings.SHARED_PASSPHRASE) and bool(body.passphrase) and hmac.compare_digest(body.passphrase, settings.SHARED_PASSPHRASE)
+    if not has_passphrase and not await _current_user_id(request, db):
+        raise HTTPException(status_code=401, detail="Sign in, or provide the shared passphrase, to create an account.")
 
     email = body.email.strip().lower()
     if "@" not in email or "." not in email.split("@")[-1]:
