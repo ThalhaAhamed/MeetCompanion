@@ -54,6 +54,7 @@ class Settings(BaseSettings):
 
     # ---- Security ----
     API_KEY_SALT: str = "meetstream_companion_secure_salt_2026"
+    SHARED_PASSPHRASE: Optional[str] = None
 
 
 settings = Settings()

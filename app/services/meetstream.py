@@ -156,6 +156,7 @@ class MeetStreamClient:
                 "timeout": 30,
                 "active": True,
                 "allowed_tools": [
+                    "get_current_datetime",
                     "search_meeting_memory",
                     "get_meeting",
                     "get_previous_meetings",
@@ -240,6 +241,7 @@ class MeetStreamClient:
             server_config: Dict[str, Any] = {
                 "url": mcp_server_url,
                 "allowed_tools": allowed_tools or [
+                    "get_current_datetime",
                     "search_meeting_memory",
                     "get_meeting",
                     "get_previous_meetings",

@@ -1229,6 +1229,68 @@ body {
   flex: none;
 }
 
+.gate-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.gate-card {
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px 24px;
+  box-shadow: var(--shadow);
+}
+
+.gate-title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.gate-subtitle {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-top: -8px;
+}
+
+.gate-card input {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.gate-card button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gate-card button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.gate-error {
+  color: #f87171;
+  font-size: 13px;
+}
+
 .credentials-panel dd {
   flex: none;
   min-width: 0;

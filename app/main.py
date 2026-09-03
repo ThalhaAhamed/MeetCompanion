@@ -12,7 +12,9 @@ from app.api.documents import router as documents_router
 from app.api.agent import router as agent_router
 from app.api.search import router as search_router
 from app.api.action_items import router as action_items_router
+from app.api.auth import router as auth_router
 from app.mcp.server import router as mcp_router
+from app.middleware.auth_gate import AuthGateMiddleware
 from app.services.embedding import embedding_service
 
 
@@ -45,9 +47,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Shared-passphrase gate (no-op unless SHARED_PASSPHRASE is set)
+app.add_middleware(AuthGateMiddleware)
+
 # Routers
 app.include_router(health_router)
 app.include_router(webhooks_router)
+app.include_router(auth_router)
 app.include_router(meetings_router)
 app.include_router(documents_router)
 app.include_router(agent_router)

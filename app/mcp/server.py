@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional
 from fastapi import APIRouter, Request, Depends, HTTPException, status
 from fastapi.responses import JSONResponse, Response
 from app.mcp.auth import verify_mcp_token
-from app.mcp.tools import MCP_TOOL_DEFINITIONS, execute_tool
+from app.mcp.tools import MCP_TOOL_DEFINITIONS, execute_tool, format_tool_output_text
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
 
@@ -79,7 +79,7 @@ async def handle_mcp_jsonrpc(
                     "content": [
                         {
                             "type": "text",
-                            "text": json.dumps(tool_output, indent=2)
+                            "text": format_tool_output_text(tool_name, tool_output)
                         }
                     ],
                     "isError": "error" in tool_output

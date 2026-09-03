@@ -243,6 +243,99 @@ MCP_TOOL_DEFINITIONS = [
 ]
 
 
+def format_tool_output_text(tool_name: str, output: Dict[str, Any]) -> str:
+    """
+    Render a tool's result as plain, human-readable text instead of raw JSON.
+
+    This is what gets sent back over MCP as the tool's "text" content - which
+    is both what the LLM reads AND, when the agent's tool_results_to_chat
+    setting is on, what MeetStream posts into the meeting chat verbatim. A
+    pretty-printed JSON blob there reads as source code to meeting
+    participants, so every tool gets a natural-language rendering here rather
+    than falling back to json.dumps.
+    """
+    if "error" in output:
+        return f"Could not find that: {output['error']}"
+
+    if tool_name == "get_current_datetime":
+        return f"Today is {output['day_of_week']}, {output['current_date']} (UTC)."
+
+    if tool_name == "get_meeting":
+        lines = [f"Meeting: {output.get('title') or 'Untitled'}"]
+        if output.get("started_at"):
+            lines.append(f"When: {output['started_at']}")
+        if output.get("customer_name"):
+            lines.append(f"Customer: {output['customer_name']}")
+        if output.get("project_name"):
+            lines.append(f"Project: {output['project_name']}")
+        participants = output.get("participants") or []
+        lines.append(
+            "Attendees: " + (", ".join(participants) if participants else "not recorded for this meeting")
+        )
+        if output.get("summary"):
+            lines.append(f"Summary: {output['summary']}")
+        memories = output.get("memories") or []
+        if memories:
+            lines.append("Key points:")
+            for m in memories:
+                speaker = f" ({m['speaker']})" if m.get("speaker") else ""
+                lines.append(f"- [{m.get('type', 'note')}]{speaker} {m.get('content', '')}")
+        action_items = output.get("action_items") or []
+        if action_items:
+            lines.append("Action items:")
+            for a in action_items:
+                owner = f" - owner: {a['owner']}" if a.get("owner") else ""
+                due = f", due {a['due_date']}" if a.get("due_date") else ""
+                lines.append(f"- {a.get('task', '')} [{a.get('status', 'open')}]{owner}{due}")
+        return "\n".join(lines)
+
+    if tool_name == "get_previous_meetings":
+        meetings = output.get("meetings") or []
+        if not meetings:
+            return f"No meetings found (total matching: {output.get('total_count', 0)})."
+        lines = [f"Found {output.get('total_count', len(meetings))} meeting(s), showing {len(meetings)}:"]
+        for m in meetings:
+            when = f" - {m['started_at']}" if m.get("started_at") else ""
+            lines.append(f"- {m.get('title') or 'Untitled'}{when} [{m.get('status', 'unknown')}] (id: {m.get('id')})")
+        return "\n".join(lines)
+
+    if tool_name == "get_action_items":
+        items = output.get("action_items") or []
+        if not items:
+            return "No matching action items found."
+        lines = [f"{len(items)} action item(s):"]
+        for a in items:
+            owner = f" - owner: {a['owner']}" if a.get("owner") else ""
+            due = f", due {a['due_date']}" if a.get("due_date") else ""
+            lines.append(f"- {a.get('task', '')} [{a.get('status', 'open')}]{owner}{due}")
+        return "\n".join(lines)
+
+    if tool_name == "search_meeting_memory":
+        results = output.get("results") or []
+        if not results:
+            return f"No results found for '{output.get('query', '')}'."
+        lines = [f"{len(results)} result(s) for '{output.get('query', '')}':"]
+        for r in results:
+            speaker = f" ({r['speaker']})" if r.get("speaker") else ""
+            meeting = f" [{r['meeting_title']}]" if r.get("meeting_title") else ""
+            lines.append(f"- {r.get('content', '')}{speaker}{meeting}")
+        return "\n".join(lines)
+
+    if tool_name in ("add_meeting_memory", "add_meeting_note"):
+        return f"Noted: {output.get('content', '')}"
+
+    if tool_name == "create_action_item":
+        owner = f" for {output['owner']}" if output.get("owner") else ""
+        return f"Created action item{owner}: {output.get('task', '')}"
+
+    if tool_name == "update_action_item":
+        return f"Updated action item '{output.get('task', '')}' - now {output.get('status', 'unknown')}."
+
+    # Fallback for any tool not explicitly formatted above.
+    import json
+    return json.dumps(output, indent=2)
+
+
 async def execute_tool(
     org_id: uuid.UUID,
     tool_name: str,

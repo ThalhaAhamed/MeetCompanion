@@ -4,12 +4,32 @@
 const BASE = `${import.meta.env.VITE_API_BASE_URL || ''}/api`
 
 async function req(path, options) {
-  const res = await fetch(`${BASE}${path}`, options)
+  const res = await fetch(`${BASE}${path}`, { credentials: 'include', ...options })
+  if (res.status === 401) {
+    window.dispatchEvent(new Event('hub:unauthorized'))
+    throw new Error('401 Unauthorized: passphrase required')
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     throw new Error(`${res.status} ${res.statusText}: ${body}`)
   }
   return res.json()
+}
+
+export function checkAuth() {
+  return req('/auth/check')
+}
+
+export function login(passphrase) {
+  return req('/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ passphrase }),
+  })
+}
+
+export function logout() {
+  return req('/auth/logout', { method: 'POST' })
 }
 
 export function listMeetings(day) {

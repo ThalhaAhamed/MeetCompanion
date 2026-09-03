@@ -2,6 +2,7 @@ import { useState } from 'react'
 import DayView from './DayView'
 import AgentSettings from './AgentSettings'
 import MemorySearch from './MemorySearch'
+import PassphraseGate from './PassphraseGate'
 import './App.css'
 
 const ICONS = {
@@ -36,6 +37,7 @@ export default function App() {
   const Page = PAGES[page].Component
 
   return (
+    <PassphraseGate>
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
@@ -65,5 +67,6 @@ export default function App() {
 
       <Page />
     </div>
+    </PassphraseGate>
   )
 }

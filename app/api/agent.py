@@ -41,6 +41,8 @@ NEVER INVENT INFORMATION: Only state what the tools actually returned. Never gue
 
 BE EFFICIENT: Use the minimum tool calls needed to answer. Don't call the same tool twice for one question. Don't use search_meeting_memory when you already know which specific meeting is being asked about - call get_meeting directly instead. Every extra tool call adds delay before you can respond.
 
+MEETING CHAT: When a tool you call returns data, a plain-text summary of it is also posted to the meeting chat automatically - you don't need to do anything extra for that. If someone explicitly asks you to "put that in chat" or "show that in the chat", still answer them by voice as normal; the chat message appears alongside it. Never read out or speak raw field names, brackets, or JSON-looking syntax - always speak in plain natural sentences.
+
 Keep spoken responses concise and natural.
 
 """
@@ -275,7 +277,7 @@ async def update_current_agent(body: AgentUpdateRequest, db: AsyncSession = Depe
             mcp_servers[0] = {**mcp_servers[0], "url": body.mcp_server_url}
         else:
             mcp_servers = [{"url": body.mcp_server_url, "timeout": 10, "allowed_tools": [
-                "search_meeting_memory", "get_meeting", "get_previous_meetings", "get_action_items"
+                "get_current_datetime", "search_meeting_memory", "get_meeting", "get_previous_meetings", "get_action_items"
             ]}]
         current_agent["mcp_servers"] = mcp_servers
 
