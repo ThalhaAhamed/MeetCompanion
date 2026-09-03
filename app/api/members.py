@@ -1,9 +1,9 @@
 """
 Member roster: add/remove the people who can sign into the hub.
 
-There's no self-serve signup - every request here (list, add, remove)
-requires an active member session. New members are added by an
-already-logged-in member from the Members page.
+Signup is open by design - POST /api/members (create an account) needs no
+session and no passphrase, so anyone with the link can create their own
+account. Listing, removing, and self-updates still require being signed in.
 """
 import uuid
 from fastapi import APIRouter, HTTPException, Request, Depends
@@ -66,10 +66,7 @@ async def list_members(request: Request, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("")
-async def add_member(body: CreateMemberRequest, request: Request, db: AsyncSession = Depends(get_db)):
-    if not await _current_user_id(request, db):
-        raise HTTPException(status_code=401, detail="Sign in required.")
-
+async def add_member(body: CreateMemberRequest, db: AsyncSession = Depends(get_db)):
     email = body.email.strip().lower()
     if "@" not in email or "." not in email.split("@")[-1]:
         raise HTTPException(status_code=400, detail="Invalid email address.")
