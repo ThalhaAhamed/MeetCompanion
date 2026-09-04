@@ -18,7 +18,16 @@ export default function LaunchBot({ onLaunched }) {
     setSuccess(null)
     try {
       const meeting = await createMeeting({ meeting_url: url.trim(), title: title.trim() })
-      setSuccess(meeting)
+      // createMeeting always returns 201 even when the bot itself failed to
+      // deploy (e.g. no personal MeetStream key set) - the meeting record
+      // still gets created so it's visible, with the real failure reason in
+      // processing_error instead of an HTTP error. Surface that instead of
+      // claiming success.
+      if (meeting.processing_error) {
+        setError(meeting.processing_error)
+      } else {
+        setSuccess(meeting)
+      }
       setUrl('')
       setTitle('')
       onLaunched?.(meeting)

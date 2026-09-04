@@ -12,6 +12,7 @@ export default function MeetingDetail({ meetingId }) {
   const [bot, setBot] = useState(null)
   const [botError, setBotError] = useState(null)
   const [botLoading, setBotLoading] = useState(false)
+  const [botFetched, setBotFetched] = useState(false)
   const [actionItems, setActionItems] = useState([])
 
   useEffect(() => {
@@ -21,6 +22,7 @@ export default function MeetingDetail({ meetingId }) {
     setTab('summary')
     setBot(null)
     setBotError(null)
+    setBotFetched(false)
     setActionItems([])
     Promise.all([getMeeting(meetingId), getTranscript(meetingId)])
       .then(([m, t]) => {
@@ -39,14 +41,20 @@ export default function MeetingDetail({ meetingId }) {
   }
 
   useEffect(() => {
-    if (tab !== 'bot' || bot || botLoading) return
+    // botFetched (not `bot`) gates this - `bot` stays null on a failed
+    // fetch, and gating on it re-triggered the same failing request forever
+    // instead of settling on the error.
+    if (tab !== 'bot' || botFetched) return
     setBotLoading(true)
     setBotError(null)
     getMeetingBot(meetingId)
       .then(setBot)
       .catch((e) => setBotError(e.message))
-      .finally(() => setBotLoading(false))
-  }, [tab, meetingId, bot, botLoading])
+      .finally(() => {
+        setBotLoading(false)
+        setBotFetched(true)
+      })
+  }, [tab, meetingId, botFetched])
 
   const contextKeywords = useMemo(() => {
     if (!meeting) return []
