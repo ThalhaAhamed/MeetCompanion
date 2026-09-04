@@ -4,7 +4,7 @@ import AgentSettings from './AgentSettings'
 import MemorySearch from './MemorySearch'
 import Members from './Members'
 import AuthGate from './AuthGate'
-import { checkAuth, logout } from './api'
+import { checkAuth, logout, getAgentCredentials, setMeetstreamApiKey, clearMeetstreamApiKey } from './api'
 import './App.css'
 
 const ICONS = {
@@ -91,6 +91,7 @@ export default function App() {
               <div className="sidebar-user-name">{me.name || me.email}</div>
               <div className="sidebar-user-email">{me.email}</div>
             </div>
+            <ApiKeyControl />
             <button className="sidebar-signout" onClick={handleSignOut}>Sign out</button>
           </div>
         )}
@@ -99,5 +100,89 @@ export default function App() {
       <Page />
     </div>
     </AuthGate>
+  )
+}
+
+function ApiKeyControl() {
+  const [credentials, setCredentials] = useState(null)
+  const [error, setError] = useState(null)
+  const [editing, setEditing] = useState(false)
+  const [input, setInput] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  function load() {
+    getAgentCredentials().catch((e) => setError(e.message)).then((d) => d && setCredentials(d))
+  }
+
+  useEffect(load, [])
+
+  async function save(e) {
+    e.preventDefault()
+    if (!input.trim()) return
+    setSaving(true)
+    setError(null)
+    try {
+      await setMeetstreamApiKey(input.trim())
+      setInput('')
+      setEditing(false)
+      load()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function remove() {
+    setSaving(true)
+    setError(null)
+    try {
+      await clearMeetstreamApiKey()
+      load()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const key = credentials?.meetstream_api_key
+
+  return (
+    <div className="sidebar-api-key">
+      <div className="sidebar-api-key-head">
+        <span>MeetStream API key</span>
+        {key && !editing && (
+          <button className="link-btn" onClick={() => setEditing(true)}>
+            {key.is_personal ? 'Change' : 'Add your own'}
+          </button>
+        )}
+      </div>
+      {!editing && key && (
+        <div className="sidebar-api-key-value">
+          {key.configured ? key.masked_value : 'Not configured'}
+          <span className="tag">{key.is_personal ? 'your key' : 'shared default'}</span>
+        </div>
+      )}
+      {editing && (
+        <form className="sidebar-api-key-form" onSubmit={save}>
+          <input
+            type="password"
+            autoFocus
+            placeholder="Paste your MeetStream API key"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+          />
+          <div className="sidebar-api-key-actions">
+            <button type="submit" disabled={saving || !input.trim()}>{saving ? 'Saving…' : 'Save'}</button>
+            <button type="button" onClick={() => { setEditing(false); setInput('') }} disabled={saving}>Cancel</button>
+            {key?.is_personal && (
+              <button type="button" onClick={remove} disabled={saving}>Remove</button>
+            )}
+          </div>
+        </form>
+      )}
+      {error && <div className="error">{error}</div>}
+    </div>
   )
 }
