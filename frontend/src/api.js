@@ -52,6 +52,14 @@ export function removeMember(id) {
   return req(`/members/${id}`, { method: 'DELETE' })
 }
 
+export function resetMemberPassword(id, new_password) {
+  return req(`/members/${id}/reset-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ new_password }),
+  })
+}
+
 export function updateSelf(patch) {
   return req('/members/me', {
     method: 'PATCH',

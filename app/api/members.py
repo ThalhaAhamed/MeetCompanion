@@ -161,6 +161,42 @@ async def update_self(body: UpdateSelfRequest, user: User = Depends(get_current_
     return MemberOut(id=str(user.id), name=user.name, email=user.email)
 
 
+class ResetPasswordRequest(BaseModel):
+    new_password: str
+
+
+@router.post("/{member_id}/reset-password")
+async def reset_member_password(
+    member_id: str,
+    body: ResetPasswordRequest,
+    org_id: uuid.UUID = Depends(get_current_org_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    "Forgot password" without an email service: any signed-in member can set
+    a new password for a teammate in the same workspace. Not self-service,
+    but works today with no email-sending integration to wire up.
+    """
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+
+    try:
+        target_id = uuid.UUID(member_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid member id")
+
+    result = await db.execute(
+        select(User).where(User.id == target_id, User.organization_id == org_id, User.is_active.is_(True))
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Member not found.")
+
+    user.password_hash = pwd_context.hash(body.new_password)
+    await db.commit()
+    return {"reset": True}
+
+
 @router.delete("/{member_id}")
 async def remove_member(member_id: str, org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
     try:

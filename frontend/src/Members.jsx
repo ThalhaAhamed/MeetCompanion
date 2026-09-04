@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { listMembers, addMember, removeMember, checkAuth, getWorkspace } from './api'
+import { listMembers, addMember, removeMember, resetMemberPassword, checkAuth, getWorkspace } from './api'
 import EmptyState from './EmptyState'
 import { InboxIcon } from './icons'
 
@@ -17,6 +17,12 @@ export default function Members() {
   const [busy, setBusy] = useState(false)
   const [formError, setFormError] = useState(null)
   const [removingId, setRemovingId] = useState(null)
+
+  const [resetTargetId, setResetTargetId] = useState(null)
+  const [resetPassword, setResetPassword] = useState('')
+  const [resetBusy, setResetBusy] = useState(false)
+  const [resetError, setResetError] = useState(null)
+  const [resetDoneId, setResetDoneId] = useState(null)
 
   function load() {
     setLoading(true)
@@ -60,6 +66,29 @@ export default function Members() {
       setError(e.message)
     } finally {
       setRemovingId(null)
+    }
+  }
+
+  function openReset(id) {
+    setResetTargetId(id)
+    setResetPassword('')
+    setResetError(null)
+    setResetDoneId(null)
+  }
+
+  async function submitReset(e) {
+    e.preventDefault()
+    setResetBusy(true)
+    setResetError(null)
+    try {
+      await resetMemberPassword(resetTargetId, resetPassword)
+      setResetDoneId(resetTargetId)
+      setResetTargetId(null)
+      setResetPassword('')
+    } catch (e) {
+      setResetError('Could not reset password.')
+    } finally {
+      setResetBusy(false)
     }
   }
 
@@ -116,6 +145,9 @@ export default function Members() {
             <div className="list-item-title">{m.name || m.email}{self?.id === m.id ? ' (you)' : ''}</div>
             <div className="list-item-meta">
               <span className="tag">{m.email}</span>
+              <button className="upload-btn" onClick={() => openReset(m.id)}>
+                Reset password
+              </button>
               {members.length > 1 && (
                 <button
                   className="upload-btn"
@@ -126,6 +158,24 @@ export default function Members() {
                 </button>
               )}
             </div>
+            {resetDoneId === m.id && <div className="launch-success" style={{ marginTop: 6 }}>Password reset.</div>}
+            {resetTargetId === m.id && (
+              <form className="agent-form-actions" onSubmit={submitReset} style={{ marginTop: 10, gap: 8 }}>
+                <input
+                  type="password"
+                  autoFocus
+                  placeholder="New password (8+ characters)"
+                  value={resetPassword}
+                  onChange={(e) => setResetPassword(e.target.value)}
+                  style={{ flex: 1, minWidth: 0 }}
+                />
+                <button type="submit" disabled={resetBusy || resetPassword.length < 8}>
+                  {resetBusy ? 'Saving…' : 'Save'}
+                </button>
+                <button type="button" className="upload-btn" onClick={() => setResetTargetId(null)}>Cancel</button>
+              </form>
+            )}
+            {resetTargetId === m.id && resetError && <div className="launch-error">{resetError}</div>}
           </li>
         ))}
       </ul>

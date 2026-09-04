@@ -95,6 +95,7 @@ export default function AuthGate({ children }) {
                 {busy ? 'Signing in…' : 'Sign in'}
               </button>
               {error && <div className="gate-error">{error}</div>}
+              <div className="gate-subtitle" style={{ marginTop: -4 }}>Forgot your password? Ask any teammate to reset it for you from the Members page.</div>
             </form>
           ) : (
             <form onSubmit={submitSignup}>
