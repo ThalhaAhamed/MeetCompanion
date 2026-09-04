@@ -55,7 +55,11 @@ class MeetingProcessingPipeline:
                 # 2. Retrieve transcript data
                 raw_segments = transcript_segments_input
                 if not raw_segments and transcript_id:
-                    t_resp = await self.meetstream_client.get_transcript(transcript_id)
+                    bot_key = None
+                    if meeting.created_by_user_id:
+                        from app.api.agent import get_meetstream_api_key
+                        bot_key = await get_meetstream_api_key(db, meeting.created_by_user_id)
+                    t_resp = await self.meetstream_client.get_transcript(transcript_id, api_key=bot_key)
                     if isinstance(t_resp, list):
                         # Actual MeetStream get_transcript response: each list item is one
                         # participant's speech for the call, with a "participant" object

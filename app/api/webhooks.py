@@ -200,7 +200,9 @@ async def process_webhook_event_async(
                 transcript_id = meeting.meetstream_transcript_id if meeting else None
                 if meeting and not transcript_id:
                     try:
-                        bot_resp = await meetstream_client.get_bot(bot_id)
+                        from app.api.agent import get_meetstream_api_key
+                        bot_key = await get_meetstream_api_key(db, meeting.created_by_user_id) if meeting.created_by_user_id else None
+                        bot_resp = await meetstream_client.get_bot(bot_id, api_key=bot_key)
                         # get_bot's response nests everything under "bot_details",
                         # including transcript_id - it is not a top-level field.
                         transcript_id = bot_resp.get("bot_details", {}).get("transcript_id")
