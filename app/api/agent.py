@@ -345,6 +345,12 @@ async def list_agents(user: User = Depends(get_current_user), db: AsyncSession =
 class AgentCreateRequest(BaseModel):
     agent_name: str
     system_prompt: str = ""
+    # True (default): system_prompt is treated as extra instructions layered
+    # on top of the built-in policy (name-gated activation, date reasoning,
+    # no-hallucination, etc - see build_agent_system_prompt). False: the
+    # member has opted out of the wrapper and system_prompt is used verbatim
+    # as the entire prompt, with none of the built-in behavior guaranteed.
+    use_default_prompt: bool = True
     first_message: str = ""  # empty -> auto-filled with a name/how-to-use greeting
     provider: str = "openai"
     model: str = "gpt-4.1"
@@ -371,11 +377,16 @@ async def create_agent(body: AgentCreateRequest, user: User = Depends(get_curren
 
     first_message = body.first_message.strip() or _DEFAULT_FIRST_MESSAGE.format(agent_name=body.agent_name)
     own_key = await require_meetstream_api_key(db, user.id)
+    system_prompt = (
+        build_agent_system_prompt(body.agent_name, body.system_prompt)
+        if body.use_default_prompt
+        else body.system_prompt
+    )
 
     try:
         result = await meetstream_client.create_mia_agent(
             agent_name=body.agent_name,
-            system_prompt=build_agent_system_prompt(body.agent_name, body.system_prompt),
+            system_prompt=system_prompt,
             first_message=first_message,
             provider=body.provider,
             model=body.model,
@@ -479,6 +490,13 @@ async def activate_agent(body: ActivateRequest, user: User = Depends(get_current
 class AgentUpdateRequest(BaseModel):
     agent_config_id: Optional[str] = None
     system_prompt: Optional[str] = None
+    # True: overwrite system_prompt with the built-in policy (name-gated
+    # activation, date reasoning, no-hallucination, etc) wrapped around
+    # whatever `system_prompt` was also sent as extra instructions (empty
+    # string if omitted) - lets a member reset an agent that had its own
+    # fully custom prompt back to the default behavior. Ignored if
+    # system_prompt isn't also part of this request's intent to change it.
+    reset_to_default_prompt: bool = False
     first_message: Optional[str] = None
     voice: Optional[str] = None
     provider: Optional[str] = None
@@ -517,7 +535,10 @@ async def update_current_agent(body: AgentUpdateRequest, user: User = Depends(ge
     current_model: Dict[str, Any] = dict(current_cfg.get("Model") or {})
     current_agent: Dict[str, Any] = dict(current_cfg.get("Agent") or {})
 
-    if body.system_prompt is not None:
+    if body.reset_to_default_prompt:
+        agent_name = current_cfg.get("AgentName") or "the assistant"
+        current_model["system_prompt"] = build_agent_system_prompt(agent_name, body.system_prompt or "")
+    elif body.system_prompt is not None:
         current_model["system_prompt"] = body.system_prompt
     if body.first_message is not None:
         current_model["first_message"] = body.first_message

@@ -10,6 +10,7 @@ const defaults = {
   mode: 'realtime',
   temperature: 0.8,
   system_prompt: '',
+  use_default_prompt: true,
   first_message: 'Hello! I am your persistent meeting companion. I remember past discussions, action items, and decisions.',
   activate: true,
 }
@@ -78,13 +79,46 @@ export default function NewAgentForm({ onCreated, onClose }) {
         </label>
       </div>
 
-      <label className="field-label">Extra instructions (optional)</label>
-      <textarea
-        rows={3}
-        value={form.system_prompt}
-        onChange={(e) => update('system_prompt', e.target.value)}
-        placeholder="Added on top of the built-in behavior every agent gets: name-gated activation, date reasoning, no-hallucination, coherent summaries."
-      />
+      <label className="field-label">System prompt</label>
+      <div className="gate-tabs">
+        <button
+          type="button"
+          className={form.use_default_prompt ? 'active' : ''}
+          onClick={() => update('use_default_prompt', true)}
+        >
+          Default + extras
+        </button>
+        <button
+          type="button"
+          className={!form.use_default_prompt ? 'active' : ''}
+          onClick={() => update('use_default_prompt', false)}
+        >
+          Write my own
+        </button>
+      </div>
+
+      {form.use_default_prompt ? (
+        <>
+          <label className="field-label">Extra instructions (optional)</label>
+          <textarea
+            rows={3}
+            value={form.system_prompt}
+            onChange={(e) => update('system_prompt', e.target.value)}
+            placeholder="Added on top of the built-in behavior every agent gets: name-gated activation, date reasoning, no-hallucination, coherent summaries."
+          />
+        </>
+      ) : (
+        <>
+          <label className="field-label">System prompt <span className="field-required">Required</span></label>
+          <textarea
+            rows={6}
+            value={form.system_prompt}
+            onChange={(e) => update('system_prompt', e.target.value)}
+            placeholder="The entire prompt, used exactly as written. None of the built-in behavior (name-gated activation, date reasoning, no-hallucination) is added automatically - include anything you still want."
+            required
+          />
+        </>
+      )}
 
       <label className="field-label">First message</label>
       <textarea rows={2} value={form.first_message} onChange={(e) => update('first_message', e.target.value)} />
@@ -98,7 +132,7 @@ export default function NewAgentForm({ onCreated, onClose }) {
         Make this the active agent (new bots will use it)
       </label>
 
-      <button type="submit" disabled={busy || !form.agent_name.trim()}>
+      <button type="submit" disabled={busy || !form.agent_name.trim() || (!form.use_default_prompt && !form.system_prompt.trim())}>
         <RocketIcon /> {busy ? 'Creating…' : 'Create agent'}
       </button>
       {error && <div className="launch-error">{error}</div>}

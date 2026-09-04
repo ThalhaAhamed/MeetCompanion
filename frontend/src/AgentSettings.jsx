@@ -105,6 +105,21 @@ export default function AgentSettings() {
     }
   }
 
+  async function resetToDefault() {
+    setSaving(true)
+    setSaveError(null)
+    setSaved(false)
+    try {
+      await updateAgent({ system_prompt: '', reset_to_default_prompt: true })
+      setSaved(true)
+      load()
+    } catch (e) {
+      setSaveError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function handleActivate(agentConfigId) {
     setActivatingId(agentConfigId)
     try {
@@ -234,6 +249,12 @@ export default function AgentSettings() {
                     onChange={(e) => update('system_prompt', e.target.value)}
                   />
                 </label>
+                <div className="agent-form-actions" style={{ marginTop: -8, marginBottom: 8 }}>
+                  <button type="button" onClick={resetToDefault} disabled={saving}>
+                    Reset to default prompt
+                  </button>
+                  <span className="subtitle">Overwrites the field above with the built-in policy (name-gated activation, date reasoning, no-hallucination).</span>
+                </div>
 
                 <label>
                   First message
