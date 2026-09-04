@@ -99,7 +99,7 @@ def _mask_secret(value: Optional[str]) -> Optional[str]:
 
 
 @router.get("/credentials")
-async def get_agent_credentials(org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
+async def get_agent_credentials(user: User = Depends(get_current_user), org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
     """
     Masked view of the provider credentials this deployment is actually
     configured with - the MIA agent's own model/voice provider is visible
@@ -107,15 +107,21 @@ async def get_agent_credentials(org_id: uuid.UUID = Depends(get_current_org_id),
     key to us at all, they hold it), but the credentials our own backend uses
     (MeetStream API access, the LLM that extracts meeting memory, MCP auth)
     were previously invisible anywhere in the dashboard. The MCP token shown
-    is this workspace's own, not a global shared one.
+    is this workspace's own, not a global shared one. meetstream_api_key
+    reflects this member's own key if they've set one, falling back to the
+    deployment's shared default otherwise - same precedence used when their
+    bots actually deploy.
     """
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_by_id(org_id)
     mcp_token = org.mcp_token if org else None
+    own_key = await get_meetstream_api_key(db, user.id)
+    effective_key = own_key or settings.MEETSTREAM_API_KEY
     return {
         "meetstream_api_key": {
-            "configured": bool(settings.MEETSTREAM_API_KEY),
-            "masked_value": _mask_secret(settings.MEETSTREAM_API_KEY),
+            "configured": bool(effective_key),
+            "masked_value": _mask_secret(effective_key),
+            "is_personal": bool(own_key),
         },
         "memory_extraction_llm": {
             "provider": settings.LLM_PROVIDER,
@@ -184,6 +190,59 @@ async def chat_relay(body: ChatRelayRequest, authorization: Optional[str] = Head
     return {"status": "sent"}
 
 
+async def get_meetstream_api_key(db: AsyncSession, user_id: uuid.UUID) -> Optional[str]:
+    """This member's own MeetStream API key, from their settings JSONB. Falls
+    back to None (not the deployment-wide MEETSTREAM_API_KEY) so callers can
+    tell "no personal key set" apart from "use the shared default" and decide
+    per call site whether a fallback is appropriate."""
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_id(user_id)
+    return (user.settings or {}).get("meetstream_api_key") if user else None
+
+
+async def require_meetstream_api_key(db: AsyncSession, user_id: uuid.UUID) -> str:
+    """Same as get_meetstream_api_key, but hard-fails when the member hasn't
+    set their own key yet. Used at every point a member takes a new action
+    against MeetStream (deploying a bot, creating/activating/updating an
+    agent) - each member's own usage must go through their own MeetStream
+    account, not silently ride on the deployment's shared default key."""
+    key = await get_meetstream_api_key(db, user_id)
+    if not key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Add your own MeetStream API key in Agent settings before doing this.",
+        )
+    return key
+
+
+class ApiKeyRequest(BaseModel):
+    meetstream_api_key: str
+
+
+@router.put("/api-key")
+async def set_meetstream_api_key(body: ApiKeyRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Store this member's own MeetStream API key so their bots/agents deploy
+    and bill against their own MeetStream account instead of the deployment's
+    shared default key."""
+    key = body.meetstream_api_key.strip()
+    if not key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="meetstream_api_key cannot be empty")
+    user_repo = UserRepository(db)
+    await user_repo.update_settings(user.id, {"meetstream_api_key": key})
+    await db.commit()
+    return {"meetstream_api_key": {"configured": True, "masked_value": _mask_secret(key)}}
+
+
+@router.delete("/api-key")
+async def clear_meetstream_api_key(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Remove this member's own MeetStream API key, reverting their future
+    bot/agent deployments to the deployment's shared default key."""
+    user_repo = UserRepository(db)
+    await user_repo.update_settings(user.id, {"meetstream_api_key": None})
+    await db.commit()
+    return {"meetstream_api_key": {"configured": False, "masked_value": None}}
+
+
 async def get_active_agent_config_id(db: AsyncSession, user_id: uuid.UUID) -> Optional[str]:
     """The agent this specific member's new bots should launch with, from
     their own settings JSONB (set via /activate). Members of the original
@@ -249,7 +308,7 @@ async def get_current_agent(user: User = Depends(get_current_user), db: AsyncSes
     if not agent_config_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active agent configured")
     try:
-        cfg = await meetstream_client.get_mia_agent(agent_config_id)
+        cfg = await meetstream_client.get_mia_agent(agent_config_id, api_key=await get_meetstream_api_key(db, user.id))
         return _redact_secrets(cfg)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
@@ -267,7 +326,7 @@ async def list_agents(user: User = Depends(get_current_user), db: AsyncSession =
     created, including their system prompts.
     """
     try:
-        agents = await meetstream_client.list_mia_agents()
+        agents = await meetstream_client.list_mia_agents(api_key=await get_meetstream_api_key(db, user.id))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
     active_id = await get_active_agent_config_id(db, user.id)
@@ -311,6 +370,7 @@ async def create_agent(body: AgentCreateRequest, user: User = Depends(get_curren
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This workspace has no MCP token configured")
 
     first_message = body.first_message.strip() or _DEFAULT_FIRST_MESSAGE.format(agent_name=body.agent_name)
+    own_key = await require_meetstream_api_key(db, user.id)
 
     try:
         result = await meetstream_client.create_mia_agent(
@@ -326,6 +386,7 @@ async def create_agent(body: AgentCreateRequest, user: User = Depends(get_curren
             mcp_auth_token=org.mcp_token,
             response_modality=body.response_modality,
             tool_results_to_chat=body.tool_results_to_chat,
+            api_key=own_key,
         )
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
@@ -345,7 +406,7 @@ class ActivateRequest(BaseModel):
     agent_config_id: str
 
 
-async def _ensure_mcp_wired(agent_config_id: str, mcp_token: Optional[str]) -> None:
+async def _ensure_mcp_wired(agent_config_id: str, mcp_token: Optional[str], api_key: Optional[str] = None) -> None:
     """
     Only agents created through this app's "New agent" form get wired to our
     MCP server (database access) at creation time - an agent set up any other
@@ -358,7 +419,7 @@ async def _ensure_mcp_wired(agent_config_id: str, mcp_token: Optional[str]) -> N
     if not settings.MCP_SERVER_URL or not mcp_token:
         return
     try:
-        current = await meetstream_client.get_mia_agent(agent_config_id)
+        current = await meetstream_client.get_mia_agent(agent_config_id, api_key=api_key)
     except Exception:
         return
     current_cfg = current.get("agent_config", current)
@@ -394,7 +455,7 @@ async def _ensure_mcp_wired(agent_config_id: str, mcp_token: Optional[str]) -> N
         current_agent["custom_functions"] = custom_functions
 
     try:
-        await meetstream_client.update_mia_agent_settings(agent_config_id=agent_config_id, agent=current_agent)
+        await meetstream_client.update_mia_agent_settings(agent_config_id=agent_config_id, agent=current_agent, api_key=api_key)
     except Exception:
         pass
 
@@ -411,7 +472,7 @@ async def activate_agent(body: ActivateRequest, user: User = Depends(get_current
 
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_by_id(user.organization_id)
-    await _ensure_mcp_wired(body.agent_config_id, org.mcp_token if org else None)
+    await _ensure_mcp_wired(body.agent_config_id, org.mcp_token if org else None, api_key=await require_meetstream_api_key(db, user.id))
     return {"active_agent_config_id": body.agent_config_id}
 
 
@@ -446,8 +507,9 @@ async def update_current_agent(body: AgentUpdateRequest, user: User = Depends(ge
         await _require_claimable_agent(db, user.id, agent_config_id)
         await _claim_agent(db, user.id, agent_config_id)
 
+    own_key = await require_meetstream_api_key(db, user.id)
     try:
-        current = await meetstream_client.get_mia_agent(agent_config_id)
+        current = await meetstream_client.get_mia_agent(agent_config_id, api_key=own_key)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
 
@@ -496,6 +558,7 @@ async def update_current_agent(body: AgentUpdateRequest, user: User = Depends(ge
             agent_config_id=agent_config_id,
             agent=current_agent,
             model=current_model,
+            api_key=own_key,
         )
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")

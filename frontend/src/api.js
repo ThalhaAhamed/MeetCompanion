@@ -134,6 +134,18 @@ export function getAgentCredentials() {
   return req('/agent/credentials')
 }
 
+export function setMeetstreamApiKey(meetstream_api_key) {
+  return req('/agent/api-key', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ meetstream_api_key }),
+  })
+}
+
+export function clearMeetstreamApiKey() {
+  return req('/agent/api-key', { method: 'DELETE' })
+}
+
 export function listAgents() {
   return req('/agent/list')
 }

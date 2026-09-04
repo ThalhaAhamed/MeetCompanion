@@ -213,9 +213,11 @@ class MeetingRepository:
         project_name: Optional[str] = None,
         meetstream_bot_id: Optional[str] = None,
         custom_attributes: Optional[Dict[str, Any]] = None,
+        created_by_user_id: Optional[uuid.UUID] = None,
     ) -> Meeting:
         meeting = Meeting(
             organization_id=org_id,
+            created_by_user_id=created_by_user_id,
             meeting_url=meeting_url,
             title=title,
             platform=platform,

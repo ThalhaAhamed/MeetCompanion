@@ -15,7 +15,7 @@ from app.models.schemas import (
     ParticipantResponse, MemoryResponse, ActionItemResponse, TranscriptSegmentResponse
 )
 from app.services.meetstream import meetstream_client
-from app.api.agent import get_active_agent_config_id, _DEFAULT_FIRST_MESSAGE, _require_claimable_agent
+from app.api.agent import get_active_agent_config_id, _DEFAULT_FIRST_MESSAGE, _require_claimable_agent, get_meetstream_api_key
 from app.api.deps import get_current_org_id, get_current_user
 from app.models.database import User
 
@@ -61,12 +61,24 @@ async def create_meeting(
         customer_name=meeting_in.customer_name,
         project_name=meeting_in.project_name,
         custom_attributes=meeting_in.custom_attributes or {},
+        created_by_user_id=user.id,
     )
     await db.commit()
     await db.refresh(meeting)
 
-    # 2. Deploy bot if requested and API key is present
-    if deploy_bot and settings.MEETSTREAM_API_KEY:
+    # 2. Deploy bot if requested. Each member's own MeetStream API key is
+    # required here - bots deploy and bill against the launching member's own
+    # MeetStream account, never silently falling back to this deployment's
+    # shared key (see require_meetstream_api_key).
+    own_meetstream_key = await get_meetstream_api_key(db, user.id)
+    if deploy_bot and not own_meetstream_key:
+        await meeting_repo.update_status(
+            meeting.id,
+            processing_error="Add your own MeetStream API key in Agent settings before launching a bot.",
+        )
+        await db.commit()
+        await db.refresh(meeting)
+    elif deploy_bot and own_meetstream_key:
         try:
             if meeting_in.agent_config_id:
                 # An explicit override still has to be an agent this member
@@ -87,7 +99,7 @@ async def create_meeting(
             bot_name = "MeetStream Companion"
             if active_agent_config_id:
                 try:
-                    agent_cfg = await meetstream_client.get_mia_agent(active_agent_config_id)
+                    agent_cfg = await meetstream_client.get_mia_agent(active_agent_config_id, api_key=own_meetstream_key)
                     bot_name = agent_cfg.get("agent_config", agent_cfg).get("AgentName") or bot_name
                 except Exception:
                     pass
@@ -110,6 +122,7 @@ async def create_meeting(
                     "project_name": meeting.project_name,
                 },
                 bot_name=bot_name,
+                api_key=own_meetstream_key,
             )
             bot_id = bot_resp.get("bot_id") or bot_resp.get("id")
             transcript_id = bot_resp.get("transcript_id")
@@ -240,6 +253,7 @@ async def get_meeting_transcript(
 @router.get("/{meeting_id}/bot")
 async def get_meeting_bot(
     meeting_id: uuid.UUID,
+    user: User = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_current_org_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -251,8 +265,13 @@ async def get_meeting_bot(
     if not meeting.meetstream_bot_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No bot deployed for this meeting")
 
+    # Must use the key the bot was actually created under (the launching
+    # member's own, if they had one set), not whoever happens to be asking -
+    # a bot created under one MeetStream account can't be queried with a
+    # different member's key.
+    key_owner_id = meeting.created_by_user_id or user.id
     try:
-        bot = await meetstream_client.get_bot(meeting.meetstream_bot_id)
+        bot = await meetstream_client.get_bot(meeting.meetstream_bot_id, api_key=await get_meetstream_api_key(db, key_owner_id))
         return _redact_secrets(bot)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
@@ -261,6 +280,7 @@ async def get_meeting_bot(
 @router.post("/{meeting_id}/stop")
 async def stop_meeting_bot(
     meeting_id: uuid.UUID,
+    user: User = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_current_org_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -272,8 +292,9 @@ async def stop_meeting_bot(
     if not meeting.meetstream_bot_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No bot deployed for this meeting")
 
+    key_owner_id = meeting.created_by_user_id or user.id
     try:
-        result = await meetstream_client.remove_bot(meeting.meetstream_bot_id)
+        result = await meetstream_client.remove_bot(meeting.meetstream_bot_id, api_key=await get_meetstream_api_key(db, key_owner_id))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
 

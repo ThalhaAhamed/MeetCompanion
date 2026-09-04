@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { checkAuth, login, addMember } from './api'
+import { checkAuth, login, addMember, setMeetstreamApiKey } from './api'
 
 export default function AuthGate({ children }) {
   const [status, setStatus] = useState('checking') // checking | gate | open
@@ -10,6 +10,7 @@ export default function AuthGate({ children }) {
   const [name, setName] = useState('')
   const [workspaceName, setWorkspaceName] = useState('')
   const [joinCode, setJoinCode] = useState('')
+  const [meetstreamApiKey, setMeetstreamApiKeyInput] = useState('')
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
 
@@ -60,6 +61,15 @@ export default function AuthGate({ children }) {
       })
       await login(email, password)
       setPassword('')
+      // Best-effort: a missing/invalid key here shouldn't block getting into
+      // the workspace - they can always set it later from Agent settings.
+      if (meetstreamApiKey.trim()) {
+        try {
+          await setMeetstreamApiKey(meetstreamApiKey.trim())
+        } catch {
+          // ignore - not fatal to account creation
+        }
+      }
       setStatus('open')
     } catch (e) {
       setError(
@@ -113,6 +123,16 @@ export default function AuthGate({ children }) {
               ) : (
                 <input type="text" placeholder="Join code (ask an existing member)" value={joinCode} onChange={(e) => setJoinCode(e.target.value)} />
               )}
+
+              <input
+                type="password"
+                placeholder="Your MeetStream API key (optional - add later if you don't have one)"
+                value={meetstreamApiKey}
+                onChange={(e) => setMeetstreamApiKeyInput(e.target.value)}
+              />
+              <div className="gate-subtitle" style={{ marginTop: -4 }}>
+                Your bots deploy under your own MeetStream account. You can skip this and add it later from Agent settings.
+              </div>
 
               <button
                 type="submit"

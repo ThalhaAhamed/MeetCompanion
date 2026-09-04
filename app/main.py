@@ -61,6 +61,15 @@ async def _ensure_schema():
         await conn.execute(text("DELETE FROM users WHERE is_active = FALSE"))
 
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS settings JSONB DEFAULT '{}'::jsonb"))
+        # Tracks which member's own MeetStream API key (and account) a bot was
+        # actually deployed under, so status/stop calls on that bot later use
+        # the same key it was created with - necessary now that each member
+        # can configure their own key (see app/api/agent.py get_meetstream_api_key),
+        # since a bot created under one member's MeetStream account can only
+        # be queried/stopped with that same account's key, not another
+        # member's. Existing rows stay NULL (falls back to the deployment's
+        # shared default key, same as before this column existed).
+        await conn.execute(text("ALTER TABLE meetings ADD COLUMN IF NOT EXISTS created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL"))
         # Agent ownership/activation moved from the shared workspace to each
         # individual member - meeting memory stays workspace-shared, but who
         # you're talking to as "your agent" doesn't. Backfill: members of the

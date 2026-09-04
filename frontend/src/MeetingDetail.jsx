@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { getMeeting, getTranscript, getMeetingBot, stopMeetingBot, updateActionItem } from './api'
+import ContextGraph, { extractKeywords, highlightKeywords } from './ContextGraph'
 
 const ACTION_STATUSES = ['open', 'in_progress', 'completed', 'cancelled']
 
@@ -47,6 +48,13 @@ export default function MeetingDetail({ meetingId }) {
       .finally(() => setBotLoading(false))
   }, [tab, meetingId, bot, botLoading])
 
+  const contextKeywords = useMemo(() => {
+    if (!meeting) return []
+    const text = [meeting.summary, ...meeting.memories.map((m) => m.content), ...actionItems.map((a) => a.task)]
+      .filter(Boolean).join('. ')
+    return extractKeywords(text, 8)
+  }, [meeting, actionItems])
+
   if (error) return <div className="error">Failed to load meeting: {error}</div>
   if (!meeting) return <div className="loading">Loading meeting…</div>
 
@@ -76,11 +84,14 @@ export default function MeetingDetail({ meetingId }) {
         <button className={tab === 'bot' ? 'active' : ''} onClick={() => setTab('bot')}>
           Bot
         </button>
+        <button className={tab === 'context' ? 'active' : ''} onClick={() => setTab('context')}>
+          Context
+        </button>
       </div>
 
       {tab === 'summary' && (
         <div className="tab-panel">
-          {meeting.summary ? <p>{meeting.summary}</p> : <p className="empty">No summary generated yet.</p>}
+          {meeting.summary ? <p>{highlightKeywords(meeting.summary, contextKeywords)}</p> : <p className="empty">No summary generated yet.</p>}
           <h3>Participants</h3>
           {meeting.participants.length === 0 ? (
             <p className="empty">No participants recorded.</p>
@@ -169,6 +180,40 @@ export default function MeetingDetail({ meetingId }) {
               onStopped={() => setBot(null)}
             />
           )}
+        </div>
+      )}
+
+      {tab === 'context' && (
+        <div className="tab-panel">
+          <h3>Meeting metadata</h3>
+          <dl className="kv">
+            <div className="kv-row">
+              <dt>Day</dt>
+              <dd>{meeting.started_at ? new Date(meeting.started_at).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' }) : '—'}</dd>
+            </div>
+            <div className="kv-row">
+              <dt>Time</dt>
+              <dd>{meeting.started_at ? new Date(meeting.started_at).toLocaleTimeString() : '—'}</dd>
+            </div>
+            <div className="kv-row">
+              <dt>Mode</dt>
+              <dd>{meeting.platform || '—'}</dd>
+            </div>
+          </dl>
+
+          <h3>Keywords</h3>
+          {contextKeywords.length === 0 ? (
+            <p className="empty">Not enough content yet to extract keywords.</p>
+          ) : (
+            <ul className="keyword-list">
+              {contextKeywords.map((k) => (
+                <li key={k.word} className="tag">{k.word} ({k.count})</li>
+              ))}
+            </ul>
+          )}
+
+          <h3>Context graph</h3>
+          <ContextGraph meeting={{ ...meeting, action_items: actionItems }} />
         </div>
       )}
     </div>

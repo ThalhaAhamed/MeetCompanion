@@ -54,6 +54,18 @@ class MeetStreamClient:
         if self.api_key:
             self.headers["Authorization"] = f"Token {self.api_key}"
 
+    def _headers(self, api_key: Optional[str] = None) -> Dict[str, str]:
+        """Per-call header set - lets a caller supply their own MeetStream API
+        key (e.g. a member's personal key from User.settings) instead of the
+        instance-wide default, so bots/agents are created and billed against
+        the member's own MeetStream account rather than whichever key this
+        deployment was constructed with."""
+        key = api_key or self.api_key
+        headers = {"Content-Type": "application/json"}
+        if key:
+            headers["Authorization"] = f"Token {key}"
+        return headers
+
     async def create_bot(
         self,
         meeting_link: str,
@@ -62,6 +74,7 @@ class MeetStreamClient:
         custom_attributes: Optional[Dict[str, Any]] = None,
         bot_name: Optional[str] = None,
         bot_message: Optional[str] = None,
+        api_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Deploy a MeetStream bot into a meeting.
@@ -101,43 +114,43 @@ class MeetStreamClient:
             resp = await client.post(
                 f"{self.base_url}/api/v1/bots/create_bot",
                 json=payload,
-                headers=self.headers,
+                headers=self._headers(api_key),
             )
             resp.raise_for_status()
             return resp.json()
 
-    async def get_bot(self, bot_id: str) -> Dict[str, Any]:
+    async def get_bot(self, bot_id: str, api_key: Optional[str] = None) -> Dict[str, Any]:
         """Retrieve the status and metadata for a specific bot."""
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
                 f"{self.base_url}/api/v1/bots/{bot_id}",
-                headers=self.headers,
+                headers=self._headers(api_key),
             )
             resp.raise_for_status()
             return resp.json()
 
-    async def send_bot_message(self, bot_id: str, message: str) -> Dict[str, Any]:
+    async def send_bot_message(self, bot_id: str, message: str, api_key: Optional[str] = None) -> Dict[str, Any]:
         """Post a message into the live meeting chat as the bot."""
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(
                 f"{self.base_url}/api/v1/bots/{bot_id}/send_message",
                 json={"message": message},
-                headers=self.headers,
+                headers=self._headers(api_key),
             )
             resp.raise_for_status()
             return resp.json()
 
-    async def remove_bot(self, bot_id: str) -> Dict[str, Any]:
+    async def remove_bot(self, bot_id: str, api_key: Optional[str] = None) -> Dict[str, Any]:
         """Send a stop signal to remove a bot from its meeting."""
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
                 f"{self.base_url}/api/v1/bots/{bot_id}/remove_bot",
-                headers=self.headers,
+                headers=self._headers(api_key),
             )
             resp.raise_for_status()
             return resp.json()
 
-    async def get_transcript(self, transcript_id: str, raw: bool = False) -> List[Dict[str, Any]] | Dict[str, Any]:
+    async def get_transcript(self, transcript_id: str, raw: bool = False, api_key: Optional[str] = None) -> List[Dict[str, Any]] | Dict[str, Any]:
         """
         Retrieve formatted or raw transcript segments for a completed call.
         """
@@ -146,28 +159,28 @@ class MeetStreamClient:
             resp = await client.get(
                 f"{self.base_url}/api/v1/transcript/{transcript_id}/get_transcript",
                 params=params,
-                headers=self.headers,
+                headers=self._headers(api_key),
             )
             resp.raise_for_status()
             return resp.json()
 
-    async def get_mia_agent(self, agent_config_id: str) -> Dict[str, Any]:
+    async def get_mia_agent(self, agent_config_id: str, api_key: Optional[str] = None) -> Dict[str, Any]:
         """Retrieve a single MIA agent config by id."""
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
                 f"{self.base_url}/api/v1/mia",
                 params={"agent_config_id": agent_config_id},
-                headers=self.headers,
+                headers=self._headers(api_key),
             )
             resp.raise_for_status()
             return resp.json()
 
-    async def list_mia_agents(self) -> Dict[str, Any]:
+    async def list_mia_agents(self, api_key: Optional[str] = None) -> Dict[str, Any]:
         """List all MIA agent configs on this account."""
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
                 f"{self.base_url}/api/v1/mia",
-                headers=self.headers,
+                headers=self._headers(api_key),
             )
             resp.raise_for_status()
             return resp.json()
@@ -186,6 +199,7 @@ class MeetStreamClient:
         mcp_auth_token: Optional[str] = None,
         response_modality: str = "text",
         tool_results_to_chat: bool = True,
+        api_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create a brand new MIA agent, pre-wired to our own MCP server the same way
@@ -239,7 +253,7 @@ class MeetStreamClient:
             resp = await client.post(
                 f"{self.base_url}/api/v1/mia",
                 json=payload,
-                headers=self.headers,
+                headers=self._headers(api_key),
             )
             resp.raise_for_status()
             return resp.json()
@@ -249,6 +263,7 @@ class MeetStreamClient:
         agent_config_id: str,
         agent: Optional[Dict[str, Any]] = None,
         model: Optional[Dict[str, Any]] = None,
+        api_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Partial update of an existing MIA agent config. `agent` and `model` are merged
@@ -265,7 +280,7 @@ class MeetStreamClient:
             resp = await client.put(
                 f"{self.base_url}/api/v1/mia",
                 json=payload,
-                headers=self.headers,
+                headers=self._headers(api_key),
             )
             resp.raise_for_status()
             return resp.json()

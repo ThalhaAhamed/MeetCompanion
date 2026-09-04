@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getAgent, updateAgent, listAgents, activateAgent, getAgentCredentials } from './api'
+import { getAgent, updateAgent, listAgents, activateAgent, getAgentCredentials, setMeetstreamApiKey, clearMeetstreamApiKey } from './api'
 import NewAgentForm from './NewAgentForm'
 import EmptyState from './EmptyState'
 import { RocketIcon, InboxIcon } from './icons'
@@ -32,6 +32,43 @@ export default function AgentSettings() {
 
   const [credentials, setCredentials] = useState(null)
   const [credentialsError, setCredentialsError] = useState(null)
+  const [apiKeyInput, setApiKeyInput] = useState('')
+  const [apiKeySaving, setApiKeySaving] = useState(false)
+  const [apiKeyError, setApiKeyError] = useState(null)
+
+  function loadCredentials() {
+    setCredentialsError(null)
+    return getAgentCredentials().catch((e) => setCredentialsError(e.message)).then((d) => d && setCredentials(d))
+  }
+
+  async function saveApiKey(e) {
+    e.preventDefault()
+    if (!apiKeyInput.trim()) return
+    setApiKeySaving(true)
+    setApiKeyError(null)
+    try {
+      await setMeetstreamApiKey(apiKeyInput.trim())
+      setApiKeyInput('')
+      await loadCredentials()
+    } catch (e) {
+      setApiKeyError(e.message)
+    } finally {
+      setApiKeySaving(false)
+    }
+  }
+
+  async function removeApiKey() {
+    setApiKeySaving(true)
+    setApiKeyError(null)
+    try {
+      await clearMeetstreamApiKey()
+      await loadCredentials()
+    } catch (e) {
+      setApiKeyError(e.message)
+    } finally {
+      setApiKeySaving(false)
+    }
+  }
 
   function load() {
     setLoading(true)
@@ -68,9 +105,7 @@ export default function AgentSettings() {
 
   useEffect(load, [])
   useEffect(loadAgents, [])
-  useEffect(() => {
-    getAgentCredentials().catch((e) => setCredentialsError(e.message)).then((d) => d && setCredentials(d))
-  }, [])
+  useEffect(() => { loadCredentials() }, [])
 
   function update(field, value) {
     setForm((f) => ({ ...f, [field]: value }))
@@ -195,7 +230,35 @@ export default function AgentSettings() {
                 <dl className="kv credentials-panel">
                   <div className="kv-row">
                     <dt>MeetStream API key</dt>
-                    <dd>{credentials.meetstream_api_key.configured ? credentials.meetstream_api_key.masked_value : 'Not configured'}</dd>
+                    <dd>
+                      {credentials.meetstream_api_key.configured ? credentials.meetstream_api_key.masked_value : 'Not configured'}
+                      {credentials.meetstream_api_key.is_personal ? ' (your own key)' : ' (shared default)'}
+                    </dd>
+                  </div>
+                  <div className="kv-row">
+                    <dt>Set your own key</dt>
+                    <dd>
+                      <form className="api-key-form" onSubmit={saveApiKey}>
+                        <input
+                          type="password"
+                          placeholder="Paste your MeetStream API key"
+                          value={apiKeyInput}
+                          onChange={(e) => setApiKeyInput(e.target.value)}
+                        />
+                        <button type="submit" disabled={apiKeySaving || !apiKeyInput.trim()}>
+                          {apiKeySaving ? 'Saving…' : 'Save'}
+                        </button>
+                        {credentials.meetstream_api_key.is_personal && (
+                          <button type="button" onClick={removeApiKey} disabled={apiKeySaving}>
+                            Remove
+                          </button>
+                        )}
+                      </form>
+                      {apiKeyError && <div className="error">{apiKeyError}</div>}
+                      <div className="subtitle">
+                        Your bots deploy under your own MeetStream account when set, instead of the workspace's shared default.
+                      </div>
+                    </dd>
                   </div>
                   <div className="kv-row">
                     <dt>Memory extraction LLM</dt>

@@ -99,6 +99,7 @@ class Meeting(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    created_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     meetstream_bot_id: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True)
     title: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     meeting_url: Mapped[Optional[str]] = mapped_column(String(2000), nullable=True)

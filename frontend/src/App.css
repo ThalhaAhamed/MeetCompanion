@@ -1362,3 +1362,87 @@ body {
   font-variant-numeric: tabular-nums;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+.api-key-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.api-key-form input {
+  flex: 1;
+  min-width: 0;
+}
+
+.keyword-mark {
+  background: rgba(255, 138, 61, 0.22);
+  color: inherit;
+  border-radius: 4px;
+  padding: 0 2px;
+}
+
+.keyword-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 16px;
+}
+
+.context-graph {
+  width: 100%;
+  max-width: 640px;
+  height: auto;
+}
+.graph-edge {
+  stroke: rgba(148, 163, 184, 0.35);
+  stroke-width: 1.5;
+}
+.graph-edge-meta {
+  stroke: rgba(148, 163, 184, 0.5);
+  stroke-dasharray: 4 3;
+}
+.graph-node-center {
+  fill: rgba(255, 138, 61, 0.18);
+  stroke: #ff8a3d;
+  stroke-width: 2;
+}
+.graph-node-meta {
+  fill: rgba(148, 163, 184, 0.12);
+  stroke: rgba(148, 163, 184, 0.5);
+  stroke-width: 1.5;
+}
+.graph-node-kw {
+  stroke: rgba(0, 0, 0, 0.2);
+  stroke-width: 1;
+}
+.graph-label {
+  font-size: 11px;
+  fill: #e2e8f0;
+  font-family: inherit;
+  pointer-events: none;
+}
+.graph-label-center {
+  font-size: 13px;
+  font-weight: 600;
+  fill: #ff8a3d;
+}
+.graph-label-center-sub {
+  font-size: 10px;
+  fill: #cbd5e1;
+}
+.graph-label-meta-title {
+  font-size: 9px;
+  fill: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.graph-label-meta-value {
+  font-size: 11px;
+  fill: #e2e8f0;
+}
+.graph-label-kw {
+  font-size: 10px;
+  fill: #0f172a;
+  font-weight: 600;
+}
