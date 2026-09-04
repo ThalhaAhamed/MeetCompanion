@@ -66,14 +66,15 @@ export default function AuthGate({ children, onAuthenticated }) {
       const d = await login(email, password)
       setPassword('')
       if (d.member) onAuthenticated?.(d.member)
-      // Best-effort: a missing/invalid key here shouldn't block getting into
-      // the workspace - they can always set it later from Agent settings.
-      if (meetstreamApiKey.trim()) {
-        try {
-          await setMeetstreamApiKey(meetstreamApiKey.trim())
-        } catch {
-          // ignore - not fatal to account creation
-        }
+      try {
+        await setMeetstreamApiKey(meetstreamApiKey.trim())
+      } catch (keyErr) {
+        // The account and login already succeeded at this point (retrying
+        // addMember would now 409-conflict), so let them in rather than
+        // strand them on a broken signup form - the sidebar's own key
+        // control still shows "Not configured" and blocks real usage until
+        // they successfully save one there.
+        console.error('Failed to save MeetStream API key during signup:', keyErr)
       }
       setStatus('open')
     } catch (e) {
@@ -131,17 +132,17 @@ export default function AuthGate({ children, onAuthenticated }) {
 
               <input
                 type="password"
-                placeholder="Your MeetStream API key (optional - add later if you don't have one)"
+                placeholder="Your MeetStream API key"
                 value={meetstreamApiKey}
                 onChange={(e) => setMeetstreamApiKeyInput(e.target.value)}
               />
               <div className="gate-subtitle" style={{ marginTop: -4 }}>
-                Your bots deploy under your own MeetStream account. You can skip this and add it later from Agent settings.
+                Required — your bots deploy and bill under your own MeetStream account, not a shared one.
               </div>
 
               <button
                 type="submit"
-                disabled={busy || !name || !email || !password || (workspaceMode === 'create' ? !workspaceName : !joinCode)}
+                disabled={busy || !name || !email || !password || !meetstreamApiKey.trim() || (workspaceMode === 'create' ? !workspaceName : !joinCode)}
               >
                 {busy ? 'Creating…' : 'Create account'}
               </button>
