@@ -157,6 +157,8 @@ class MeetingUpdate(BaseModel):
 class MeetingResponse(SchemaBase):
     id: uuid.UUID
     organization_id: uuid.UUID
+    created_by_user_id: Optional[uuid.UUID] = None
+    created_by_name: Optional[str] = None
     meetstream_bot_id: Optional[str] = None
     title: Optional[str] = None
     meeting_url: Optional[str] = None

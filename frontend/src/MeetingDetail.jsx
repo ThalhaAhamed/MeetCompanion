@@ -66,6 +66,7 @@ export default function MeetingDetail({ meetingId }) {
         {meeting.customer_name && <span className="tag">{meeting.customer_name}</span>}
         {meeting.project_name && <span className="tag">{meeting.project_name}</span>}
         {meeting.platform && <span className="tag">{meeting.platform}</span>}
+        {meeting.created_by_name && <span className="tag">Created by {meeting.created_by_name}</span>}
       </div>
 
       <div className="tabs">

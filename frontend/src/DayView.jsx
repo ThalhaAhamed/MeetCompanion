@@ -172,6 +172,7 @@ export default function DayView() {
                       <span className={`badge status-${m.status}`}>{m.status}</span>
                       {m.customer_name && <span className="tag">{m.customer_name}</span>}
                       {m.project_name && <span className="tag">{m.project_name}</span>}
+                      {m.created_by_name && <span className="tag">by {m.created_by_name}</span>}
                       {m.started_at && (
                         <span className="time">{new Date(m.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                       )}

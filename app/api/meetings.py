@@ -210,6 +210,8 @@ async def get_meeting(
     return MeetingDetailResponse(
         id=meeting.id,
         organization_id=meeting.organization_id,
+        created_by_user_id=meeting.created_by_user_id,
+        created_by_name=meeting.created_by_name,
         meetstream_bot_id=meeting.meetstream_bot_id,
         title=meeting.title,
         meeting_url=meeting.meeting_url,

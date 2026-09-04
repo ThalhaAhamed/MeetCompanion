@@ -118,11 +118,22 @@ class Meeting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     organization: Mapped["Organization"] = relationship("Organization", back_populates="meetings")
+    # lazy="selectin" so this loads automatically (one batched follow-up
+    # query) whenever a Meeting is fetched, without every repository query
+    # needing its own selectinload(Meeting.created_by) added - safe with
+    # AsyncSession since it's issued as its own SELECT, not lazy-on-access.
+    created_by: Mapped[Optional["User"]] = relationship("User", foreign_keys=[created_by_user_id], lazy="selectin")
     participants: Mapped[List["Participant"]] = relationship("Participant", back_populates="meeting", cascade="all, delete-orphan")
     transcript_segments: Mapped[List["TranscriptSegment"]] = relationship("TranscriptSegment", back_populates="meeting", cascade="all, delete-orphan")
     memories: Mapped[List["Memory"]] = relationship("Memory", back_populates="meeting", cascade="all, delete-orphan")
     action_items: Mapped[List["ActionItem"]] = relationship("ActionItem", back_populates="meeting", cascade="all, delete-orphan")
     processing_jobs: Mapped[List["ProcessingJob"]] = relationship("ProcessingJob", back_populates="meeting", cascade="all, delete-orphan")
+
+    @property
+    def created_by_name(self) -> Optional[str]:
+        if not self.created_by:
+            return None
+        return self.created_by.name or self.created_by.email
 
 
 class Participant(Base):
