@@ -4,7 +4,7 @@ import AgentSettings from './AgentSettings'
 import MemorySearch from './MemorySearch'
 import Members from './Members'
 import AuthGate from './AuthGate'
-import { checkAuth, logout, getAgentCredentials, setMeetstreamApiKey, clearMeetstreamApiKey } from './api'
+import { logout, getAgentCredentials, setMeetstreamApiKey, clearMeetstreamApiKey } from './api'
 import './App.css'
 
 const ICONS = {
@@ -48,17 +48,13 @@ export default function App() {
   const [me, setMe] = useState(null)
   const Page = PAGES[page].Component
 
-  useEffect(() => {
-    checkAuth().then((d) => d.member && setMe(d.member)).catch(() => {})
-  }, [])
-
   async function handleSignOut() {
     await logout().catch(() => {})
     window.location.reload()
   }
 
   return (
-    <AuthGate>
+    <AuthGate onAuthenticated={setMe}>
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">

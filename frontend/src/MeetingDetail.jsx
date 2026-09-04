@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { getMeeting, getTranscript, getMeetingBot, stopMeetingBot, updateActionItem } from './api'
-import ContextGraph, { extractKeywords, highlightKeywords } from './ContextGraph'
+import { extractKeywords, highlightKeywords } from './ContextGraph'
 
 const ACTION_STATUSES = ['open', 'in_progress', 'completed', 'cancelled']
 
@@ -84,9 +84,6 @@ export default function MeetingDetail({ meetingId }) {
         </button>
         <button className={tab === 'bot' ? 'active' : ''} onClick={() => setTab('bot')}>
           Bot
-        </button>
-        <button className={tab === 'context' ? 'active' : ''} onClick={() => setTab('context')}>
-          Context
         </button>
       </div>
 
@@ -184,39 +181,6 @@ export default function MeetingDetail({ meetingId }) {
         </div>
       )}
 
-      {tab === 'context' && (
-        <div className="tab-panel">
-          <h3>Meeting metadata</h3>
-          <dl className="kv">
-            <div className="kv-row">
-              <dt>Day</dt>
-              <dd>{meeting.started_at ? new Date(meeting.started_at).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' }) : '—'}</dd>
-            </div>
-            <div className="kv-row">
-              <dt>Time</dt>
-              <dd>{meeting.started_at ? new Date(meeting.started_at).toLocaleTimeString() : '—'}</dd>
-            </div>
-            <div className="kv-row">
-              <dt>Mode</dt>
-              <dd>{meeting.platform || '—'}</dd>
-            </div>
-          </dl>
-
-          <h3>Keywords</h3>
-          {contextKeywords.length === 0 ? (
-            <p className="empty">Not enough content yet to extract keywords.</p>
-          ) : (
-            <ul className="keyword-list">
-              {contextKeywords.map((k) => (
-                <li key={k.word} className="tag">{k.word} ({k.count})</li>
-              ))}
-            </ul>
-          )}
-
-          <h3>Context graph</h3>
-          <ContextGraph meeting={{ ...meeting, action_items: actionItems }} />
-        </div>
-      )}
     </div>
   )
 }

@@ -1,11 +1,38 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { searchMemory } from './api'
+import ContextGraph, { extractKeywords, highlightKeywords } from './ContextGraph'
 
 export default function MemorySearch() {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+
+  const contextKeywords = useMemo(() => {
+    if (!results?.results?.length) return []
+    const text = results.results.map((r) => r.content).filter(Boolean).join('. ')
+    return extractKeywords(text, 8)
+  }, [results])
+
+  const contextMeta = useMemo(() => {
+    if (!results?.results?.length) return []
+    const withDates = results.results.map((r) => r.meeting_date).filter(Boolean).sort()
+    const dateRange = withDates.length
+      ? (withDates[0] === withDates[withDates.length - 1] ? withDates[0] : `${withDates[0]} – ${withDates[withDates.length - 1]}`)
+      : '—'
+    const meetingTitles = new Set(results.results.map((r) => r.meeting_title).filter(Boolean))
+    const typeCounts = new Map()
+    for (const r of results.results) {
+      const t = r.memory_type || r.source_type
+      if (t) typeCounts.set(t, (typeCounts.get(t) || 0) + 1)
+    }
+    const topType = [...typeCounts.entries()].sort((a, b) => b[1] - a[1])[0]
+    return [
+      { label: 'Meetings', value: meetingTitles.size || '—' },
+      { label: 'Dates', value: dateRange },
+      { label: 'Mostly', value: topType ? topType[0] : '—' },
+    ]
+  }, [results])
 
   async function submit(e) {
     e.preventDefault()
@@ -52,21 +79,27 @@ export default function MemorySearch() {
           {results.results.length === 0 ? (
             <p className="empty">No matches found.</p>
           ) : (
-            <ul className="memories">
-              {results.results.map((r) => (
-                <li key={r.id} className="memory-item search-result">
-                  <div className="list-item-meta">
-                    <span className="badge">{r.memory_type || r.source_type}</span>
-                    {r.meeting_title && <span className="tag">{r.meeting_title}</span>}
-                    {r.meeting_date && <span className="tag">{r.meeting_date}</span>}
-                    {r.project_name && <span className="tag">{r.project_name}</span>}
-                    <span className="time">{(r.similarity * 100).toFixed(0)}% match</span>
-                  </div>
-                  <p>{r.content}</p>
-                  {r.speaker && <span className="time">— {r.speaker}</span>}
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="memories">
+                {results.results.map((r) => (
+                  <li key={r.id} className="memory-item search-result">
+                    <div className="list-item-meta">
+                      <span className="badge">{r.memory_type || r.source_type}</span>
+                      {r.meeting_title && <span className="tag">{r.meeting_title}</span>}
+                      {r.meeting_date && <span className="tag">{r.meeting_date}</span>}
+                      {r.project_name && <span className="tag">{r.project_name}</span>}
+                      <span className="time">{(r.similarity * 100).toFixed(0)}% match</span>
+                    </div>
+                    <p>{highlightKeywords(r.content, contextKeywords)}</p>
+                    {r.speaker && <span className="time">— {r.speaker}</span>}
+                  </li>
+                ))}
+              </ul>
+
+              <h3>Context graph</h3>
+              <p className="subtitle">Keywords and meeting spread across everything matched by this search.</p>
+              <ContextGraph centerLabel={query} keywords={contextKeywords} metaNodes={contextMeta} />
+            </>
           )}
         </div>
       )}

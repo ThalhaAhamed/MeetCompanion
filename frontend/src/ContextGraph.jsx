@@ -39,27 +39,16 @@ export function highlightKeywords(text, keywords) {
 
 const COLORS = ['#ff8a3d', '#ffb677', '#7fb2ff', '#8fd6a8', '#e69be6', '#ffd166', '#6ee7d0', '#f28ba0']
 
-export default function ContextGraph({ meeting }) {
-  const sourceText = [
-    meeting.summary,
-    ...meeting.memories.map((m) => m.content),
-    ...(meeting.action_items || []).map((a) => a.task),
-  ].filter(Boolean).join('. ')
-
-  const keywords = extractKeywords(sourceText, 8)
-
-  const started = meeting.started_at ? new Date(meeting.started_at) : null
-  const metaNodes = [
-    { label: 'Day', value: started ? started.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }) : '—' },
-    { label: 'Time', value: started ? started.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '—' },
-    { label: 'Mode', value: meeting.platform || '—' },
-  ]
-
+// Generic radial graph: a center node (the search query, or whatever the
+// caller is centering the graph on), up to a handful of metadata nodes in a
+// row above it, and keyword nodes fanned in an arc below. Reused by
+// MemorySearch (context across all matched results) - kept decoupled from
+// any one meeting's shape so it isn't tied to a single meeting's data.
+export default function ContextGraph({ centerLabel, keywords, metaNodes = [] }) {
   const width = 640
   const height = 480
   const cx = width / 2
   const cy = 230
-  const centerLabel = meeting.title || 'Meeting'
 
   // Metadata nodes sit in a straight row above the center node, evenly
   // spaced regardless of how many there are - an arc looked natural for
@@ -83,12 +72,12 @@ export default function ContextGraph({ meeting }) {
     return { ...k, x: cx + kwRadius * Math.cos(angle), y: cy + 50 + kwRadius * Math.sin(angle) }
   })
 
-  if (keywords.length === 0 && !started && !meeting.platform) {
-    return <p className="empty">Not enough meeting content yet to build a context graph.</p>
+  if (keywords.length === 0 && metaNodes.every((n) => !n.value || n.value === '—')) {
+    return <p className="empty">Not enough content yet to build a context graph.</p>
   }
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="context-graph" role="img" aria-label="Meeting context graph">
+    <svg viewBox={`0 0 ${width} ${height}`} className="context-graph" role="img" aria-label="Context graph">
       {metaPositions.map((n, i) => (
         <line key={`meta-line-${i}`} x1={cx} y1={cy} x2={n.x} y2={n.y} className="graph-edge graph-edge-meta" />
       ))}
@@ -97,9 +86,9 @@ export default function ContextGraph({ meeting }) {
       ))}
 
       <circle cx={cx} cy={cy} r={44} className="graph-node graph-node-center" />
-      <text x={cx} y={cy - 4} textAnchor="middle" className="graph-label graph-label-center">Meeting</text>
+      <text x={cx} y={cy - 4} textAnchor="middle" className="graph-label graph-label-center">Query</text>
       <text x={cx} y={cy + 14} textAnchor="middle" className="graph-label graph-label-center-sub">
-        {centerLabel.length > 18 ? `${centerLabel.slice(0, 18)}…` : centerLabel}
+        {centerLabel && centerLabel.length > 18 ? `${centerLabel.slice(0, 18)}…` : centerLabel}
       </text>
 
       {metaPositions.map((n, i) => (

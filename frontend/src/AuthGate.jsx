@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { checkAuth, login, addMember, setMeetstreamApiKey } from './api'
 
-export default function AuthGate({ children }) {
+export default function AuthGate({ children, onAuthenticated }) {
   const [status, setStatus] = useState('checking') // checking | gate | open
   const [mode, setMode] = useState('signin') // signin | signup
   const [workspaceMode, setWorkspaceMode] = useState('create') // create | join
@@ -16,7 +16,10 @@ export default function AuthGate({ children }) {
 
   function recheck() {
     checkAuth()
-      .then((d) => setStatus(d.authenticated ? 'open' : 'gate'))
+      .then((d) => {
+        if (d.authenticated && d.member) onAuthenticated?.(d.member)
+        setStatus(d.authenticated ? 'open' : 'gate')
+      })
       .catch(() => setStatus('gate'))
   }
 
@@ -37,8 +40,9 @@ export default function AuthGate({ children }) {
     setBusy(true)
     setError(null)
     try {
-      await login(email, password)
+      const d = await login(email, password)
       setPassword('')
+      if (d.member) onAuthenticated?.(d.member)
       setStatus('open')
     } catch (e) {
       setError('Incorrect email or password.')
@@ -59,8 +63,9 @@ export default function AuthGate({ children }) {
         workspace_name: workspaceMode === 'create' ? workspaceName : undefined,
         join_code: workspaceMode === 'join' ? joinCode : undefined,
       })
-      await login(email, password)
+      const d = await login(email, password)
       setPassword('')
+      if (d.member) onAuthenticated?.(d.member)
       // Best-effort: a missing/invalid key here shouldn't block getting into
       // the workspace - they can always set it later from Agent settings.
       if (meetstreamApiKey.trim()) {
