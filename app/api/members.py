@@ -181,6 +181,11 @@ async def remove_member(member_id: str, org_id: uuid.UUID = Depends(get_current_
     if not user:
         raise HTTPException(status_code=404, detail="Member not found.")
 
-    user.is_active = False
+    # Hard delete, not a soft is_active=False flag: the (organization_id, email)
+    # DB constraint means a deactivated-but-still-present row permanently blocks
+    # that email from ever signing up again in this workspace, which is
+    # confusing ("that email is already a member" for an email nobody can
+    # actually use). A removed member should just be gone.
+    await db.delete(user)
     await db.commit()
     return {"removed": True}

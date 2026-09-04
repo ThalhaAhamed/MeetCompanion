@@ -51,6 +51,14 @@ async def _ensure_schema():
                 "WHERE join_code IS NULL"
             )
         )
+        # One-time cleanup: member removal used to set is_active=FALSE instead
+        # of deleting the row (fixed in app/api/members.py), so a removed
+        # member's email stayed permanently reserved by the (organization_id,
+        # email) constraint - "that email is already a member" for an email
+        # nobody could actually sign back in with. Removal deletes the row now,
+        # so this only ever needs to run once for rows soft-deleted before
+        # that fix.
+        await conn.execute(text("DELETE FROM users WHERE is_active = FALSE"))
 
 
 @asynccontextmanager
