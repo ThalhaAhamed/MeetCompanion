@@ -263,6 +263,32 @@ async def _get_owned_agent_ids(db: AsyncSession, user_id: uuid.UUID) -> set:
     return set((user.settings or {}).get("agent_config_ids") or []) if user else set()
 
 
+@router.post("/reset-ownership")
+async def reset_agent_ownership(org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
+    """
+    One-time maintenance action: reset every member of this workspace's
+    agent_config_ids claim list back to just their own currently-active
+    agent, releasing every other claim. Fixes ownership that got tangled
+    during the original default-workspace backfill (see app/main.py), where
+    multiple members could end up having claimed the same pre-existing
+    agents before per-member ownership was enforced. Each member keeps
+    whatever they're actively using; everything else becomes unclaimed and
+    gets freshly claimed by whichever member next activates/updates it.
+    Intended to be called once and then removed, not a permanent endpoint.
+    """
+    from sqlalchemy import select as _select
+    result = await db.execute(_select(User).where(User.organization_id == org_id))
+    user_repo = UserRepository(db)
+    reset = []
+    for user in result.scalars().all():
+        active_id = (user.settings or {}).get("active_agent_config_id")
+        new_owned = [active_id] if active_id else []
+        await user_repo.update_settings(user.id, {"agent_config_ids": new_owned})
+        reset.append({"user_id": str(user.id), "name": user.name, "kept": new_owned})
+    await db.commit()
+    return {"reset": reset}
+
+
 async def _find_owning_user(db: AsyncSession, agent_config_id: str) -> Optional[uuid.UUID]:
     """Which member (if any) already has this agent_config_id in their owned
     list. Small-scale linear scan over all members - fine at this app's
