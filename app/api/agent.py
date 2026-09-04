@@ -263,6 +263,29 @@ async def _get_owned_agent_ids(db: AsyncSession, user_id: uuid.UUID) -> set:
     return set((user.settings or {}).get("agent_config_ids") or []) if user else set()
 
 
+@router.post("/claim-all")
+async def claim_all_agents(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """
+    One-time fix: claim every agent on this member's MeetStream account under
+    this member, for the case where there's really only one person actually
+    using MeetStream (this account) despite the workspace having multiple app
+    logins - a prior ownership reset over-corrected by unclaiming most of
+    this account's agents instead of consolidating them under the one real
+    owner. Meant to be called once and then removed, not a permanent
+    endpoint.
+    """
+    own_key = await get_meetstream_api_key(db, user.id)
+    try:
+        agents = await meetstream_client.list_mia_agents(api_key=own_key)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
+    all_ids = [a.get("AgentConfigID") for a in agents.get("agent_configs", []) if a.get("AgentConfigID")]
+    user_repo = UserRepository(db)
+    await user_repo.update_settings(user.id, {"agent_config_ids": all_ids})
+    await db.commit()
+    return {"claimed": all_ids}
+
+
 async def _find_owning_user(db: AsyncSession, agent_config_id: str) -> Optional[uuid.UUID]:
     """Which member (if any) already has this agent_config_id in their owned
     list. Small-scale linear scan over all members - fine at this app's
