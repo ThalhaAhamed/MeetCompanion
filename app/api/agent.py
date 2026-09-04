@@ -263,6 +263,34 @@ async def _get_owned_agent_ids(db: AsyncSession, user_id: uuid.UUID) -> set:
     return set((user.settings or {}).get("agent_config_ids") or []) if user else set()
 
 
+@router.post("/release-duplicate-claims")
+async def release_duplicate_claims(org_id: uuid.UUID = Depends(get_current_org_id), user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """
+    One-time fix: an earlier ownership reset left some agent_config_ids
+    claimed by more than one member in this workspace at once (e.g. a member
+    kept their prior active agent as their one claim, then a later claim-all
+    also added it to someone else) - _find_owning_user's linear scan then
+    non-deterministically blocks whichever member it hits second with
+    "belongs to a different member". Strips every agent_config_id the
+    calling member owns out of every OTHER member's claim list, leaving the
+    calling member as sole owner. Meant to be called once and then removed,
+    not a permanent endpoint.
+    """
+    from sqlalchemy import select as _select
+    my_ids = await _get_owned_agent_ids(db, user.id)
+    result = await db.execute(_select(User).where(User.organization_id == org_id, User.id != user.id))
+    user_repo = UserRepository(db)
+    cleared = []
+    for other in result.scalars().all():
+        other_ids = set((other.settings or {}).get("agent_config_ids") or [])
+        overlap = other_ids & my_ids
+        if overlap:
+            await user_repo.update_settings(other.id, {"agent_config_ids": sorted(other_ids - overlap)})
+            cleared.append({"user_id": str(other.id), "name": other.name, "removed": sorted(overlap)})
+    await db.commit()
+    return {"cleared": cleared}
+
+
 async def _find_owning_user(db: AsyncSession, agent_config_id: str) -> Optional[uuid.UUID]:
     """Which member (if any) already has this agent_config_id in their owned
     list. Small-scale linear scan over all members - fine at this app's
