@@ -15,8 +15,9 @@ from app.models.schemas import (
     ParticipantResponse, MemoryResponse, ActionItemResponse, TranscriptSegmentResponse
 )
 from app.services.meetstream import meetstream_client
-from app.api.agent import get_active_agent_config_id, _DEFAULT_FIRST_MESSAGE
-from app.api.deps import get_current_org_id
+from app.api.agent import get_active_agent_config_id, _DEFAULT_FIRST_MESSAGE, _require_claimable_agent
+from app.api.deps import get_current_org_id, get_current_user
+from app.models.database import User
 
 router = APIRouter(prefix="/api/meetings", tags=["meetings"])
 
@@ -39,12 +40,16 @@ def _redact_secrets(value):
 async def create_meeting(
     meeting_in: MeetingCreate,
     deploy_bot: bool = Query(default=True, description="Whether to immediately deploy the MeetStream bot"),
-    org_id: uuid.UUID = Depends(get_current_org_id),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Register a meeting and optionally launch a MeetStream bot into the call.
+    The meeting record itself is shared workspace-wide (everyone in the
+    workspace can see it), but which agent joins as the bot is the launching
+    member's own - each person's agent is personal, not shared.
     """
+    org_id = user.organization_id
     meeting_repo = MeetingRepository(db)
 
     # 1. Create meeting record
@@ -63,7 +68,13 @@ async def create_meeting(
     # 2. Deploy bot if requested and API key is present
     if deploy_bot and settings.MEETSTREAM_API_KEY:
         try:
-            active_agent_config_id = meeting_in.agent_config_id or await get_active_agent_config_id(db, org_id)
+            if meeting_in.agent_config_id:
+                # An explicit override still has to be an agent this member
+                # actually owns - otherwise the bot's MCP wiring would point
+                # at whichever workspace that agent belongs to, leaking that
+                # workspace's meeting memory into a call it has no part of.
+                await _require_claimable_agent(db, user.id, meeting_in.agent_config_id)
+            active_agent_config_id = meeting_in.agent_config_id or await get_active_agent_config_id(db, user.id)
 
             # The bot's visible in-meeting name must match the name the agent's
             # own system prompt listens for in its ACTIVATION RULE ("only

@@ -66,6 +66,11 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(50), default="member")
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Which MIA agent config(s) this specific person owns/has activated -
+    # agents belong to the individual member, not the shared workspace;
+    # meetings/memory/action items stay workspace-shared via organization_id.
+    # Mirrors Organization.settings' shape: {"active_agent_config_id": "...", "agent_config_ids": [...]}.
+    settings: Mapped[Dict[str, Any]] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 

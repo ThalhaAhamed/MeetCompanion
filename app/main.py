@@ -60,6 +60,30 @@ async def _ensure_schema():
         # that fix.
         await conn.execute(text("DELETE FROM users WHERE is_active = FALSE"))
 
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS settings JSONB DEFAULT '{}'::jsonb"))
+        # Agent ownership/activation moved from the shared workspace to each
+        # individual member - meeting memory stays workspace-shared, but who
+        # you're talking to as "your agent" doesn't. Backfill: members of the
+        # original default workspace inherit whatever agent the workspace had
+        # active before this change, as their own personal starting point,
+        # rather than suddenly having no agent configured at all.
+        await conn.execute(
+            text(
+                """
+                UPDATE users u
+                SET settings = jsonb_build_object(
+                    'active_agent_config_id', o.settings->'active_agent_config_id',
+                    'agent_config_ids', COALESCE(o.settings->'agent_config_ids', '[]'::jsonb)
+                )
+                FROM organizations o
+                WHERE u.organization_id = o.id
+                  AND u.organization_id = :org_id
+                  AND NOT (u.settings ? 'active_agent_config_id')
+                """
+            ),
+            {"org_id": settings.DEFAULT_ORG_ID},
+        )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

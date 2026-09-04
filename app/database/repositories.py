@@ -8,7 +8,7 @@ from sqlalchemy import select, update, delete, func, and_, or_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.models.database import (
-    Organization, Meeting, Participant, TranscriptSegment,
+    Organization, User, Meeting, Participant, TranscriptSegment,
     Memory, MemoryType, ActionItem, MeetingMemoryEmbedding,
     CompanyKnowledgeEmbedding, WebhookEvent, ProcessingJob
 )
@@ -45,6 +45,27 @@ class OrganizationRepository:
         org.settings = {**(org.settings or {}), **patch}
         await self.session.flush()
         return org
+
+
+class UserRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get_by_id(self, user_id: uuid.UUID) -> Optional[User]:
+        stmt = select(User).where(User.id == user_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def update_settings(self, user_id: uuid.UUID, patch: Dict[str, Any]) -> Optional[User]:
+        """Merge `patch` into the member's own settings JSONB (shallow merge, one level) -
+        which MIA agent(s) they own/have activated, kept separate per person
+        rather than shared at the workspace level."""
+        user = await self.get_by_id(user_id)
+        if not user:
+            return None
+        user.settings = {**(user.settings or {}), **patch}
+        await self.session.flush()
+        return user
 
 
 class MeetingRepository:

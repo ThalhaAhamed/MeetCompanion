@@ -1,10 +1,10 @@
 """
 MIA Agent Configuration Endpoints.
-Read, create, update, and switch between the MeetStream MIA agent(s) on this
-account. "Active" agent (the one new bots launch with) is resolved from the
-org's settings JSONB (set via /activate) with a fallback to the
-MEETSTREAM_AGENT_CONFIG_ID env var - so switching which agent is active
-doesn't require an env var change + redeploy.
+Read, create, update, and switch between MeetStream MIA agents. Each agent
+belongs to the individual member who created/activated it (tracked in
+User.settings), not the shared workspace - meeting memory is workspace-wide,
+but "which agent is mine" is personal, the same way a Slack workspace is
+shared while each person's own bot/app connections aren't.
 """
 import uuid
 from typing import Optional, Dict, Any
@@ -13,9 +13,10 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database.connection import get_db
-from app.database.repositories import OrganizationRepository, MeetingRepository
+from app.database.repositories import OrganizationRepository, UserRepository, MeetingRepository
+from app.models.database import User
 from app.services.meetstream import meetstream_client, _share_in_chat_function
-from app.api.deps import get_current_org_id
+from app.api.deps import get_current_org_id, get_current_user
 from app.mcp.auth import resolve_org_by_mcp_token
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
@@ -183,91 +184,68 @@ async def chat_relay(body: ChatRelayRequest, authorization: Optional[str] = Head
     return {"status": "sent"}
 
 
-async def get_active_agent_config_id(db: AsyncSession, org_id: uuid.UUID) -> Optional[str]:
-    """The agent new bots should launch with: this workspace's org-settings
-    override if set, else the MEETSTREAM_AGENT_CONFIG_ID this app was
-    originally configured with (only meaningful for the original default
-    workspace, since that's a single global env var)."""
-    org_repo = OrganizationRepository(db)
-    org = await org_repo.get_by_id(org_id)
-    override = (org.settings or {}).get("active_agent_config_id") if org else None
-    if override:
-        return override
-    if str(org_id) == settings.DEFAULT_ORG_ID:
-        return settings.MEETSTREAM_AGENT_CONFIG_ID or None
-    return None
+async def get_active_agent_config_id(db: AsyncSession, user_id: uuid.UUID) -> Optional[str]:
+    """The agent this specific member's new bots should launch with, from
+    their own settings JSONB (set via /activate). Members of the original
+    default workspace were backfilled with whatever the workspace had active
+    before agents became per-person (see app/main.py); everyone else starts
+    with none until they create or activate one - no fallback to a global
+    env var, which would otherwise leak the very first agent to every new
+    signup."""
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_id(user_id)
+    return (user.settings or {}).get("active_agent_config_id") if user else None
 
 
-async def _get_owned_agent_ids(db: AsyncSession, org_id: uuid.UUID) -> set:
-    """
-    Which MeetStream agent_config_ids this workspace is actually allowed to
-    see or act on. Backfills the original default workspace's snapshot the
-    first time it's needed (see list_agents' docstring for why) so every
-    workspace - including that one - ends up with a real, non-empty
-    ownership boundary rather than an implicit "everything" for one of them.
-    """
-    org_repo = OrganizationRepository(db)
-    org = await org_repo.get_by_id(org_id)
-    org_settings = org.settings or {} if org else {}
-
-    if org and str(org_id) == settings.DEFAULT_ORG_ID and "agent_config_ids" not in org_settings:
-        try:
-            agents = await meetstream_client.list_mia_agents()
-            all_account_ids = [cfg.get("AgentConfigID") for cfg in agents.get("agent_configs", [])]
-        except Exception:
-            all_account_ids = []
-        org = await org_repo.update_settings(org_id, {"agent_config_ids": all_account_ids})
-        await db.commit()
-        org_settings = org.settings or {}
-
-    return set(org_settings.get("agent_config_ids") or [])
+async def _get_owned_agent_ids(db: AsyncSession, user_id: uuid.UUID) -> set:
+    """Which MeetStream agent_config_ids this specific member is allowed to see or act on."""
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_id(user_id)
+    return set((user.settings or {}).get("agent_config_ids") or []) if user else set()
 
 
-async def _find_owning_org(db: AsyncSession, agent_config_id: str) -> Optional[uuid.UUID]:
-    """Which workspace (if any) already has this agent_config_id in its
-    owned list. Small-scale linear scan over all workspaces - fine at this
-    app's size, and only run on the activate/update write paths, not on
-    every read."""
-    from app.models.database import Organization as OrgModel
+async def _find_owning_user(db: AsyncSession, agent_config_id: str) -> Optional[uuid.UUID]:
+    """Which member (if any) already has this agent_config_id in their owned
+    list. Small-scale linear scan over all members - fine at this app's
+    size, and only run on the activate/update write paths, not on every read."""
     from sqlalchemy import select as _select
-    result = await db.execute(_select(OrgModel))
-    for org in result.scalars().all():
-        if agent_config_id in ((org.settings or {}).get("agent_config_ids") or []):
-            return org.id
+    result = await db.execute(_select(User))
+    for user in result.scalars().all():
+        if agent_config_id in ((user.settings or {}).get("agent_config_ids") or []):
+            return user.id
     return None
 
 
-async def _require_claimable_agent(db: AsyncSession, org_id: uuid.UUID, agent_config_id: str) -> None:
+async def _require_claimable_agent(db: AsyncSession, user_id: uuid.UUID, agent_config_id: str) -> None:
     """
-    Block activating or overwriting an agent another workspace already
-    claimed - without this, any workspace could hijack (activate_agent
-    rewires its MCP token to itself) or overwrite (update_current_agent
-    rewrites its system prompt) another workspace's live agent just by
-    knowing its id. An agent nobody has claimed yet (created directly on
-    MeetStream's own dashboard, from before this app tracked ownership) can
-    still be adopted - that's the one legitimate case for touching an
-    agent_config_id this workspace didn't create itself.
+    Block activating or overwriting an agent another member already claimed -
+    without this, anyone could hijack (activate_agent rewires its MCP token)
+    or overwrite (update_current_agent rewrites its system prompt) another
+    member's agent just by knowing its id. An agent nobody has claimed yet
+    (created directly on MeetStream's own dashboard) can still be adopted -
+    that's the one legitimate case for touching an agent_config_id this
+    member didn't create themselves.
     """
-    owner = await _find_owning_org(db, agent_config_id)
-    if owner is not None and owner != org_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This agent belongs to a different workspace.")
+    owner = await _find_owning_user(db, agent_config_id)
+    if owner is not None and owner != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This agent belongs to a different member.")
 
 
-async def _claim_agent(db: AsyncSession, org_id: uuid.UUID, agent_config_id: str) -> None:
-    """Record that this workspace now owns agent_config_id, if it doesn't already."""
-    org_repo = OrganizationRepository(db)
-    org = await org_repo.get_by_id(org_id)
-    owned_ids = list((org.settings or {}).get("agent_config_ids") or []) if org else []
+async def _claim_agent(db: AsyncSession, user_id: uuid.UUID, agent_config_id: str) -> None:
+    """Record that this member now owns agent_config_id, if they don't already."""
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_id(user_id)
+    owned_ids = list((user.settings or {}).get("agent_config_ids") or []) if user else []
     if agent_config_id not in owned_ids:
         owned_ids.append(agent_config_id)
-        await org_repo.update_settings(org_id, {"agent_config_ids": owned_ids})
+        await user_repo.update_settings(user_id, {"agent_config_ids": owned_ids})
         await db.commit()
 
 
 @router.get("")
-async def get_current_agent(org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
-    """Fetch this workspace's currently active agent config."""
-    agent_config_id = await get_active_agent_config_id(db, org_id)
+async def get_current_agent(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Fetch this member's own currently active agent config."""
+    agent_config_id = await get_active_agent_config_id(db, user.id)
     if not agent_config_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active agent configured")
     try:
@@ -278,31 +256,22 @@ async def get_current_agent(org_id: uuid.UUID = Depends(get_current_org_id), db:
 
 
 @router.get("/list")
-async def list_agents(org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
+async def list_agents(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """
-    List only the MIA agent configs this workspace owns, flagging the active
-    one. MeetStream itself has no workspace concept - every agent on the
+    List only the MIA agent configs this member owns, flagging the active
+    one. MeetStream itself has no per-person concept - every agent on the
     account is visible to any API caller - so ownership is tracked ourselves
-    in org.settings["agent_config_ids"], appended to whenever this workspace
+    in User.settings["agent_config_ids"], appended to whenever this member
     creates an agent via POST /api/agent. Without this filter, a brand new
-    workspace's Agent Settings page showed every agent any other workspace
-    had ever created, including their system prompts - and the reverse too,
-    since the original default workspace predates ownership tracking and had
-    no recorded list to filter by.
-
-    That's handled with a one-time backfill: the first time this runs for the
-    default workspace, whatever agents exist on the account *right now* are
-    recorded as its own permanently, and it's filtered like every other
-    workspace from then on - so it keeps seeing what it already had, but
-    never gains visibility into agents created by other workspaces after
-    this fix shipped.
+    member's Agent Settings page showed every agent anyone else had ever
+    created, including their system prompts.
     """
     try:
         agents = await meetstream_client.list_mia_agents()
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
-    active_id = await get_active_agent_config_id(db, org_id)
-    owned_ids = await _get_owned_agent_ids(db, org_id)
+    active_id = await get_active_agent_config_id(db, user.id)
+    owned_ids = await _get_owned_agent_ids(db, user.id)
     if active_id:
         owned_ids.add(active_id)
 
@@ -329,15 +298,15 @@ class AgentCreateRequest(BaseModel):
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create_agent(body: AgentCreateRequest, org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
-    """Create a brand new MIA agent, pre-wired to this workspace's own MCP
-    token so it can recall this workspace's meeting memory immediately. Set
-    activate=false to create without switching to it."""
+async def create_agent(body: AgentCreateRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Create a brand new MIA agent, owned by you personally and pre-wired to
+    your workspace's MCP token so it can recall your workspace's meeting
+    memory immediately. Set activate=false to create without switching to it."""
     if not settings.MCP_SERVER_URL:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="MCP_SERVER_URL is not configured on this deployment")
 
     org_repo = OrganizationRepository(db)
-    org = await org_repo.get_by_id(org_id)
+    org = await org_repo.get_by_id(user.organization_id)
     if not org or not org.mcp_token:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This workspace has no MCP token configured")
 
@@ -363,14 +332,11 @@ async def create_agent(body: AgentCreateRequest, org_id: uuid.UUID = Depends(get
 
     new_id = (result.get("agent_config") or result).get("AgentConfigID")
     if new_id:
-        owned_ids = list((org.settings or {}).get("agent_config_ids") or [])
-        if new_id not in owned_ids:
-            owned_ids.append(new_id)
-        patch = {"agent_config_ids": owned_ids}
+        await _claim_agent(db, user.id, new_id)
         if body.activate:
-            patch["active_agent_config_id"] = new_id
-        await org_repo.update_settings(org_id, patch)
-        await db.commit()
+            user_repo = UserRepository(db)
+            await user_repo.update_settings(user.id, {"active_agent_config_id": new_id})
+            await db.commit()
 
     return _redact_secrets(result)
 
@@ -434,17 +400,18 @@ async def _ensure_mcp_wired(agent_config_id: str, mcp_token: Optional[str]) -> N
 
 
 @router.post("/activate")
-async def activate_agent(body: ActivateRequest, org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
-    """Switch which agent this workspace's new bots launch with, without touching env vars or redeploying."""
-    await _require_claimable_agent(db, org_id, body.agent_config_id)
-    await _claim_agent(db, org_id, body.agent_config_id)
+async def activate_agent(body: ActivateRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Switch which agent your own new bots launch with, without touching env vars or redeploying."""
+    await _require_claimable_agent(db, user.id, body.agent_config_id)
+    await _claim_agent(db, user.id, body.agent_config_id)
+
+    user_repo = UserRepository(db)
+    await user_repo.update_settings(user.id, {"active_agent_config_id": body.agent_config_id})
+    await db.commit()
 
     org_repo = OrganizationRepository(db)
-    org = await org_repo.update_settings(org_id, {"active_agent_config_id": body.agent_config_id})
-    if not org:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
-    await db.commit()
-    await _ensure_mcp_wired(body.agent_config_id, org.mcp_token)
+    org = await org_repo.get_by_id(user.organization_id)
+    await _ensure_mcp_wired(body.agent_config_id, org.mcp_token if org else None)
     return {"active_agent_config_id": body.agent_config_id}
 
 
@@ -462,22 +429,22 @@ class AgentUpdateRequest(BaseModel):
 
 
 @router.put("")
-async def update_current_agent(body: AgentUpdateRequest, org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
+async def update_current_agent(body: AgentUpdateRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """
-    Partially update an MIA agent's model/agent blocks (this workspace's
-    active one, unless agent_config_id is given explicitly). MeetStream
-    replaces each block wholesale, so we fetch the current config first and
-    merge the requested fields in.
+    Partially update an MIA agent's model/agent blocks (your own active one,
+    unless agent_config_id is given explicitly). MeetStream replaces each
+    block wholesale, so we fetch the current config first and merge the
+    requested fields in.
     """
-    agent_config_id = body.agent_config_id or await get_active_agent_config_id(db, org_id)
+    agent_config_id = body.agent_config_id or await get_active_agent_config_id(db, user.id)
     if not agent_config_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No agent_config_id provided or configured")
     if body.agent_config_id:
         # Only need to check when the caller explicitly named an id - the
-        # fallback (this workspace's own active agent) is already implicitly
+        # fallback (this member's own active agent) is already implicitly
         # owned.
-        await _require_claimable_agent(db, org_id, agent_config_id)
-        await _claim_agent(db, org_id, agent_config_id)
+        await _require_claimable_agent(db, user.id, agent_config_id)
+        await _claim_agent(db, user.id, agent_config_id)
 
     try:
         current = await meetstream_client.get_mia_agent(agent_config_id)
@@ -515,7 +482,7 @@ async def update_current_agent(body: AgentUpdateRequest, org_id: uuid.UUID = Dep
             }
         else:
             org_repo = OrganizationRepository(db)
-            org = await org_repo.get_by_id(org_id)
+            org = await org_repo.get_by_id(user.organization_id)
             new_server: Dict[str, Any] = {"url": body.mcp_server_url, "timeout": 10, "allowed_tools": [
                 "get_current_datetime", "search_meeting_memory", "get_meeting", "get_previous_meetings", "get_action_items"
             ]}
