@@ -205,19 +205,44 @@ async def get_current_agent(org_id: uuid.UUID = Depends(get_current_org_id), db:
 @router.get("/list")
 async def list_agents(org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
     """
-    List MIA agent configs, flagging this workspace's active one. Note: this
-    still lists every agent on the underlying MeetStream account (MeetStream
-    itself has no workspace concept), not just ones this workspace created -
-    only the active-agent flag and MCP wiring are workspace-scoped.
+    List only the MIA agent configs this workspace owns, flagging the active
+    one. MeetStream itself has no workspace concept - every agent on the
+    account is visible to any API caller - so ownership is tracked ourselves
+    in org.settings["agent_config_ids"], appended to whenever this workspace
+    creates an agent via POST /api/agent. Without this filter, a brand new
+    workspace's Agent Settings page showed every agent any other workspace
+    had ever created, including their system prompts.
+
+    The one exception: the original default workspace (this app's very first
+    one, from before workspaces existed) never had its pre-existing agents
+    recorded this way, so it still sees every agent on the account rather
+    than an empty list - a real access boundary for every workspace created
+    after that point, not a loophole they can use to see each other's agents.
     """
     try:
         agents = await meetstream_client.list_mia_agents()
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
     active_id = await get_active_agent_config_id(db, org_id)
+
+    org_repo = OrganizationRepository(db)
+    org = await org_repo.get_by_id(org_id)
+    owned_ids = set((org.settings or {}).get("agent_config_ids") or []) if org else set()
+    if active_id:
+        owned_ids.add(active_id)
+
     result = _redact_secrets(agents)
-    for cfg in result.get("agent_configs", []):
+    all_configs = result.get("agent_configs", [])
+    # The default workspace predates ownership tracking, so its own
+    # pre-existing agents were never recorded in agent_config_ids - it stays
+    # unfiltered permanently, not just until it happens to create one new
+    # agent (which would otherwise flip it into a narrower, wrong filter and
+    # hide everything it made before ownership tracking existed).
+    if str(org_id) != settings.DEFAULT_ORG_ID:
+        all_configs = [cfg for cfg in all_configs if cfg.get("AgentConfigID") in owned_ids]
+    for cfg in all_configs:
         cfg["IsActive"] = cfg.get("AgentConfigID") == active_id
+    result["agent_configs"] = all_configs
     return result
 
 
@@ -269,8 +294,14 @@ async def create_agent(body: AgentCreateRequest, org_id: uuid.UUID = Depends(get
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
 
     new_id = (result.get("agent_config") or result).get("AgentConfigID")
-    if body.activate and new_id:
-        await org_repo.update_settings(org_id, {"active_agent_config_id": new_id})
+    if new_id:
+        owned_ids = list((org.settings or {}).get("agent_config_ids") or [])
+        if new_id not in owned_ids:
+            owned_ids.append(new_id)
+        patch = {"agent_config_ids": owned_ids}
+        if body.activate:
+            patch["active_agent_config_id"] = new_id
+        await org_repo.update_settings(org_id, patch)
         await db.commit()
 
     return _redact_secrets(result)
