@@ -211,35 +211,39 @@ async def list_agents(org_id: uuid.UUID = Depends(get_current_org_id), db: Async
     in org.settings["agent_config_ids"], appended to whenever this workspace
     creates an agent via POST /api/agent. Without this filter, a brand new
     workspace's Agent Settings page showed every agent any other workspace
-    had ever created, including their system prompts.
+    had ever created, including their system prompts - and the reverse too,
+    since the original default workspace predates ownership tracking and had
+    no recorded list to filter by.
 
-    The one exception: the original default workspace (this app's very first
-    one, from before workspaces existed) never had its pre-existing agents
-    recorded this way, so it still sees every agent on the account rather
-    than an empty list - a real access boundary for every workspace created
-    after that point, not a loophole they can use to see each other's agents.
+    That's handled with a one-time backfill: the first time this runs for the
+    default workspace, whatever agents exist on the account *right now* are
+    recorded as its own permanently, and it's filtered like every other
+    workspace from then on - so it keeps seeing what it already had, but
+    never gains visibility into agents created by other workspaces after
+    this fix shipped.
     """
     try:
         agents = await meetstream_client.list_mia_agents()
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
     active_id = await get_active_agent_config_id(db, org_id)
+    all_account_ids = [cfg.get("AgentConfigID") for cfg in agents.get("agent_configs", [])]
 
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_by_id(org_id)
-    owned_ids = set((org.settings or {}).get("agent_config_ids") or []) if org else set()
+    org_settings = org.settings or {} if org else {}
+
+    if org and str(org_id) == settings.DEFAULT_ORG_ID and "agent_config_ids" not in org_settings:
+        org = await org_repo.update_settings(org_id, {"agent_config_ids": all_account_ids})
+        await db.commit()
+        org_settings = org.settings or {}
+
+    owned_ids = set(org_settings.get("agent_config_ids") or [])
     if active_id:
         owned_ids.add(active_id)
 
     result = _redact_secrets(agents)
-    all_configs = result.get("agent_configs", [])
-    # The default workspace predates ownership tracking, so its own
-    # pre-existing agents were never recorded in agent_config_ids - it stays
-    # unfiltered permanently, not just until it happens to create one new
-    # agent (which would otherwise flip it into a narrower, wrong filter and
-    # hide everything it made before ownership tracking existed).
-    if str(org_id) != settings.DEFAULT_ORG_ID:
-        all_configs = [cfg for cfg in all_configs if cfg.get("AgentConfigID") in owned_ids]
+    all_configs = [cfg for cfg in result.get("agent_configs", []) if cfg.get("AgentConfigID") in owned_ids]
     for cfg in all_configs:
         cfg["IsActive"] = cfg.get("AgentConfigID") == active_id
     result["agent_configs"] = all_configs
