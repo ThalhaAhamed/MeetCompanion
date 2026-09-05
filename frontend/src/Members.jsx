@@ -118,7 +118,7 @@ export default function Members() {
       )}
 
       {showForm && (
-        <form className="launch-panel new-agent-panel" onSubmit={submit} style={{ maxWidth: 380 }}>
+        <form className="launch-panel new-agent-panel" onSubmit={submit} style={{ maxWidth: 380, marginBottom: 20 }}>
           <div className="launch-panel-head">
             <span>Add a member</span>
             <button type="button" className="launch-close" onClick={() => setShowForm(false)}>×</button>
