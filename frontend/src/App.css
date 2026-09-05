@@ -1257,8 +1257,26 @@ body {
   animation: live-pulse 1.6s ease-in-out infinite;
 }
 
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
 .new-agent-panel {
-  width: 420px;
+  width: 460px;
+  max-width: 100%;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
 }
 
 .new-agent-panel textarea {

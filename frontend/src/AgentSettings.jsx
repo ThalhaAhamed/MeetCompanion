@@ -155,9 +155,16 @@ export default function AgentSettings() {
           <button className="launch-btn" onClick={() => setShowNewForm((v) => !v)}>
             <RocketIcon /> New agent
           </button>
-          {showNewForm && <NewAgentForm onCreated={handleCreated} onClose={() => setShowNewForm(false)} />}
         </div>
       </header>
+
+      {showNewForm && (
+        <div className="modal-overlay" onClick={() => setShowNewForm(false)}>
+          <div onClick={(e) => e.stopPropagation()}>
+            <NewAgentForm onCreated={handleCreated} onClose={() => setShowNewForm(false)} />
+          </div>
+        </div>
+      )}
 
       <div className="layout">
         <div className="column">
