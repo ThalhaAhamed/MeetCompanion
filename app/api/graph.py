@@ -56,7 +56,16 @@ async def get_knowledge_graph(org_id: uuid.UUID = Depends(get_current_org_id), d
             continue
 
         mid = f"meeting:{m.id}"
-        add_node(mid, label=m.title or "Untitled meeting", type="meeting", date=m.started_at.isoformat() if m.started_at else None)
+        add_node(
+            mid,
+            label=m.title or "Untitled meeting",
+            type="meeting",
+            date=m.started_at.isoformat() if m.started_at else None,
+            platform=m.platform,
+            status=m.status,
+            summary=m.summary,
+            meeting_id=str(m.id),
+        )
 
         if m.customer_name:
             cid = add_node(f"customer:{m.customer_name.lower()}", label=m.customer_name, type="customer")
@@ -73,7 +82,16 @@ async def get_knowledge_graph(org_id: uuid.UUID = Depends(get_current_org_id), d
 
         for mem in m.memories:
             memid = f"memory:{mem.id}"
-            add_node(memid, label=(mem.content or "")[:80], type="memory", memory_type=mem.type.value if mem.type else None)
+            add_node(
+                memid,
+                label=(mem.content or "")[:80],
+                content=mem.content,
+                type="memory",
+                memory_type=mem.type.value if mem.type else None,
+                speaker=mem.speaker,
+                meeting_id=str(m.id),
+                meeting_title=m.title,
+            )
             edges.append({"source": mid, "target": memid, "type": "produced"})
             if mem.speaker:
                 pid = add_person(mem.speaker)
@@ -81,7 +99,18 @@ async def get_knowledge_graph(org_id: uuid.UUID = Depends(get_current_org_id), d
 
         for a in m.action_items:
             aid = f"action:{a.id}"
-            add_node(aid, label=a.task[:80], type="action_item", status=a.status)
+            add_node(
+                aid,
+                label=a.task[:80],
+                task=a.task,
+                type="action_item",
+                status=a.status,
+                owner=a.owner,
+                due_date=a.due_date.isoformat() if a.due_date else None,
+                priority=a.priority,
+                meeting_id=str(m.id),
+                meeting_title=m.title,
+            )
             edges.append({"source": mid, "target": aid, "type": "produced"})
             if a.owner:
                 pid = add_person(a.owner)
