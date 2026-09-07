@@ -202,7 +202,11 @@ async def list_importable_bots(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
 
     meeting_repo = MeetingRepository(db)
-    existing_bot_ids = await meeting_repo.get_existing_bot_ids(org_id)
+    # Global, not org-scoped: meetstream_bot_id is unique across the whole
+    # database (this MeetStream account can be shared by more than one
+    # workspace in this app), so a bot already imported anywhere else must
+    # still be excluded here even though it's not in *this* org's meetings.
+    existing_bot_ids = await meeting_repo.get_all_existing_bot_ids()
 
     candidates = [
         {
@@ -247,8 +251,10 @@ async def import_bot(
     """
     own_key = await require_meetstream_api_key(db, user.id)
     meeting_repo = MeetingRepository(db)
-    if body.bot_id in await meeting_repo.get_existing_bot_ids(org_id):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This bot is already imported.")
+    # Global check (see get_all_existing_bot_ids) - meetstream_bot_id is
+    # unique across every organization, not just this one.
+    if body.bot_id in await meeting_repo.get_all_existing_bot_ids():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This bot is already imported (possibly under a different workspace).")
 
     try:
         bot_resp = await meetstream_client.get_bot(body.bot_id, api_key=own_key)
@@ -272,14 +278,21 @@ async def import_bot(
     started_at = _parse_ts(details.get("StartTime"))
     ended_at = _parse_ts(details.get("EndTime"))
 
-    meeting = await meeting_repo.create(
-        org_id=org_id,
-        meeting_url=meeting_url,
-        title=body.title or f"Imported: {meeting_url.split('/')[-1] if meeting_url else body.bot_id}",
-        platform=platform,
-        meetstream_bot_id=body.bot_id,
-        created_by_user_id=user.id,
-    )
+    try:
+        meeting = await meeting_repo.create(
+            org_id=org_id,
+            meeting_url=meeting_url,
+            title=body.title or f"Imported: {meeting_url.split('/')[-1] if meeting_url else body.bot_id}",
+            platform=platform,
+            meetstream_bot_id=body.bot_id,
+            created_by_user_id=user.id,
+        )
+    except Exception:
+        # Defense in depth against the get_all_existing_bot_ids check above
+        # racing a concurrent import of the same bot - meetstream_bot_id's
+        # DB-level unique constraint is the actual source of truth.
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This bot is already imported (possibly under a different workspace).")
     await meeting_repo.update_status(
         meeting.id,
         status="completed",

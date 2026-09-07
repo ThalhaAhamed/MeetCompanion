@@ -82,6 +82,17 @@ class MeetingRepository:
         result = await self.session.execute(stmt)
         return {row[0] for row in result.all()}
 
+    async def get_all_existing_bot_ids(self) -> set:
+        """Every meetstream_bot_id tracked anywhere, across every
+        organization - meetings.meetstream_bot_id has a *global* unique
+        constraint (one MeetStream account can genuinely be shared by
+        multiple workspaces in this app), so a bot already imported under a
+        different org is still not importable here even though
+        get_existing_bot_ids (org-scoped) wouldn't catch that."""
+        stmt = select(Meeting.meetstream_bot_id).where(Meeting.meetstream_bot_id.is_not(None))
+        result = await self.session.execute(stmt)
+        return {row[0] for row in result.all()}
+
     async def get_by_id(self, org_id: uuid.UUID, meeting_id: uuid.UUID) -> Optional[Meeting]:
         stmt = (
             select(Meeting)
