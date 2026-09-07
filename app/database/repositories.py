@@ -72,6 +72,16 @@ class MeetingRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    async def get_existing_bot_ids(self, org_id: uuid.UUID) -> set:
+        """Every meetstream_bot_id already tracked for this org - used to
+        filter the account's full bot list down to ones with no local
+        meeting row yet (the import-old-bot-data feature's candidate set)."""
+        stmt = select(Meeting.meetstream_bot_id).where(
+            Meeting.organization_id == org_id, Meeting.meetstream_bot_id.is_not(None)
+        )
+        result = await self.session.execute(stmt)
+        return {row[0] for row in result.all()}
+
     async def get_by_id(self, org_id: uuid.UUID, meeting_id: uuid.UUID) -> Optional[Meeting]:
         stmt = (
             select(Meeting)

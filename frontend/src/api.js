@@ -98,6 +98,18 @@ export function getMeetingBot(id) {
   return req(`/meetings/${id}/bot`)
 }
 
+export function listImportableBots() {
+  return req('/meetings/importable')
+}
+
+export function importBot({ bot_id, title, platform, meeting_url }) {
+  return req('/meetings/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bot_id, title, platform, meeting_url }),
+  })
+}
+
 export function getAgent() {
   return req('/agent')
 }

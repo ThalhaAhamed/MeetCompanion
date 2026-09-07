@@ -129,6 +129,19 @@ class MeetStreamClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def list_bots(self, api_key: Optional[str] = None) -> Dict[str, Any]:
+        """List every bot ever deployed on this MeetStream account - includes
+        ones launched outside this app (its own dashboard, another
+        integration), which is how the import-old-bot-data feature finds
+        candidates that have no matching row in our own meetings table."""
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                f"{self.base_url}/api/v1/bots",
+                headers=self._headers(api_key),
+            )
+            resp.raise_for_status()
+            return resp.json()
+
     async def send_bot_message(self, bot_id: str, message: str, api_key: Optional[str] = None) -> Dict[str, Any]:
         """Post a message into the live meeting chat as the bot."""
         async with httpx.AsyncClient(timeout=15.0) as client:

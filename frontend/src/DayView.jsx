@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { listMeetings, listDocuments, uploadDocument } from './api'
 import MeetingDetail from './MeetingDetail'
 import LaunchBot from './LaunchBot'
+import ImportBots from './ImportBots'
 import EmptyState from './EmptyState'
 import { UploadIcon, CalendarIcon, SearchIcon, InboxIcon, CursorClickIcon } from './icons'
 
@@ -22,6 +23,7 @@ export default function DayView() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState(null)
+  const [showImport, setShowImport] = useState(false)
   const fileInputRef = useRef(null)
 
   const refresh = useCallback(() => {
@@ -43,6 +45,11 @@ export default function DayView() {
 
   function handleLaunched(meeting) {
     setDay(todayStr())
+    refresh()
+    setSelectedMeetingId(meeting.id)
+  }
+
+  function handleImported(meeting) {
     refresh()
     setSelectedMeetingId(meeting.id)
   }
@@ -92,12 +99,17 @@ export default function DayView() {
         </div>
         <div className="topbar-actions">
           <LaunchBot onLaunched={handleLaunched} />
+          <button className="upload-btn" onClick={() => setShowImport(true)}>
+            Import old bot data
+          </button>
           <label className="day-picker">
             <CalendarIcon className="day-picker-icon" />
             <input type="date" value={day} onChange={(e) => setDay(e.target.value)} />
           </label>
         </div>
       </header>
+
+      {showImport && <ImportBots onClose={() => setShowImport(false)} onImported={handleImported} />}
 
       {!loading && meetings.length > 0 && (
         <div className="stats-row">

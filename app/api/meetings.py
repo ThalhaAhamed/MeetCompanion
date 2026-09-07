@@ -6,6 +6,7 @@ import uuid
 from datetime import date
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database.connection import get_db
@@ -15,9 +16,11 @@ from app.models.schemas import (
     ParticipantResponse, MemoryResponse, ActionItemResponse, TranscriptSegmentResponse
 )
 from app.services.meetstream import meetstream_client
-from app.api.agent import get_active_agent_config_id, _DEFAULT_FIRST_MESSAGE, _require_claimable_agent, get_meetstream_api_key
+from app.api.agent import get_active_agent_config_id, _DEFAULT_FIRST_MESSAGE, _require_claimable_agent, get_meetstream_api_key, require_meetstream_api_key
 from app.api.deps import get_current_org_id, get_current_user
 from app.models.database import User
+
+_PLATFORM_MAP = {"gmeet": "google_meet", "zoom": "zoom", "teams": "teams"}
 
 router = APIRouter(prefix="/api/meetings", tags=["meetings"])
 
@@ -177,6 +180,120 @@ async def list_meetings(
         offset=offset,
     )
     return meetings
+
+
+@router.get("/importable")
+async def list_importable_bots(
+    user: User = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_current_org_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Bots that exist on this member's MeetStream account but have no
+    matching row in our own meetings table - i.e. ones launched outside
+    this app (its own dashboard, another integration, or before this
+    workspace started using it) that never got tracked, transcribed, or
+    indexed here. The candidate list for the "import old bot data" feature.
+    """
+    own_key = await require_meetstream_api_key(db, user.id)
+    try:
+        bots = await meetstream_client.list_bots(api_key=own_key)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
+
+    meeting_repo = MeetingRepository(db)
+    existing_bot_ids = await meeting_repo.get_existing_bot_ids(org_id)
+
+    candidates = [
+        {
+            "bot_id": b.get("bot_id"),
+            "meeting_url": b.get("meeting_url"),
+            "platform": b.get("platform"),
+            "status": b.get("status"),
+            "bot_username": b.get("bot_username"),
+            "start_time": b.get("start_time"),
+            "duration": b.get("duration"),
+        }
+        for b in bots.get("bots", [])
+        if b.get("bot_id") and b.get("bot_id") not in existing_bot_ids
+    ]
+    return {"importable": candidates}
+
+
+class ImportBotRequest(BaseModel):
+    bot_id: str
+    title: Optional[str] = None
+    # Frontend already has these from the /importable listing (MeetStream's
+    # own bot-list response) - passed through here rather than re-derived,
+    # since get_bot's nested bot_details payload doesn't reliably carry a
+    # platform field the way the list endpoint does.
+    platform: Optional[str] = None
+    meeting_url: Optional[str] = None
+
+
+@router.post("/import", response_model=MeetingResponse, status_code=status.HTTP_201_CREATED)
+async def import_bot(
+    body: ImportBotRequest,
+    user: User = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_current_org_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Bring an existing MeetStream bot (launched outside this app) into our
+    own tracking: creates the local meeting row from its real metadata, then
+    runs it through the same transcript-fetch and memory-extraction pipeline
+    a normal webhook-driven meeting goes through, so it becomes searchable
+    and recallable like any other meeting.
+    """
+    own_key = await require_meetstream_api_key(db, user.id)
+    meeting_repo = MeetingRepository(db)
+    if body.bot_id in await meeting_repo.get_existing_bot_ids(org_id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This bot is already imported.")
+
+    try:
+        bot_resp = await meetstream_client.get_bot(body.bot_id, api_key=own_key)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
+
+    details = bot_resp.get("bot_details", bot_resp)
+    meeting_url = details.get("MeetingLink") or body.meeting_url
+    transcript_id = details.get("transcript_id")
+    platform_raw = body.platform or ""
+    platform = _PLATFORM_MAP.get(platform_raw.lower(), platform_raw.lower() or None)
+
+    meeting = await meeting_repo.create(
+        org_id=org_id,
+        meeting_url=meeting_url,
+        title=body.title or f"Imported: {meeting_url.split('/')[-1] if meeting_url else body.bot_id}",
+        platform=platform,
+        meetstream_bot_id=body.bot_id,
+        created_by_user_id=user.id,
+    )
+    await meeting_repo.update_status(
+        meeting.id,
+        status="completed",
+        meetstream_transcript_id=transcript_id,
+        processing_status="queued_for_processing" if transcript_id else "failed",
+        processing_error=None if transcript_id else "No transcript available for this bot yet.",
+    )
+    await db.commit()
+    await db.refresh(meeting)
+
+    if transcript_id:
+        from app.services.processing import processing_pipeline
+        try:
+            await processing_pipeline.process_meeting_transcript(
+                meeting_id=meeting.id,
+                transcript_id=transcript_id,
+            )
+        except Exception as e:
+            await meeting_repo.update_status(
+                meeting.id, processing_status="failed", processing_error=f"Import processing failed: {e}"
+            )
+            await db.commit()
+        await db.refresh(meeting)
+
+    return meeting
 
 
 @router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
