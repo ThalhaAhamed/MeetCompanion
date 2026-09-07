@@ -3,7 +3,7 @@ Meeting Management Endpoints.
 Allows creating meetings, triggering MeetStream bot deployment, and retrieving meeting data.
 """
 import uuid
-from datetime import date
+from datetime import date, datetime
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
@@ -261,6 +261,17 @@ async def import_bot(
     platform_raw = body.platform or ""
     platform = _PLATFORM_MAP.get(platform_raw.lower(), platform_raw.lower() or None)
 
+    def _parse_ts(value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    started_at = _parse_ts(details.get("StartTime"))
+    ended_at = _parse_ts(details.get("EndTime"))
+
     meeting = await meeting_repo.create(
         org_id=org_id,
         meeting_url=meeting_url,
@@ -272,9 +283,11 @@ async def import_bot(
     await meeting_repo.update_status(
         meeting.id,
         status="completed",
+        started_at=started_at,
+        ended_at=ended_at,
         meetstream_transcript_id=transcript_id,
         processing_status="queued_for_processing" if transcript_id else "failed",
-        processing_error=None if transcript_id else "No transcript available for this bot yet.",
+        processing_error=None if transcript_id else "No transcript available for this bot (it wasn't recorded with transcription enabled).",
     )
     await db.commit()
     await db.refresh(meeting)
