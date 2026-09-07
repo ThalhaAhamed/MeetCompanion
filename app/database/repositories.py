@@ -4,7 +4,7 @@ Data access repositories with strict organization isolation.
 import uuid
 from datetime import datetime, timezone, date
 from typing import Optional, List, Dict, Any, Tuple
-from sqlalchemy import select, update, delete, func, and_, or_, desc
+from sqlalchemy import select, update, delete, func, and_, or_, desc, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.models.database import (
@@ -527,6 +527,18 @@ class VectorRepository:
         Cosine similarity search using pgvector cosine distance operator `<=>`.
         Similarity = 1 - distance.
         """
+        # The ivfflat index (lists=100, see migrations/001_initial_schema.sql)
+        # defaults to probes=1 - i.e. it only scans ~1% of the index's
+        # clusters per query. That's a reasonable speed/recall tradeoff once
+        # a table is large enough for 100 lists to make sense, but at this
+        # app's actual per-org data volume it means real nearest neighbors
+        # are frequently skipped entirely, not just ranked lower - the
+        # search misses relevant results rather than merely deprioritizing
+        # them. Raising probes trades a small amount of query time for
+        # dramatically better recall; 10 is a safe middle ground that stays
+        # fast even as the table grows.
+        await self.session.execute(text("SET LOCAL ivfflat.probes = 10"))
+
         # Distance calculation
         distance_expr = MeetingMemoryEmbedding.embedding.cosine_distance(query_embedding).label("distance")
 
