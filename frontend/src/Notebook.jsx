@@ -365,7 +365,6 @@ export default function Notebook() {
   }
 
   function handleWheel(e) {
-    e.preventDefault()
     const rect = svgRef.current.getBoundingClientRect()
     const cx = ((e.clientX - rect.left) / rect.width) * width
     const cy = ((e.clientY - rect.top) / rect.height) * height
@@ -377,6 +376,22 @@ export default function Notebook() {
       return { x, y, k }
     })
   }
+
+  // React attaches JSX onWheel as a passive listener, so e.preventDefault()
+  // inside it silently does nothing (console even warns about it) - the
+  // page scrolls right along with the graph zooming. A native listener
+  // registered with { passive: false } is the only way to actually stop
+  // that scroll.
+  useEffect(() => {
+    const el = svgRef.current
+    if (!el || tab !== 'graph') return
+    function onWheel(e) {
+      e.preventDefault()
+      handleWheel(e)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [tab, nodes.length])
 
   function handleBackgroundMouseDown(e) {
     panRef.current = { startX: e.clientX, startY: e.clientY, origin: { ...view } }
@@ -518,7 +533,6 @@ export default function Notebook() {
                 viewBox={`0 0 ${width} ${height}`}
                 className="context-graph"
                 style={{ maxWidth: '100%', background: '#0a0a0c', borderRadius: 'var(--radius)', border: '1px solid var(--border)', cursor: panRef.current ? 'grabbing' : 'grab' }}
-                onWheel={handleWheel}
                 onMouseDown={handleBackgroundMouseDown}
                 onMouseMove={handleMouseMove}
                 onMouseUp={() => handleMouseUp()}
