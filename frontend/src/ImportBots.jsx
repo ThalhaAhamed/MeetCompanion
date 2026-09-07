@@ -30,6 +30,7 @@ export default function ImportBots({ onClose, onImported }) {
         bot_id: bot.bot_id,
         platform: bot.platform,
         meeting_url: bot.meeting_url,
+        title: bot.bot_username ? `${bot.bot_username} (imported)` : undefined,
       })
       setImportedIds((s) => new Set(s).add(bot.bot_id))
       onImported?.(meeting)
@@ -63,8 +64,9 @@ export default function ImportBots({ onClose, onImported }) {
           <ul className="list" style={{ maxHeight: 360, overflowY: 'auto' }}>
             {candidates.map((bot) => (
               <li key={bot.bot_id} className="list-item doc-item">
-                <div className="list-item-title">{bot.meeting_url || bot.bot_id}</div>
+                <div className="list-item-title">{bot.bot_username || 'Untitled bot'}</div>
                 <div className="list-item-meta">
+                  {bot.meeting_url && <span className="tag">{bot.meeting_url}</span>}
                   {bot.platform && <span className="tag">{bot.platform}</span>}
                   {bot.status && <span className="tag">{bot.status}</span>}
                   {bot.start_time && <span className="time">{new Date(bot.start_time).toLocaleString()}</span>}
