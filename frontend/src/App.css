@@ -1038,6 +1038,46 @@ body {
   cursor: not-allowed;
 }
 
+/* Notebook page - merged search + knowledge graph */
+.notebook-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.notebook-layout .context-graph {
+  flex: 1;
+  min-width: 0;
+}
+
+.notebook-panel {
+  width: 320px;
+  flex: none;
+  max-height: 560px;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 4px 12px;
+}
+
+.notebook-detail {
+  padding: 12px 14px;
+}
+
+.notebook-detail h4 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  margin: 16px 0 6px;
+}
+
+.notebook-detail .list-item {
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
 .search-results h2 {
   font-size: 13px;
   text-transform: uppercase;

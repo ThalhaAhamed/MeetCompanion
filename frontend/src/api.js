@@ -98,6 +98,10 @@ export function getMeetingBot(id) {
   return req(`/meetings/${id}/bot`)
 }
 
+export function getKnowledgeGraph() {
+  return req('/graph')
+}
+
 export function listImportableBots() {
   return req('/meetings/importable')
 }

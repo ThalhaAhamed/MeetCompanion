@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import DayView from './DayView'
 import AgentSettings from './AgentSettings'
-import MemorySearch from './MemorySearch'
 import Members from './Members'
+import Notebook from './Notebook'
 import AuthGate from './AuthGate'
 import { logout, getAgentCredentials, setMeetstreamApiKey, clearMeetstreamApiKey } from './api'
 import './App.css'
@@ -14,10 +14,12 @@ const ICONS = {
       <path d="M2 7h14M6.5 2v3.2M11.5 2v3.2" strokeLinecap="round" />
     </svg>
   ),
-  search: (
+  notebook: (
     <svg viewBox="0 0 18 18" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.6">
-      <circle cx="8" cy="8" r="5.2" />
-      <path d="M15.5 15.5L12 12" strokeLinecap="round" />
+      <circle cx="4" cy="4" r="2" />
+      <circle cx="14" cy="4" r="2" />
+      <circle cx="9" cy="14" r="2" />
+      <path d="M5.6 5.2L8 12.4M12.4 5.2L10 12.4M6 4h6" strokeLinecap="round" />
     </svg>
   ),
   agent: (
@@ -38,7 +40,7 @@ const ICONS = {
 
 const PAGES = {
   day: { label: 'Day view', Component: DayView },
-  search: { label: 'Search memory', Component: MemorySearch },
+  notebook: { label: 'Notebook', Component: Notebook },
   agent: { label: 'Agent', Component: AgentSettings },
   members: { label: 'Members', Component: Members },
 }
