@@ -3,9 +3,10 @@ Meeting Memory RAG Engine.
 Indexes meeting transcripts and structured memories into vector store,
 and provides semantic search with customer, project, and speaker filtering.
 """
+import re
 import uuid
 from typing import List, Dict, Any, Optional
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.services.embedding import embedding_service
@@ -14,6 +15,56 @@ from app.database.repositories import VectorRepository, MeetingRepository, Memor
 from app.models.schemas import SearchMeetingMemoryQuery, SearchResultItem, SearchMeetingMemoryResponse
 from app.models.database import MemoryType, Meeting, Memory
 from app.rag.retrieval import reciprocal_rank_fusion
+
+_MONTHS = {
+    "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
+    "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7, "july": 7,
+    "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9, "oct": 10,
+    "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
+}
+_MONTH_DAY_RE = re.compile(
+    r"\b(" + "|".join(_MONTHS.keys()) + r")\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b",
+    re.IGNORECASE,
+)
+
+
+def _extract_date_hint(query: str, reference: date) -> Optional[date]:
+    """
+    Pull an explicit or relative date out of free-text search queries like
+    "what happened on september 2" or "what did thalha say yesterday" - the
+    search itself is pure semantic/keyword matching over content text, with
+    no awareness that a query mentions a specific day, so a meeting that
+    actually occurred on the mentioned date can rank behind other meetings
+    that merely talk *about* that date. Returns None when no date reference
+    is found, so unrelated queries aren't affected.
+    """
+    q = query.lower()
+    if "yesterday" in q:
+        return reference - timedelta(days=1)
+    if "today" in q:
+        return reference
+    if "tomorrow" in q:
+        return reference + timedelta(days=1)
+    m = _MONTH_DAY_RE.search(q)
+    if m:
+        month = _MONTHS[m.group(1).lower()]
+        day = int(m.group(2))
+        year = reference.year
+        try:
+            candidate = date(year, month, day)
+        except ValueError:
+            return None
+        # A bare "September 2" mentioned well after that month has passed
+        # this year almost always means last year's September 2, not a
+        # future date - e.g. searching in December for "September 2" should
+        # not resolve to next year.
+        if candidate > reference:
+            try:
+                candidate = date(year - 1, month, day)
+            except ValueError:
+                return None
+        return candidate
+    return None
 
 
 class MeetingMemoryRAG:
@@ -198,6 +249,21 @@ class MeetingMemoryRAG:
             keyword_ranked.append({"id": rid})
 
         fused = reciprocal_rank_fusion([vector_ranked, keyword_ranked], key_field="id")
+
+        # If the query names a specific day ("what happened on september 2",
+        # "what did thalha say yesterday"), move results actually from that
+        # day ahead of ones merely talking about it - a meeting held on the
+        # 3rd where someone recaps "on September 2nd we decided X" otherwise
+        # outranks the real September 2nd meeting on pure text/semantic
+        # similarity. Stable sort - relevance order within each group (date
+        # matches vs not) is preserved from the fused ranking.
+        date_hint = _extract_date_hint(query, datetime.now(timezone.utc).date())
+        if date_hint:
+            def _date_rank(item):
+                record = records_by_id[item["id"]]
+                matches = bool(record.created_at and record.created_at.date() == date_hint)
+                return 0 if matches else 1
+            fused = sorted(fused, key=_date_rank)
 
         results: List[SearchResultItem] = []
         for item in fused[:limit]:
