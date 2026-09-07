@@ -25,6 +25,11 @@ export default function DayView() {
   const [uploadError, setUploadError] = useState(null)
   const [showImport, setShowImport] = useState(false)
   const fileInputRef = useRef(null)
+  // Set right before switching `day` so the meetings-loaded effect below can
+  // select it once that day's list actually contains it - selecting
+  // immediately after setDay() would race the fetch, since setDay only
+  // schedules the state update rather than applying it synchronously.
+  const [pendingSelectId, setPendingSelectId] = useState(null)
 
   const refresh = useCallback(() => {
     setLoading(true)
@@ -39,9 +44,16 @@ export default function DayView() {
   }, [day])
 
   useEffect(() => {
-    setSelectedMeetingId(null)
+    if (!pendingSelectId) setSelectedMeetingId(null)
     refresh()
-  }, [day, refresh])
+  }, [day, refresh]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (pendingSelectId && meetings.some((m) => m.id === pendingSelectId)) {
+      setSelectedMeetingId(pendingSelectId)
+      setPendingSelectId(null)
+    }
+  }, [meetings, pendingSelectId])
 
   function handleLaunched(meeting) {
     setDay(todayStr())
@@ -50,8 +62,17 @@ export default function DayView() {
   }
 
   function handleImported(meeting) {
-    refresh()
-    setSelectedMeetingId(meeting.id)
+    // A bot that was actually used on some other day should jump the
+    // calendar to that real day - the meeting won't appear in whatever day
+    // is currently showing otherwise, since the list is fetched per-day.
+    const meetingDay = meeting.started_at ? meeting.started_at.slice(0, 10) : null
+    if (meetingDay && meetingDay !== day) {
+      setPendingSelectId(meeting.id)
+      setDay(meetingDay)
+    } else {
+      refresh()
+      setSelectedMeetingId(meeting.id)
+    }
   }
 
   async function handleFileChosen(e) {
