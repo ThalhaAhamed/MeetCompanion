@@ -12,6 +12,7 @@ from app.api.documents import router as documents_router
 from app.api.agent import router as agent_router
 from app.api.search import router as search_router
 from app.api.action_items import router as action_items_router
+from app.api.graph import router as graph_router
 from app.api.auth import router as auth_router
 from app.api.members import router as members_router
 from app.mcp.server import router as mcp_router
@@ -142,6 +143,7 @@ app.include_router(documents_router)
 app.include_router(agent_router)
 app.include_router(search_router)
 app.include_router(action_items_router)
+app.include_router(graph_router)
 app.include_router(mcp_router)
 
 
