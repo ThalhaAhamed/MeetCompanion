@@ -618,7 +618,12 @@ async def _tool_add_meeting_memory(
         org_id=org_id,
         meeting_id=meeting_id,
         memory=memory,
-        meeting_metadata={"title": meeting.title, "customer_name": meeting.customer_name, "project_name": meeting.project_name},
+        meeting_metadata={
+            "title": meeting.title,
+            "customer_name": meeting.customer_name,
+            "project_name": meeting.project_name,
+            "meeting_date": (meeting.started_at or meeting.created_at).date().isoformat(),
+        },
     )
     await db.commit()
 

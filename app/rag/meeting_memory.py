@@ -28,43 +28,59 @@ _MONTH_DAY_RE = re.compile(
 )
 
 
-def _extract_date_hint(query: str, reference: date) -> Optional[date]:
-    """
-    Pull an explicit or relative date out of free-text search queries like
-    "what happened on september 2" or "what did thalha say yesterday" - the
-    search itself is pure semantic/keyword matching over content text, with
-    no awareness that a query mentions a specific day, so a meeting that
-    actually occurred on the mentioned date can rank behind other meetings
-    that merely talk *about* that date. Returns None when no date reference
-    is found, so unrelated queries aren't affected.
-    """
-    q = query.lower()
-    if "yesterday" in q:
-        return reference - timedelta(days=1)
-    if "today" in q:
-        return reference
-    if "tomorrow" in q:
-        return reference + timedelta(days=1)
-    m = _MONTH_DAY_RE.search(q)
-    if m:
-        month = _MONTHS[m.group(1).lower()]
-        day = int(m.group(2))
-        year = reference.year
+def _resolve_month_day(month: int, day: int, reference: date) -> Optional[date]:
+    """A bare "September 2" mentioned well after that month has passed this
+    year almost always means last year's September 2, not a future date -
+    e.g. searching in December for "September 2" should not resolve to next
+    year."""
+    try:
+        candidate = date(reference.year, month, day)
+    except ValueError:
+        return None
+    if candidate > reference:
         try:
-            candidate = date(year, month, day)
+            candidate = date(reference.year - 1, month, day)
         except ValueError:
             return None
-        # A bare "September 2" mentioned well after that month has passed
-        # this year almost always means last year's September 2, not a
-        # future date - e.g. searching in December for "September 2" should
-        # not resolve to next year.
-        if candidate > reference:
-            try:
-                candidate = date(year - 1, month, day)
-            except ValueError:
-                return None
-        return candidate
-    return None
+    return candidate
+
+
+def _find_date_mentions(text: str, reference: date) -> List[date]:
+    """
+    Find every explicit or relative date mentioned in `text`, resolved
+    against `reference` - the date to treat "yesterday"/"today"/"tomorrow"
+    as relative to. Used two ways with two different meanings of
+    "reference": at search time, reference is *today* (so a query's
+    "yesterday" means the day before the search happens); at index time,
+    reference is the *meeting's own date* (so "yesterday" spoken during a
+    meeting resolves to the day before that meeting, not the day before
+    whenever the content later gets indexed or searched). Conflating those
+    two would make relative-date words in old transcripts collide with
+    unrelated queries that happen to also say "yesterday".
+    """
+    q = text.lower()
+    found: List[date] = []
+    if re.search(r"\byesterday\b", q):
+        found.append(reference - timedelta(days=1))
+    if re.search(r"\btoday\b", q):
+        found.append(reference)
+    if re.search(r"\btomorrow\b", q):
+        found.append(reference + timedelta(days=1))
+    for m in _MONTH_DAY_RE.finditer(q):
+        month = _MONTHS[m.group(1).lower()]
+        day = int(m.group(2))
+        resolved = _resolve_month_day(month, day, reference)
+        if resolved:
+            found.append(resolved)
+    return found
+
+
+def _extract_date_hint(query: str, reference: date) -> Optional[date]:
+    """Single best date mention in a search query - see _find_date_mentions.
+    Only the first match is used for search-time boosting, since a query
+    realistically names at most one target date."""
+    mentions = _find_date_mentions(query, reference)
+    return mentions[0] if mentions else None
 
 
 class MeetingMemoryRAG:
@@ -92,6 +108,15 @@ class MeetingMemoryRAG:
         customer_name = meta.get("customer_name")
         project_name = meta.get("project_name")
         meeting_title = meta.get("title")
+        # Reference point for resolving "yesterday"/"today"/etc *inside*
+        # transcript content - the meeting's own date, not whenever indexing
+        # happens to run. Without this, a chunk saying "yesterday" gets no
+        # resolved date at all, and later a search for the literal word
+        # "yesterday" (resolved against *search time*) can't tell this
+        # content apart from an unrelated meeting that also said "yesterday"
+        # on a completely different real day.
+        meeting_date_str = meta.get("meeting_date")
+        meeting_date = date.fromisoformat(meeting_date_str) if meeting_date_str else None
 
         # 1. Index Transcript Chunks
         chunks = self.chunker.chunk_transcript_segments(transcript_segments)
@@ -100,6 +125,7 @@ class MeetingMemoryRAG:
             embeddings = await self.embedding_service.embed_batch_async(chunk_texts)
 
             for chunk, emb in zip(chunks, embeddings):
+                mentioned_dates = _find_date_mentions(chunk.text, meeting_date) if meeting_date else []
                 chunk_meta = {
                     "customer_name": customer_name,
                     "project_name": project_name,
@@ -109,6 +135,7 @@ class MeetingMemoryRAG:
                     "end_time": chunk.end_time,
                     "segment_indices": chunk.segment_indices,
                     "source": "transcript_chunk",
+                    "mentioned_dates": [d.isoformat() for d in mentioned_dates],
                 }
                 await vector_repo.add_meeting_embedding(
                     org_id=org_id,
@@ -129,6 +156,7 @@ class MeetingMemoryRAG:
             mem_embeddings = await self.embedding_service.embed_batch_async(memory_texts)
 
             for mem, emb in zip(memories, mem_embeddings):
+                mentioned_dates = _find_date_mentions(mem.content, meeting_date) if meeting_date else []
                 mem_meta = {
                     "customer_name": mem.customer_name or customer_name,
                     "project_name": mem.project_name or project_name,
@@ -137,6 +165,7 @@ class MeetingMemoryRAG:
                     "memory_type": mem.type.value,
                     "importance": mem.importance,
                     "source": "memory",
+                    "mentioned_dates": [d.isoformat() for d in mentioned_dates],
                 }
                 await vector_repo.add_meeting_embedding(
                     org_id=org_id,
@@ -166,8 +195,11 @@ class MeetingMemoryRAG:
         """
         vector_repo = VectorRepository(db)
         meta = meeting_metadata or {}
+        meeting_date_str = meta.get("meeting_date")
+        meeting_date = date.fromisoformat(meeting_date_str) if meeting_date_str else None
         text_repr = f"[{memory.type.value.upper()}] (Speaker: {memory.speaker or 'Unknown'}): {memory.content}"
         embedding = await self.embedding_service.embed_text_async(text_repr)
+        mentioned_dates = _find_date_mentions(memory.content, meeting_date) if meeting_date else []
         mem_meta = {
             "customer_name": memory.customer_name or meta.get("customer_name"),
             "project_name": memory.project_name or meta.get("project_name"),
@@ -176,6 +208,7 @@ class MeetingMemoryRAG:
             "memory_type": memory.type.value,
             "importance": memory.importance,
             "source": "memory",
+            "mentioned_dates": [d.isoformat() for d in mentioned_dates],
         }
         await vector_repo.add_meeting_embedding(
             org_id=org_id,
@@ -259,10 +292,20 @@ class MeetingMemoryRAG:
         # matches vs not) is preserved from the fused ranking.
         date_hint = _extract_date_hint(query, datetime.now(timezone.utc).date())
         if date_hint:
+            date_hint_str = date_hint.isoformat()
+
             def _date_rank(item):
                 record = records_by_id[item["id"]]
-                matches = bool(record.created_at and record.created_at.date() == date_hint)
-                return 0 if matches else 1
+                # Two ways a chunk can be "about" date_hint: the meeting it
+                # came from actually happened that day, or the content
+                # itself mentions that date (resolved against the meeting's
+                # own date at index time - see mentioned_dates, and
+                # _find_date_mentions' docstring for why that resolution has
+                # to happen relative to the meeting, not to whenever this
+                # search runs).
+                meeting_matches = bool(record.created_at and record.created_at.date() == date_hint)
+                content_matches = date_hint_str in ((record.metadata_ or {}).get("mentioned_dates") or [])
+                return 0 if (meeting_matches or content_matches) else 1
             fused = sorted(fused, key=_date_rank)
 
         results: List[SearchResultItem] = []

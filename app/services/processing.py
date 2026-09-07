@@ -163,6 +163,7 @@ class MeetingProcessingPipeline:
                         "title": meeting.title,
                         "customer_name": meeting.customer_name,
                         "project_name": meeting.project_name,
+                        "meeting_date": (meeting.started_at or meeting.created_at).date().isoformat(),
                     }
                 )
 
