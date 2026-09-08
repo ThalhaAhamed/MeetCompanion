@@ -36,9 +36,13 @@ function useForceLayout(nodes, edges, width, height) {
   const activeUntilRef = useRef(0)
   const runningRef = useRef(false)
   const draggingIdRef = useRef(null)
+  const settledRef = useRef(false)
   const [, setTick] = useState(0)
+  const [settled, setSettled] = useState(false)
 
   useEffect(() => {
+    settledRef.current = false
+    setSettled(false)
     const pos = posRef.current
     for (const n of nodes) {
       if (!pos.has(n.id)) {
@@ -121,6 +125,7 @@ function useForceLayout(nodes, edges, width, height) {
       // fine for a handful of nodes but fights the repulsion needed to
       // separate clusters once there are dozens of them.
       const gravity = 0.001 / Math.max(1, Math.sqrt(ids.length / 20))
+      let totalSpeed = 0
       for (const id of ids) {
         if (id === draggingIdRef.current) continue
         const p = pos.get(id)
@@ -132,12 +137,25 @@ function useForceLayout(nodes, edges, width, height) {
         p.y += p.vy
         p.x = Math.max(20, Math.min(width - 20, p.x))
         p.y = Math.max(20, Math.min(height - 20, p.y))
+        totalSpeed += Math.abs(p.vx) + Math.abs(p.vy)
+      }
+      // Reveal the graph as soon as it's visually calm rather than after a
+      // fixed delay - a small graph settles almost instantly (so filtering
+      // never shows a spinner) while a dense one gets however long it
+      // actually needs instead of being revealed mid-jiggle.
+      if (!settledRef.current && ids.length > 0 && totalSpeed / ids.length < 0.12) {
+        settledRef.current = true
+        setSettled(true)
       }
       setTick((t) => t + 1)
       if (performance.now() < activeUntilRef.current) {
         requestAnimationFrame(step)
       } else {
         runningRef.current = false
+        if (!settledRef.current) {
+          settledRef.current = true
+          setSettled(true)
+        }
       }
     }
 
@@ -154,7 +172,7 @@ function useForceLayout(nodes, edges, width, height) {
     setTick((t) => t + 1)
   }
 
-  return { positions: posRef.current, draggingIdRef, bump }
+  return { positions: posRef.current, draggingIdRef, bump, settled }
 }
 
 function NodeDetail({ node, nodes, edges, onOpenNode }) {
@@ -314,20 +332,18 @@ export default function Notebook() {
   }, [edges, filteredNodes])
 
   const degrees = useMemo(() => computeDegrees(filteredNodes, filteredEdges), [filteredNodes, filteredEdges])
-  const { positions, draggingIdRef, bump } = useForceLayout(filteredNodes, filteredEdges, width, height)
+  const { positions, draggingIdRef, bump, settled } = useForceLayout(filteredNodes, filteredEdges, width, height)
 
   // The simulation starts nodes at random positions and throws them around
-  // hard for the first stretch before it settles - showing that raw jiggle
-  // looks broken, so a brief "arranging" overlay covers it. This is keyed
-  // to the raw data load (not filteredNodes/filteredEdges), so switching
-  // the node-type filter stays instant instead of re-triggering the spinner.
-  const [layoutReady, setLayoutReady] = useState(false)
+  // hard before it calms down - showing that raw jiggle looks broken, so an
+  // "arranging" overlay covers it until `settled` says the layout is calm.
+  // Switching the node-type filter reuses already-settled positions, so it
+  // re-settles within a frame or two and the spinner never has time to show.
+  const [everSettled, setEverSettled] = useState(false)
   useEffect(() => {
-    if (!data) return
-    setLayoutReady(false)
-    const t = setTimeout(() => setLayoutReady(true), 1100)
-    return () => clearTimeout(t)
-  }, [data])
+    if (settled) setEverSettled(true)
+  }, [settled])
+  const layoutReady = everSettled || settled
 
   const selectedNode = nodes.find((n) => n.id === selectedId) || null
 
