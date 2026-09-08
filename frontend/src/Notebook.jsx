@@ -420,7 +420,7 @@ export default function Notebook() {
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
-  }, [tab, nodes.length])
+  }, [tab, nodes.length, layoutReady])
 
   function handleBackgroundMouseDown(e) {
     panRef.current = { startX: e.clientX, startY: e.clientY, origin: { ...view } }
