@@ -316,6 +316,17 @@ export default function Notebook() {
   const degrees = useMemo(() => computeDegrees(filteredNodes, filteredEdges), [filteredNodes, filteredEdges])
   const { positions, draggingIdRef, bump } = useForceLayout(filteredNodes, filteredEdges, width, height)
 
+  // The simulation starts nodes at random positions and throws them around
+  // hard for the first stretch before it settles - showing that raw jiggle
+  // looks broken, so a brief "arranging" overlay covers it and the graph
+  // only appears once the layout has had time to calm down.
+  const [layoutReady, setLayoutReady] = useState(false)
+  useEffect(() => {
+    setLayoutReady(false)
+    const t = setTimeout(() => setLayoutReady(true), 1100)
+    return () => clearTimeout(t)
+  }, [filteredNodes.length, filteredEdges.length])
+
   const selectedNode = nodes.find((n) => n.id === selectedId) || null
 
   const neighborIds = new Set()
@@ -527,6 +538,11 @@ export default function Notebook() {
           <div className="notebook-layout">
             {nodes.length === 0 ? (
               <p className="empty">Nothing here yet - meetings need participants, memories, or action items first.</p>
+            ) : !layoutReady ? (
+              <div className="graph-arranging">
+                <div className="graph-arranging-spinner" />
+                <span>Arranging graph…</span>
+              </div>
             ) : (
               <svg
                 ref={svgRef}
