@@ -318,14 +318,16 @@ export default function Notebook() {
 
   // The simulation starts nodes at random positions and throws them around
   // hard for the first stretch before it settles - showing that raw jiggle
-  // looks broken, so a brief "arranging" overlay covers it and the graph
-  // only appears once the layout has had time to calm down.
+  // looks broken, so a brief "arranging" overlay covers it. This is keyed
+  // to the raw data load (not filteredNodes/filteredEdges), so switching
+  // the node-type filter stays instant instead of re-triggering the spinner.
   const [layoutReady, setLayoutReady] = useState(false)
   useEffect(() => {
+    if (!data) return
     setLayoutReady(false)
     const t = setTimeout(() => setLayoutReady(true), 1100)
     return () => clearTimeout(t)
-  }, [filteredNodes.length, filteredEdges.length])
+  }, [data])
 
   const selectedNode = nodes.find((n) => n.id === selectedId) || null
 
