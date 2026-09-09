@@ -1,6 +1,6 @@
 # MeetStream Companion 🎙️🧠
 
-**[▶ Try it now](https://frontend-production-1102c.up.railway.app)** — create your own private workspace (or join one with a code) and launch a bot into a real meeting.
+**[▶ Try it now](https://meetstreamcompanion.up.railway.app)** — create your own private workspace (or join one with a code) and launch a bot into a real meeting.
 
 > **Persistent AI Meeting Companion** — deploys a voice agent into your meetings via **MeetStream MIA**, remembers everything across every call using **PostgreSQL + pgvector**, and exposes that memory back to the live agent through **MCP (Model Context Protocol)** — plus a hosted web dashboard the whole team can sign into.
 
