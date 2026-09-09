@@ -7,6 +7,7 @@ but "which agent is mine" is personal, the same way a Slack workspace is
 shared while each person's own bot/app connections aren't.
 """
 import uuid
+import httpx
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from pydantic import BaseModel
@@ -310,6 +311,21 @@ async def get_current_agent(user: User = Depends(get_current_user), db: AsyncSes
     try:
         cfg = await meetstream_client.get_mia_agent(agent_config_id, api_key=await get_meetstream_api_key(db, user.id))
         return _redact_secrets(cfg)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            # The agent config this member had marked active no longer exists on
+            # MeetStream's side (deleted there directly, or the account behind
+            # the currently-saved API key never had it) - clearing the stale
+            # reference lets them pick a real agent instead of being stuck on a
+            # permanent 502 every time this loads.
+            user_repo = UserRepository(db)
+            await user_repo.update_settings(user.id, {"active_agent_config_id": None})
+            await db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Your active agent no longer exists on MeetStream. Pick another from Agent Settings.",
+            )
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
 
