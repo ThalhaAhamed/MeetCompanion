@@ -13,7 +13,7 @@ The backend and frontend are deployed on Railway (not a local-only dev tool). It
 ## 🌟 Key Features
 
 - **Live in-meeting AI agent, name-gated** — MeetStream's MIA agent joins your Google Meet / Zoom / Teams call and stays silent until addressed by name (e.g. "MeetStream Companion, ..."), then answers using full historical context pulled from past meetings.
-- **Persistent hybrid RAG memory** — every meeting's transcript and extracted memories are embedded and indexed with **Reciprocal Rank Fusion** (vector similarity + Postgres full-text keyword search), so exact terms (names, dates) aren't lost to embedding-only ranking.
+- **Persistent hybrid RAG memory** — every meeting's transcript and extracted memories are embedded and indexed with **Reciprocal Rank Fusion** (vector similarity + Postgres full-text keyword search), so exact terms (names, dates) aren't lost to embedding-only ranking. The ivfflat index is queried with `probes=10` rather than the pgvector default of 1 — at this app's per-workspace data volume, scanning ~1% of clusters was dropping genuinely relevant rows outright, not just ranking them lower.
 - **MCP server with 9 tools** — a date-resolution tool, 4 read tools (search memory, get a meeting, list/count previous meetings, list action items) and 4 write tools (add a memory, add a note, create an action item, update an action item), all org-scoped and audit-logged. Tool output is rendered as plain natural language, not raw JSON, so it reads cleanly if it ever reaches meeting chat.
 - **On-demand chat sharing** — the agent has a `share_in_chat` tool it only calls when a speaker explicitly asks it to post something to the meeting chat; it never dumps tool output into chat automatically.
 - **Chat-based join greeting** — when the bot joins, it posts an intro to the meeting chat explaining who it is, how to address it, and what it can do (realtime voice models don't reliably self-introduce out loud, so this is deliberately chat-based, not spoken).
@@ -22,6 +22,9 @@ The backend and frontend are deployed on Railway (not a local-only dev tool). It
 - **Web dashboard with real accounts** — a Members page for adding/removing who's in your workspace, and for sharing the join code that lets someone else join it; removing someone revokes their session immediately, not just future logins.
 - **Multi-agent management** — create, switch between, and activate multiple MIA agent configs from the dashboard; activating an agent auto-repairs its MCP/database wiring to your workspace if it was ever set up outside this app (e.g. directly in MeetStream's dashboard).
 - **Masked credentials panel** — Agent Settings shows which provider credentials are configured (MeetStream API key, memory-extraction LLM, this workspace's own MCP auth token) without ever exposing full secret values.
+- **Notebook — search + knowledge graph** — hybrid search and a force-directed knowledge graph in one page. The graph is derived from data already stored (meetings, participants, memories, action items) rather than a second extraction pipeline, so it stays in sync for free: people link to the meetings they attended and the memories they spoke, and meetings link to their customers, projects, memories, and action items.
+- **Date-aware retrieval** — a query naming a day ("what did we decide on September 2", "what did Thalha say yesterday") promotes results that are actually *from* that day over ones merely talking about it. Relative words inside transcripts are resolved at index time against the **meeting's own date**, not against whenever the search runs, so "yesterday" spoken in an old call can't collide with an unrelated query that also says "yesterday".
+- **Import bots launched outside the app** — meetings started directly in MeetStream can be pulled in after the fact, with filters, their real start/end dates, and the bot's own name as the meeting title.
 - **Company knowledge RAG** — upload PDFs/docs/notes as a separate knowledge base the agent can also draw on.
 - **Secure by construction** — every table is scoped by `organization_id` and every API route resolves it from your session, not a hardcoded default; HMAC-signed webhooks with replay protection; secrets are redacted server-side before any MeetStream API response reaches the browser.
 
@@ -43,7 +46,7 @@ The backend and frontend are deployed on Railway (not a local-only dev tool). It
    │                                                                 │
    │  ┌────────────┐ ┌─────────────┐ ┌────────────┐ ┌─────────────┐│
    │  │ Webhook API│ │ MCP Server  │ │ Meeting API│ │ Auth/Members││
-   │  │            │ │ (9 tools +  │ │            │ │     API     ││
+   │  │            │ │ (9 tools +  │ │  + Graph   │ │     API     ││
    │  │            │ │ chat-relay) │ │            │ │             ││
    │  └──────┬─────┘ └──────┬──────┘ └─────┬──────┘ └──────┬──────┘│
    │         │              │              │               │       │
@@ -66,7 +69,7 @@ The backend and frontend are deployed on Railway (not a local-only dev tool). It
                                 │
                  ┌───────────────────────────────┐
                  │   React Dashboard · Railway     │
-                 │   Day view · Search · Agent ·   │
+                 │   Day view · Notebook · Agent · │
                  │   Members · sign-in gate        │
                  └───────────────────────────────┘
 ```
@@ -132,10 +135,11 @@ You'll also need a tunnel (e.g. `cloudflared tunnel --url http://localhost:8000`
 ### From the dashboard
 1. **Day view** — pick a date to see every meeting and document from that day. Click **Launch bot** and paste a meeting link (Google Meet / Zoom / Teams) to deploy the agent into a live call. The Title field is just a label for this dashboard — it does not change what the bot is named or addressed as in the meeting.
 2. Click into a meeting to see its **Summary**, **Decisions & Memories**, **Action Items** (editable status), **Transcript**, and live **Bot** status — with a **Stop bot** button while it's still recording.
-3. **Search memory** — semantic + keyword search across every indexed meeting, ranked by match %.
+3. **Notebook** — semantic + keyword search across every indexed meeting, ranked by match %, alongside a force-directed knowledge graph of how people, meetings, customers, projects, memories, and action items connect. Naming a date in the query surfaces that day's meetings first.
 4. **Agent** — view and edit the live MIA agent's system prompt, voice, model, and response settings; create additional agents and switch which one is active; see masked provider credentials.
 5. **Members** — see your workspace's join code (for inviting people directly into it), add someone yourself, or remove someone (revokes their session immediately).
-6. Upload company documents (PDF/DOCX/TXT/MD/CSV) from the Day view's Documents panel to add them to the company-knowledge RAG.
+6. **Import old bots** — pull in meetings that were launched directly in MeetStream rather than through this dashboard; they land on their real date with the bot's name as the title.
+7. Upload company documents (PDF/DOCX/TXT/MD/CSV) from the Day view's Documents panel to add them to the company-knowledge RAG.
 
 ### From a live meeting
 Once a bot joins, it stays silent until addressed by its configured name (e.g. *"MeetStream Companion, what did we decide about the pricing tier last week?"* or *"MeetStream Companion, how many meetings did we have yesterday?"*) — it answers using the MCP tools below, drawing on the same memory the dashboard shows you. Ask it to *"share that in chat"* and it'll post a clean, plain-language version of its answer into the meeting chat — it never does this unprompted.
@@ -212,7 +216,7 @@ python scripts/test_memory_pipeline.py
 
 ```
 app/
-  api/          REST endpoints (meetings, documents, agent, members, auth, search, action items, webhooks, health)
+  api/          REST endpoints (meetings, documents, agent, members, auth, search, graph, action items, webhooks, health)
   api/deps.py   Shared dependency that resolves the signed-in member's own workspace (org_id) from the session
   mcp/          MCP server (JSON-RPC + REST tool endpoints), tool implementations, and per-workspace token auth
   middleware/   Per-member session gate (auth_gate.py)
@@ -220,7 +224,7 @@ app/
   rag/          Hybrid vector+keyword search (meeting memory) and company knowledge RAG
   database/     SQLAlchemy repositories (org-scoped data access)
   models/       ORM models and Pydantic schemas
-frontend/       React + Vite dashboard (Day view, Search, Agent settings, Members, sign-in gate)
+frontend/       React + Vite dashboard (Day view, Notebook, Agent settings, Members, sign-in gate)
 migrations/     SQL schema (Postgres + pgvector) - additive columns are patched in at startup, see app/main.py
 tests/          Unit, integration, and security tests
 start.ps1       One-command local dev environment bootstrap (Windows)
