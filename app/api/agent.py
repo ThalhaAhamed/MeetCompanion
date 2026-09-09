@@ -358,6 +358,36 @@ async def list_agents(user: User = Depends(get_current_user), db: AsyncSession =
     return result
 
 
+async def _get_all_claimed_agent_ids(db: AsyncSession) -> set:
+    """Every agent_config_id any member across the whole account has already
+    claimed - used to find the leftover unclaimed ones for the import list."""
+    from sqlalchemy import select as _select
+    result = await db.execute(_select(User))
+    claimed = set()
+    for user in result.scalars().all():
+        claimed |= set((user.settings or {}).get("agent_config_ids") or [])
+    return claimed
+
+
+@router.get("/importable")
+async def list_importable_agents(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """
+    Agents that exist on this account's MeetStream key but that no member of
+    this app has claimed yet - ones created directly on MeetStream's own
+    dashboard, or left behind after whoever owned them was removed. Lets a
+    member adopt one instead of it just sitting invisible forever.
+    """
+    try:
+        agents = await meetstream_client.list_mia_agents(api_key=await get_meetstream_api_key(db, user.id))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
+
+    claimed_ids = await _get_all_claimed_agent_ids(db)
+    result = _redact_secrets(agents)
+    importable = [cfg for cfg in result.get("agent_configs", []) if cfg.get("AgentConfigID") not in claimed_ids]
+    return {"importable": importable}
+
+
 class AgentCreateRequest(BaseModel):
     agent_name: str
     system_prompt: str = ""

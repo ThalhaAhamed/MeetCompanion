@@ -166,6 +166,10 @@ export function listAgents() {
   return req('/agent/list')
 }
 
+export function listImportableAgents() {
+  return req('/agent/importable')
+}
+
 export function createAgent(payload) {
   return req('/agent', {
     method: 'POST',

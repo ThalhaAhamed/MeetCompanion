@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getAgent, updateAgent, listAgents, activateAgent, getAgentCredentials } from './api'
 import NewAgentForm from './NewAgentForm'
+import ImportAgents from './ImportAgents'
 import EmptyState from './EmptyState'
 import { RocketIcon, InboxIcon } from './icons'
 
@@ -29,6 +30,7 @@ export default function AgentSettings() {
   const [agentsError, setAgentsError] = useState(null)
   const [activatingId, setActivatingId] = useState(null)
   const [showNewForm, setShowNewForm] = useState(false)
+  const [showImportForm, setShowImportForm] = useState(false)
 
   const [credentials, setCredentials] = useState(null)
   const [credentialsError, setCredentialsError] = useState(null)
@@ -152,11 +154,21 @@ export default function AgentSettings() {
           <p className="subtitle">Configure the MIA agent MeetStream deploys into your meetings.</p>
         </div>
         <div className="topbar-actions">
+          <button type="button" className="upload-btn" onClick={() => setShowImportForm(true)}>
+            Import from MeetStream
+          </button>
           <button className="launch-btn" onClick={() => setShowNewForm((v) => !v)}>
             <RocketIcon /> New agent
           </button>
         </div>
       </header>
+
+      {showImportForm && (
+        <ImportAgents
+          onClose={() => setShowImportForm(false)}
+          onImported={() => { loadAgents(); load() }}
+        />
+      )}
 
       {showNewForm && (
         <div className="modal-overlay" onClick={() => setShowNewForm(false)}>
