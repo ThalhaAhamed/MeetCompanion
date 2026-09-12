@@ -13,6 +13,7 @@ import {
   TrashIcon,
 } from '../components/Icons'
 import { Badge, EmptyState, ErrorMessage, Loading, Modal, Spinner } from '../components/ui'
+import Markdown, { toggleTaskInMarkdown } from '../components/Markdown'
 import {
   createFolder,
   createNote,
@@ -96,9 +97,30 @@ function FolderRow({ node, depth, selectedId, onSelect, onContextMenu }) {
   )
 }
 
+const VIEW_KEY = 'meet-companion:note-view'
+
 function NoteEditor({ note, onChange, onDelete, onBack, saving }) {
   const [draft, setDraft] = useState(note)
   const timer = useRef(null)
+  // Preview by default for notes that already have content (the generated
+  // meeting notes in particular); an empty note opens ready to type.
+  const [mode, setMode] = useState(() => {
+    try {
+      return window.localStorage.getItem(VIEW_KEY) || 'preview'
+    } catch {
+      return 'preview'
+    }
+  })
+  const effectiveMode = draft.content ? mode : 'edit'
+
+  function switchMode(next) {
+    setMode(next)
+    try {
+      window.localStorage.setItem(VIEW_KEY, next)
+    } catch {
+      // Preference only.
+    }
+  }
 
   // Only reset the draft when a different note is opened. Re-syncing on every
   // prop change would overwrite what the user is typing each time a save
@@ -107,6 +129,11 @@ function NoteEditor({ note, onChange, onDelete, onBack, saving }) {
     setDraft(note)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.id])
+
+  // The save timestamp is the one field that should follow the server.
+  useEffect(() => {
+    setDraft((current) => (current.updated_at === note.updated_at ? current : { ...current, updated_at: note.updated_at }))
+  }, [note.updated_at])
 
   // Debounced autosave: typing should not fire a request per keystroke, but
   // the user should never have to remember to press save.
@@ -146,6 +173,30 @@ function NoteEditor({ note, onChange, onDelete, onBack, saving }) {
           placeholder="Untitled"
           aria-label="Note title"
         />
+        <div
+          className="flex rounded-lg p-0.5 text-xs"
+          style={{ backgroundColor: 'var(--surface-sunken)' }}
+          role="tablist"
+          aria-label="Note view"
+        >
+          {['preview', 'edit'].map((value) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={effectiveMode === value}
+              className="rounded-md px-2.5 py-1 font-medium capitalize transition-colors"
+              style={{
+                backgroundColor: effectiveMode === value ? 'var(--surface-panel)' : 'transparent',
+                color: effectiveMode === value ? 'var(--text-strong)' : 'var(--text-muted)',
+                boxShadow: effectiveMode === value ? 'var(--elevation-card)' : 'none',
+              }}
+              onClick={() => switchMode(value)}
+            >
+              {value}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           className="mc-btn mc-btn-ghost px-2"
@@ -205,14 +256,24 @@ function NoteEditor({ note, onChange, onDelete, onBack, saving }) {
         </span>
       </div>
 
-      <textarea
-        className="mc-scroll flex-1 resize-none bg-transparent px-5 py-4 text-sm leading-relaxed outline-none"
-        style={{ color: 'var(--text-default)' }}
-        value={draft.content || ''}
-        onChange={(event) => edit('content', event.target.value)}
-        placeholder="Start writing…"
-        aria-label="Note content"
-      />
+      {effectiveMode === 'preview' ? (
+        <div className="mc-scroll flex-1 overflow-y-auto px-6 py-5" onDoubleClick={() => switchMode('edit')}>
+          <Markdown
+            source={draft.content}
+            onToggleTask={(index, checked) => edit('content', toggleTaskInMarkdown(draft.content, index, checked))}
+          />
+        </div>
+      ) : (
+        <textarea
+          className="mc-scroll flex-1 resize-none bg-transparent px-5 py-4 font-mono text-[0.85rem] leading-relaxed outline-none"
+          style={{ color: 'var(--text-default)' }}
+          value={draft.content || ''}
+          onChange={(event) => edit('content', event.target.value)}
+          placeholder="Start writing… Markdown is supported."
+          aria-label="Note content"
+          autoFocus
+        />
+      )}
     </div>
   )
 }
