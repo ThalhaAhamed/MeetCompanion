@@ -191,3 +191,116 @@ export function uploadDocument(file) {
   form.append('file', file)
   return req('/documents/upload', { method: 'POST', body: form })
 }
+
+// ---------------------------------------------------------------------------
+// Setup and configuration
+// ---------------------------------------------------------------------------
+
+export function getSetupStatus() {
+  return req('/setup/status')
+}
+
+export function getProviderCatalog() {
+  return req('/setup/providers')
+}
+
+export function testLlmProvider(config) {
+  return req('/setup/test-llm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  })
+}
+
+export function testDatabase(url) {
+  return req('/setup/test-database', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  })
+}
+
+export function completeSetup(payload) {
+  return req('/setup/complete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function resetSetup() {
+  return req('/setup/reset', { method: 'POST' })
+}
+
+// ---------------------------------------------------------------------------
+// Notebook
+// ---------------------------------------------------------------------------
+
+export function listFolders() {
+  return req('/notebook/folders')
+}
+
+export function createFolder({ name, parent_id = null }) {
+  return req('/notebook/folders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, parent_id }),
+  })
+}
+
+export function updateFolder(id, patch) {
+  return req(`/notebook/folders/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+}
+
+export function deleteFolder(id, { cascade = false } = {}) {
+  return req(`/notebook/folders/${id}?cascade=${cascade}`, { method: 'DELETE' })
+}
+
+export function listNotes(params = {}) {
+  const query = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') query.set(key, value)
+  })
+  const suffix = query.toString()
+  return req(`/notebook/notes${suffix ? `?${suffix}` : ''}`)
+}
+
+export function getNote(id) {
+  return req(`/notebook/notes/${id}`)
+}
+
+export function createNote(payload) {
+  return req('/notebook/notes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateNote(id, patch) {
+  return req(`/notebook/notes/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+}
+
+export function deleteNote(id) {
+  return req(`/notebook/notes/${id}`, { method: 'DELETE' })
+}
+
+export function listNoteTags() {
+  return req('/notebook/tags')
+}
+
+export function askNotebook(payload) {
+  return req('/notebook/ask', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}

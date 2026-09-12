@@ -6,15 +6,14 @@ import time
 import uuid
 from fastapi import APIRouter, HTTPException, Response, Request, Depends
 from pydantic import BaseModel
-from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.connection import get_db
 from app.models.database import User
 from app.middleware.auth_gate import COOKIE_NAME, SESSION_TTL_SECONDS, sign_session, decode_session
+from app.security import hash_password, verify_password
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class LoginRequest(BaseModel):
@@ -26,7 +25,7 @@ class LoginRequest(BaseModel):
 async def login(body: LoginRequest, response: Response, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == body.email.strip().lower(), User.is_active.is_(True)))
     user = result.scalar_one_or_none()
-    if not user or not user.password_hash or not pwd_context.verify(body.password, user.password_hash):
+    if not user or not user.password_hash or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Incorrect email or password.")
 
     token = sign_session(str(user.id), int(time.time()) + SESSION_TTL_SECONDS)

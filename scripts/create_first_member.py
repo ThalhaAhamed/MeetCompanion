@@ -20,12 +20,11 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from passlib.context import CryptContext
 from sqlalchemy import select
 from app.database.connection import AsyncSessionLocal
 from app.models.database import User, Organization
+from app.security import hash_password, verify_password
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 async def main():
@@ -64,7 +63,7 @@ async def main():
             organization_id=org.id,
             email=email,
             name=name,
-            password_hash=pwd_context.hash(password),
+            password_hash=hash_password(password),
             is_active=True,
         )
         db.add(user)

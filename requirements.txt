@@ -43,7 +43,8 @@ pydantic-settings==2.9.1
 python-dotenv==1.1.0
 
 # ---- Security ----
-passlib==1.7.4
+# passlib removed: unmaintained since 2020 and its bcrypt backend detection
+# breaks against bcrypt 4.1+. app/security.py uses bcrypt directly.
 bcrypt==4.2.1
 
 # ---- Logging ----

@@ -12,16 +12,15 @@ import secrets
 import uuid
 from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
-from passlib.context import CryptContext
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.connection import get_db
 from app.models.database import User, Organization
 from app.middleware.auth_gate import COOKIE_NAME, decode_session
 from app.api.deps import get_current_org_id, get_current_user
+from app.security import hash_password, verify_password
 
 router = APIRouter(prefix="/api/members", tags=["members"])
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 async def _current_user_id(request: Request, db: AsyncSession) -> "uuid.UUID | None":
@@ -130,7 +129,7 @@ async def add_member(body: CreateMemberRequest, request: Request, db: AsyncSessi
         organization_id=org_id,
         email=email,
         name=body.name.strip(),
-        password_hash=pwd_context.hash(body.password),
+        password_hash=hash_password(body.password),
         is_active=True,
     )
     db.add(user)
@@ -155,7 +154,7 @@ async def update_self(body: UpdateSelfRequest, user: User = Depends(get_current_
     if body.password is not None:
         if len(body.password) < 8:
             raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
-        user.password_hash = pwd_context.hash(body.password)
+        user.password_hash = hash_password(body.password)
 
     await db.commit()
     return MemberOut(id=str(user.id), name=user.name, email=user.email)
@@ -192,7 +191,7 @@ async def reset_member_password(
     if not user:
         raise HTTPException(status_code=404, detail="Member not found.")
 
-    user.password_hash = pwd_context.hash(body.new_password)
+    user.password_hash = hash_password(body.new_password)
     await db.commit()
     return {"reset": True}
 
