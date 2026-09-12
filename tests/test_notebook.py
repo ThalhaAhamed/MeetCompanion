@@ -323,3 +323,83 @@ async def test_ask_with_no_notes_in_scope_says_so(
     response = await authed_client.post("/api/notebook/ask", json={"question": "Anything?"})
     assert response.status_code == 200
     assert "no notes in scope" in response.json()["answer"]
+
+
+# ---------------------------------------------------------------------------
+# Meetings are filed into the notebook automatically
+# ---------------------------------------------------------------------------
+
+
+async def _seed_completed_meeting():
+    import uuid
+    from datetime import datetime, timezone
+
+    from app.config import settings
+    from app.database.connection import AsyncSessionLocal
+    from app.models.database import ActionItem, Meeting, Memory, MemoryType, Participant
+
+    async with AsyncSessionLocal() as session:
+        meeting = Meeting(
+            organization_id=uuid.UUID(settings.DEFAULT_ORG_ID),
+            title="Weekly sync",
+            platform="google_meet",
+            project_name="Apollo",
+            started_at=datetime(2026, 9, 12, 10, 0, tzinfo=timezone.utc),
+            summary="We agreed the launch date.",
+            processing_status="completed",
+        )
+        session.add(meeting)
+        await session.flush()
+        session.add_all([
+            Participant(meeting_id=meeting.id, name="Sara"),
+            Memory(organization_id=meeting.organization_id, meeting_id=meeting.id, type=MemoryType.DECISION,
+                   content="Launch on 1 October", importance=9, speaker="Sara"),
+            ActionItem(organization_id=meeting.organization_id, meeting_id=meeting.id,
+                       task="Write the release notes", owner="Sara", priority="high"),
+        ])
+        await session.commit()
+        return meeting.id
+
+
+@pytest.mark.asyncio
+async def test_sync_files_meeting_under_year_and_month(authed_client):
+    meeting_id = await _seed_completed_meeting()
+
+    response = await authed_client.post("/api/notebook/sync-meetings")
+    assert response.status_code == 200
+    assert response.json()["synced"] == 1
+
+    notes = (await authed_client.get("/api/notebook/notes", params={"meeting_id": str(meeting_id)})).json()
+    assert notes["total"] == 1
+    note = notes["notes"][0]
+    assert note["title"] == "2026-09-12 · Weekly sync"
+    assert set(note["tags"]) >= {"meeting", "google-meet", "apollo"}
+
+    body = (await authed_client.get(f"/api/notebook/notes/{note['id']}")).json()["content"]
+    assert "## Summary" in body and "We agreed the launch date." in body
+    assert "- [ ] **Sara** — Write the release notes _(high)_" in body
+    assert "## Decisions" in body and "Launch on 1 October" in body
+
+    folders = (await authed_client.get("/api/notebook/folders")).json()["folders"]
+    root = next(f for f in folders if f["name"] == "Meetings")
+    year = next(f for f in root["children"] if f["name"] == "2026")
+    assert [f["name"] for f in year["children"]] == ["09 September"]
+
+
+@pytest.mark.asyncio
+async def test_sync_is_idempotent_and_respects_edits(authed_client):
+    meeting_id = await _seed_completed_meeting()
+    await authed_client.post("/api/notebook/sync-meetings")
+    assert (await authed_client.post("/api/notebook/sync-meetings")).json()["synced"] == 1
+
+    notes = (await authed_client.get("/api/notebook/notes", params={"meeting_id": str(meeting_id)})).json()
+    note_id = notes["notes"][0]["id"]
+
+    # A person edits the note; regeneration must not clobber it.
+    import asyncio
+    await asyncio.sleep(2.1)
+    await authed_client.patch(f"/api/notebook/notes/{note_id}", json={"content": "my own words"})
+    result = (await authed_client.post("/api/notebook/sync-meetings")).json()
+    assert result["skipped"] == 1
+    body = (await authed_client.get(f"/api/notebook/notes/{note_id}")).json()["content"]
+    assert body == "my own words"

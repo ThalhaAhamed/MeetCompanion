@@ -22,6 +22,7 @@ import {
   listFolders,
   listNoteTags,
   listNotes,
+  syncMeetingNotes,
   updateNote,
 } from '../api'
 
@@ -309,6 +310,23 @@ export default function Notebook() {
       .catch(() => navigate('/notebook', { replace: true }))
   }, [noteId, navigate])
 
+  const [syncing, setSyncing] = useState(false)
+
+  // New meetings are filed automatically when processing finishes; this
+  // catches up meetings that predate the notebook or were imported.
+  async function handleSyncMeetings() {
+    setSyncing(true)
+    try {
+      await syncMeetingNotes()
+      await Promise.all([refreshNotes(), refreshFolders()])
+      listNoteTags().then((data) => setTags(data.tags)).catch(() => {})
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   async function handleCreateNote() {
     const payload = { title: 'Untitled', content: '' }
     if (scope.kind === 'folder') payload.folder_id = scope.id
@@ -526,13 +544,18 @@ export default function Notebook() {
               description={
                 query || tagFilter
                   ? 'Try a different search or clear your filters.'
-                  : 'Create your first note to get started.'
+                  : 'Every processed meeting is filed here automatically. Create a note, or bring in the meetings you already have.'
               }
               action={
                 !query && !tagFilter ? (
-                  <button type="button" className="mc-btn mc-btn-secondary" onClick={handleCreateNote}>
-                    New note
-                  </button>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <button type="button" className="mc-btn mc-btn-primary" onClick={handleSyncMeetings} disabled={syncing}>
+                      {syncing ? <Spinner size={14} /> : null} Generate from meetings
+                    </button>
+                    <button type="button" className="mc-btn mc-btn-secondary" onClick={handleCreateNote}>
+                      New note
+                    </button>
+                  </div>
                 ) : null
               }
             />

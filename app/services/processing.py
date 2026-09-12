@@ -174,7 +174,21 @@ class MeetingProcessingPipeline:
                     processing_status="completed",
                 )
 
+                # 10. File the meeting in the notebook. Its own failure must
+                # not fail the meeting - the note can be regenerated later.
+                note_written = False
+                try:
+                    from app.api.notebook import _embed_note
+                    from app.services.meeting_notes import MeetingNoteService
+
+                    fresh = await meeting_repo.get_by_id_unscoped(meeting.id)
+                    note = await MeetingNoteService(db).sync(fresh, embed=_embed_note)
+                    note_written = note is not None
+                except Exception as note_exc:
+                    print(f"[WARN] Could not write notebook entry for meeting {meeting.id}: {note_exc}")
+
                 result_payload = {
+                    "note_written": note_written,
                     "memories_extracted": len(created_memories),
                     "action_items_created": len(extracted_actions_data),
                     "vectors_indexed": indexed_count,

@@ -369,3 +369,7 @@ export function updateAgentTemplate(patch) {
     body: JSON.stringify(patch),
   })
 }
+
+export function syncMeetingNotes() {
+  return req('/notebook/sync-meetings', { method: 'POST' })
+}

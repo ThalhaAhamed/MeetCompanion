@@ -366,6 +366,21 @@ async def delete_note(
 # ---------------------------------------------------------------------------
 
 
+@router.post("/sync-meetings")
+async def sync_meeting_notes(
+    org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)
+) -> Dict[str, int]:
+    """
+    Write a note for every processed meeting that does not have one.
+
+    New meetings get theirs automatically as they finish processing; this is
+    for meetings that predate the notebook, or were imported.
+    """
+    from app.services.meeting_notes import MeetingNoteService
+
+    return await MeetingNoteService(db).sync_all(org_id, embed=_embed_note)
+
+
 @router.post("/ask")
 async def ask_notebook(
     body: AskRequest,
