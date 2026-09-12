@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Page, PageHeader } from '../components/AppShell'
 import { Badge, Card, EmptyState, ErrorMessage, Loading, StatTile } from '../components/ui'
-import { MeetingsIcon, NotebookIcon, PlusIcon } from '../components/Icons'
+import { AskAiIcon, MeetingsIcon, NotebookIcon, PlusIcon, StarIcon } from '../components/Icons'
 import { listFolders, listMeetings, listNotes } from '../api'
 
 function today() {
@@ -73,11 +73,35 @@ export default function Dashboard() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatTile label="Meetings today" value={meetings.length} tone="brand" />
-        <StatTile label="Live now" value={live.length} tone="peach" />
-        <StatTile label="Notes" value={counts?.notes ?? 0} tone="lavender" />
-        <StatTile label="Favourites" value={counts?.favorites ?? 0} tone="rose" />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatTile
+          label="Meetings today"
+          value={meetings.length}
+          tone="brand"
+          icon={<MeetingsIcon size={19} />}
+          hint={meetings.length ? 'Captured by Meet Companion' : 'Nothing scheduled yet'}
+        />
+        <StatTile
+          label="Live now"
+          value={live.length}
+          tone="peach"
+          icon={<AskAiIcon size={19} />}
+          hint={live.length ? 'Bot is in a call' : 'No active bots'}
+        />
+        <StatTile
+          label="Notes"
+          value={counts?.notes ?? 0}
+          tone="lavender"
+          icon={<NotebookIcon size={19} />}
+          hint="Across your notebook"
+        />
+        <StatTile
+          label="Favourites"
+          value={counts?.favorites ?? 0}
+          tone="rose"
+          icon={<StarIcon size={19} />}
+          hint="Starred for quick access"
+        />
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">

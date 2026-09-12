@@ -15,6 +15,18 @@ export function Card({ children, className = '', padded = true, ...rest }) {
   )
 }
 
+export function SectionCard({ title, action, children, className = '' }) {
+  return (
+    <Card padded={false} className={className}>
+      <div className="flex items-center justify-between gap-3 px-5 py-4">
+        <h2 className="text-[0.95rem] font-semibold">{title}</h2>
+        {action}
+      </div>
+      <div style={{ borderTop: '1px solid var(--border-subtle)' }}>{children}</div>
+    </Card>
+  )
+}
+
 export function Spinner({ size = 18 }) {
   return (
     <span
@@ -172,31 +184,50 @@ export function Modal({ open, onClose, title, children, footer, width = '32rem' 
   )
 }
 
-export function StatTile({ label, value, hint, tone = 'brand' }) {
-  const accents = {
-    brand: 'var(--color-brand-400)',
-    lavender: 'var(--color-lavender-400)',
-    peach: 'var(--color-peach-500)',
-    rose: 'var(--color-rose-500)',
-  }
+// Theme-aware so glyphs stay readable in both light and dark; see the
+// --chip-* tokens in index.css.
+const TONES = {
+  brand: { fg: 'var(--chip-brand-fg)', bg: 'var(--chip-brand-bg)' },
+  lavender: { fg: 'var(--chip-lavender-fg)', bg: 'var(--chip-lavender-bg)' },
+  peach: { fg: 'var(--chip-peach-fg)', bg: 'var(--chip-peach-bg)' },
+  rose: { fg: 'var(--chip-rose-fg)', bg: 'var(--chip-rose-bg)' },
+}
+
+export function IconChip({ icon, tone = 'brand', size = 40 }) {
+  const palette = TONES[tone] || TONES.brand
   return (
-    <Card className="relative overflow-hidden">
-      <span
-        className="absolute inset-y-0 left-0 w-1"
-        style={{ backgroundColor: accents[tone] || accents.brand }}
-        aria-hidden="true"
-      />
-      <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-faint)' }}>
-        {label}
-      </div>
-      <div className="mt-1.5 text-2xl font-semibold" style={{ color: 'var(--text-strong)' }}>
-        {value}
-      </div>
-      {hint && (
-        <div className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-          {hint}
+    <span
+      className="mc-icon-chip"
+      style={{ backgroundColor: palette.bg, color: palette.fg, width: size, height: size }}
+      aria-hidden="true"
+    >
+      {icon}
+    </span>
+  )
+}
+
+export function StatTile({ label, value, hint, icon, tone = 'brand' }) {
+  return (
+    <Card className="mc-panel-interactive">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[0.78rem] font-medium" style={{ color: 'var(--text-muted)' }}>
+            {label}
+          </div>
+          <div
+            className="mt-2 text-[1.9rem] font-semibold leading-none tracking-tight"
+            style={{ color: 'var(--text-strong)' }}
+          >
+            {value}
+          </div>
+          {hint && (
+            <div className="mt-2 text-xs" style={{ color: 'var(--text-faint)' }}>
+              {hint}
+            </div>
+          )}
         </div>
-      )}
+        {icon && <IconChip icon={icon} tone={tone} />}
+      </div>
     </Card>
   )
 }

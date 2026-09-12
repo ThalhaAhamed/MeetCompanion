@@ -21,7 +21,6 @@ import {
   listFolders,
   listNoteTags,
   listNotes,
-  updateFolder,
   updateNote,
 } from '../api'
 

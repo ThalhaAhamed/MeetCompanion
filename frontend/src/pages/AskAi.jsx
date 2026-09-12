@@ -12,6 +12,14 @@ const SUGGESTIONS = [
   'What questions are still unresolved?',
 ]
 
+function flatten(nodes, depth = 0, acc = []) {
+  for (const node of nodes || []) {
+    acc.push({ id: node.id, name: `${'— '.repeat(depth)}${node.name}` })
+    flatten(node.children, depth + 1, acc)
+  }
+  return acc
+}
+
 export default function AskAi() {
   const [question, setQuestion] = useState('')
   const [scope, setScope] = useState('all')
@@ -25,14 +33,6 @@ export default function AskAi() {
       .then((data) => setFolders(flatten(data.folders)))
       .catch(() => {})
   }, [])
-
-  function flatten(nodes, depth = 0, acc = []) {
-    for (const node of nodes || []) {
-      acc.push({ id: node.id, name: `${'— '.repeat(depth)}${node.name}` })
-      flatten(node.children, depth + 1, acc)
-    }
-    return acc
-  }
 
   async function ask(text) {
     const trimmed = (text ?? question).trim()

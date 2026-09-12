@@ -61,7 +61,12 @@
   --color-rose-500: #c67d8e;
   --color-rose-700: #9b4d60;
 
-  --radius-card: 0.875rem;
+  --radius-card: 1rem;
+
+  /* Soft, layered elevation. The interface reads as cards floating on a light
+     ground rather than boxes separated by hairlines. */
+  --shadow-card: 0 1px 2px rgba(24, 28, 50, 0.04), 0 4px 16px rgba(24, 28, 50, 0.06);
+  --shadow-raised: 0 2px 4px rgba(24, 28, 50, 0.06), 0 12px 28px rgba(24, 28, 50, 0.10);
 }
 
 /* --------------------------------------------------------------------------
@@ -72,11 +77,16 @@
    -------------------------------------------------------------------------- */
 
 :root {
-  --surface-page: var(--color-ink-50);
+  --surface-page: #f5f6fb;
   --surface-panel: #ffffff;
   --surface-raised: var(--color-ink-100);
   --surface-sunken: var(--color-ink-100);
   --surface-nav: #ffffff;
+  --elevation-card: var(--shadow-card);
+  --elevation-raised: var(--shadow-raised);
+  /* Cards rely on shadow for separation, so their outline stays nearly
+     invisible on light and only becomes structural in dark. */
+  --card-border: rgba(24, 28, 50, 0.05);
 
   --text-strong: var(--color-ink-900);
   --text-default: var(--color-ink-700);
@@ -93,14 +103,26 @@
   --brand-soft: var(--color-brand-50);
   --brand-soft-text: var(--color-brand-700);
   --brand-ring: var(--color-brand-400);
+
+  --chip-brand-bg: #e8ebf6;
+  --chip-brand-fg: var(--color-brand-600);
+  --chip-lavender-bg: #ecebf5;
+  --chip-lavender-fg: var(--color-lavender-500);
+  --chip-peach-bg: var(--color-peach-200);
+  --chip-peach-fg: var(--color-peach-700);
+  --chip-rose-bg: var(--color-rose-200);
+  --chip-rose-fg: var(--color-rose-700);
 }
 
 .dark {
-  --surface-page: #10131f;
+  --surface-page: #0f121e;
   --surface-panel: #171b2b;
   --surface-raised: #1e2337;
   --surface-sunken: #0c0f19;
   --surface-nav: #141827;
+  --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --elevation-raised: 0 8px 28px rgba(0, 0, 0, 0.5);
+  --card-border: #252b40;
 
   --text-strong: #f2f4fa;
   --text-default: #ccd1e2;
@@ -117,6 +139,17 @@
   --brand-soft: #1d2338;
   --brand-soft-text: var(--color-brand-300);
   --brand-ring: var(--color-brand-400);
+
+  /* Tinted dark backgrounds with light glyphs. Reusing the light-theme chips
+     here produced pale blobs with an unreadable icon inside. */
+  --chip-brand-bg: rgba(123, 135, 190, 0.18);
+  --chip-brand-fg: var(--color-brand-300);
+  --chip-lavender-bg: rgba(167, 165, 203, 0.18);
+  --chip-lavender-fg: var(--color-lavender-300);
+  --chip-peach-bg: rgba(217, 155, 120, 0.20);
+  --chip-peach-fg: var(--color-peach-300);
+  --chip-rose-bg: rgba(198, 125, 142, 0.20);
+  --chip-rose-fg: var(--color-rose-300);
 }
 
 @layer base {
@@ -162,8 +195,17 @@
 @layer components {
   .mc-panel {
     background-color: var(--surface-panel);
-    border: 1px solid var(--border-subtle);
+    border: 1px solid var(--card-border);
     border-radius: var(--radius-card);
+    box-shadow: var(--elevation-card);
+  }
+
+  .mc-panel-interactive {
+    transition: box-shadow 160ms ease, transform 160ms ease;
+  }
+
+  .mc-panel-interactive:hover {
+    box-shadow: var(--elevation-raised);
   }
 
   .mc-input {
@@ -283,16 +325,18 @@
     white-space: nowrap;
   }
 
+  /* Pill-shaped navigation: the active item is a solid brand pill rather than
+     a tinted block, which is what gives the sidebar its shape at a glance. */
   .mc-nav-item {
     display: flex;
     align-items: center;
-    gap: 0.7rem;
-    border-radius: 0.625rem;
-    padding: 0.55rem 0.7rem;
+    gap: 0.75rem;
+    border-radius: 0.75rem;
+    padding: 0.6rem 0.8rem;
     font-size: 0.875rem;
     font-weight: 500;
     color: var(--text-muted);
-    transition: background-color 120ms ease, color 120ms ease;
+    transition: background-color 140ms ease, color 140ms ease;
   }
 
   .mc-nav-item:hover {
@@ -301,9 +345,57 @@
   }
 
   .mc-nav-item[aria-current="page"] {
-    background-color: var(--brand-soft);
-    color: var(--brand-soft-text);
+    background-color: var(--brand-solid);
+    color: var(--text-on-brand);
     font-weight: 600;
+    box-shadow: 0 6px 16px color-mix(in srgb, var(--brand-solid) 30%, transparent);
+  }
+
+  .mc-nav-item[aria-current="page"]:hover {
+    background-color: var(--brand-solid);
+    color: var(--text-on-brand);
+  }
+
+  /* Circular tinted icon holder used on stat cards and empty states. */
+  .mc-icon-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 0.875rem;
+    flex-shrink: 0;
+  }
+
+  .mc-search {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    background-color: var(--surface-raised);
+    border: 1px solid transparent;
+    border-radius: 9999px;
+    padding: 0.5rem 1rem;
+    color: var(--text-muted);
+    transition: border-color 140ms ease, background-color 140ms ease;
+  }
+
+  .mc-search:focus-within {
+    background-color: var(--surface-panel);
+    border-color: var(--brand-ring);
+  }
+
+  .mc-search input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    outline: none;
+    font-size: 0.875rem;
+    color: var(--text-strong);
+  }
+
+  .mc-search input::placeholder {
+    color: var(--text-faint);
   }
 
   .mc-scroll {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import Logo from './Logo'
 import {
   AskAiIcon,
@@ -8,6 +8,7 @@ import {
   MembersIcon,
   MoonIcon,
   NotebookIcon,
+  SearchIcon,
   SettingsIcon,
   SidebarIcon,
   SunIcon,
@@ -41,11 +42,21 @@ export function useTheme() {
     try {
       window.localStorage.setItem(THEME_KEY, theme)
     } catch {
-      // Private browsing can reject writes; the theme still applies for this session.
+      // Private browsing can reject writes; the theme still applies this session.
     }
   }, [theme])
 
   return [theme, () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))]
+}
+
+function initialsOf(user) {
+  const source = user?.name || user?.email || '?'
+  return source
+    .split(/[\s@._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0].toUpperCase())
+    .join('')
 }
 
 function NavSection({ items, collapsed }) {
@@ -56,7 +67,7 @@ function NavSection({ items, collapsed }) {
           key={to}
           to={to}
           end={end}
-          className="mc-nav-item"
+          className={`mc-nav-item ${collapsed ? 'justify-center px-0' : ''}`}
           title={collapsed ? label : undefined}
         >
           <Icon size={18} />
@@ -67,8 +78,27 @@ function NavSection({ items, collapsed }) {
   )
 }
 
+function Avatar({ user, size = 34 }) {
+  return (
+    <div
+      className="flex items-center justify-center rounded-full text-xs font-semibold"
+      style={{
+        width: size,
+        height: size,
+        background: 'linear-gradient(135deg, var(--color-brand-400), var(--color-brand-700))',
+        color: '#fff',
+      }}
+      aria-hidden="true"
+    >
+      {initialsOf(user)}
+    </div>
+  )
+}
+
 export default function AppShell({ user, onSignOut, children }) {
   const [theme, toggleTheme] = useTheme()
+  const navigate = useNavigate()
+  const [query, setQuery] = useState('')
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return window.localStorage.getItem(COLLAPSE_KEY) === 'true'
@@ -85,24 +115,30 @@ export default function AppShell({ user, onSignOut, children }) {
     }
   }, [collapsed])
 
+  function submitSearch(event) {
+    event.preventDefault()
+    if (!query.trim()) return
+    navigate(`/notebook?q=${encodeURIComponent(query.trim())}`)
+  }
+
   return (
     <div className="flex min-h-screen" style={{ backgroundColor: 'var(--surface-page)' }}>
       <aside
         className="hidden md:flex flex-col shrink-0 transition-[width] duration-200"
         style={{
-          width: collapsed ? '4.5rem' : '16rem',
+          width: collapsed ? '5rem' : '16rem',
           backgroundColor: 'var(--surface-nav)',
           borderRight: '1px solid var(--border-subtle)',
         }}
       >
-        <div className={`flex items-center h-16 px-4 ${collapsed ? 'justify-center' : ''}`}>
-          {collapsed ? <Logo variant="icon" size={30} /> : <Logo size={30} />}
+        <div className={`flex items-center h-[4.5rem] px-5 ${collapsed ? 'justify-center px-0' : ''}`}>
+          {collapsed ? <Logo variant="icon" size={32} /> : <Logo size={32} />}
         </div>
 
         <div className="flex-1 overflow-y-auto mc-scroll px-3 py-2">
           {!collapsed && (
             <div
-              className="px-2 pb-2 text-[0.65rem] font-semibold uppercase tracking-[0.14em]"
+              className="px-3 pb-2 text-[0.65rem] font-semibold uppercase tracking-[0.14em]"
               style={{ color: 'var(--text-faint)' }}
             >
               Workspace
@@ -110,55 +146,91 @@ export default function AppShell({ user, onSignOut, children }) {
           )}
           <NavSection items={PRIMARY_NAV} collapsed={collapsed} />
 
-          <div className="my-4 h-px" style={{ backgroundColor: 'var(--border-subtle)' }} />
-          <NavSection items={SECONDARY_NAV} collapsed={collapsed} />
-        </div>
-
-        <div className="px-3 py-3" style={{ borderTop: '1px solid var(--border-subtle)' }}>
-          {user && !collapsed && (
-            <div className="px-2 pb-2">
-              <div className="text-sm font-medium truncate" style={{ color: 'var(--text-strong)' }}>
-                {user.name || user.email}
-              </div>
-              <div className="text-xs truncate" style={{ color: 'var(--text-faint)' }}>
-                {user.email}
-              </div>
+          {!collapsed && (
+            <div
+              className="mt-6 px-3 pb-2 text-[0.65rem] font-semibold uppercase tracking-[0.14em]"
+              style={{ color: 'var(--text-faint)' }}
+            >
+              Manage
             </div>
           )}
-          <div className={`flex gap-1 ${collapsed ? 'flex-col items-center' : ''}`}>
+          <div className={collapsed ? 'mt-4' : ''}>
+            <NavSection items={SECONDARY_NAV} collapsed={collapsed} />
+          </div>
+        </div>
+
+        <div className="p-3">
+          <button
+            type="button"
+            className={`mc-btn mc-btn-ghost w-full ${collapsed ? 'px-0' : ''}`}
+            onClick={() => setCollapsed((c) => !c)}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            <SidebarIcon size={17} />
+            {!collapsed && <span>Collapse</span>}
+          </button>
+        </div>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header
+          className="sticky top-0 z-30 flex h-[4.5rem] items-center gap-3 px-5 md:px-8"
+          style={{
+            backgroundColor: 'var(--surface-nav)',
+            borderBottom: '1px solid var(--border-subtle)',
+          }}
+        >
+          <div className="md:hidden">
+            <Logo variant="icon" size={30} />
+          </div>
+
+          <form className="mc-search hidden max-w-md flex-1 sm:flex" onSubmit={submitSearch}>
+            <SearchIcon size={17} />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search your notes…"
+              aria-label="Search your notes"
+            />
+          </form>
+
+          <div className="ml-auto flex items-center gap-2">
             <button
               type="button"
-              className="mc-btn mc-btn-ghost flex-1"
+              className="mc-btn mc-btn-ghost px-2.5"
               onClick={toggleTheme}
               title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
               aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
             >
-              {theme === 'dark' ? <SunIcon size={16} /> : <MoonIcon size={16} />}
-              {!collapsed && <span>{theme === 'dark' ? 'Light' : 'Dark'}</span>}
+              {theme === 'dark' ? <SunIcon size={18} /> : <MoonIcon size={18} />}
             </button>
-            <button
-              type="button"
-              className="mc-btn mc-btn-ghost"
-              onClick={() => setCollapsed((c) => !c)}
-              title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            >
-              <SidebarIcon size={16} />
-            </button>
-          </div>
-          {user && onSignOut && !collapsed && (
-            <button
-              type="button"
-              className="mc-btn mc-btn-ghost w-full mt-1"
-              onClick={onSignOut}
-            >
-              Sign out
-            </button>
-          )}
-        </div>
-      </aside>
 
-      {/* Mobile navigation: the sidebar is replaced by a bottom bar */}
+            {user && (
+              <div className="flex items-center gap-3 pl-1">
+                <div className="hidden text-right leading-tight lg:block">
+                  <div className="text-sm font-semibold" style={{ color: 'var(--text-strong)' }}>
+                    {user.name || user.email}
+                  </div>
+                  <button
+                    type="button"
+                    className="text-xs hover:underline"
+                    style={{ color: 'var(--text-faint)' }}
+                    onClick={onSignOut}
+                  >
+                    Sign out
+                  </button>
+                </div>
+                <Avatar user={user} />
+              </div>
+            )}
+          </div>
+        </header>
+
+        <main className="min-w-0 flex-1 pb-24 md:pb-0">{children}</main>
+      </div>
+
+      {/* Small screens swap the sidebar for a bottom bar */}
       <nav
         className="md:hidden fixed bottom-0 inset-x-0 z-40 flex justify-around py-2"
         style={{
@@ -171,7 +243,7 @@ export default function AppShell({ user, onSignOut, children }) {
             key={to}
             to={to}
             end={end}
-            className="mc-nav-item flex-col gap-0.5 px-3 text-[0.65rem]"
+            className="mc-nav-item flex-col gap-0.5 px-3 py-1.5 text-[0.65rem]"
             aria-label={label}
           >
             <Icon size={19} />
@@ -179,8 +251,6 @@ export default function AppShell({ user, onSignOut, children }) {
           </NavLink>
         ))}
       </nav>
-
-      <main className="flex-1 min-w-0 pb-20 md:pb-0">{children}</main>
     </div>
   )
 }
@@ -189,9 +259,9 @@ export function PageHeader({ title, description, actions }) {
   return (
     <header className="flex flex-wrap items-start justify-between gap-4 mb-6">
       <div className="min-w-0">
-        <h1 className="text-2xl font-semibold">{title}</h1>
+        <h1 className="text-[1.6rem] font-semibold leading-tight">{title}</h1>
         {description && (
-          <p className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>
+          <p className="mt-1.5 text-sm" style={{ color: 'var(--text-muted)' }}>
             {description}
           </p>
         )}
@@ -202,5 +272,5 @@ export function PageHeader({ title, description, actions }) {
 }
 
 export function Page({ children }) {
-  return <div className="mx-auto w-full max-w-[1400px] px-5 py-6 md:px-8 md:py-8">{children}</div>
+  return <div className="mx-auto w-full max-w-[1500px] px-5 py-6 md:px-8 md:py-7">{children}</div>
 }

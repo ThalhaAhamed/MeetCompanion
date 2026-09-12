@@ -36,9 +36,15 @@ export default function App() {
     }
 
     try {
-      const me = await checkAuth()
-      setUser(me)
-      setPhase('ready')
+      // /auth/check answers 200 with authenticated:false when signed out, so
+      // a successful response is not on its own proof of a session.
+      const result = await checkAuth()
+      if (result?.authenticated && result.member) {
+        setUser(result.member)
+        setPhase('ready')
+      } else {
+        setPhase('signin')
+      }
     } catch {
       setPhase('signin')
     }
