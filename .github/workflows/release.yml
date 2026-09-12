@@ -1,0 +1,97 @@
+name: Release
+
+# Pushing a tag like v1.2.0 builds the desktop app for Windows, macOS and
+# Linux on their native runners and attaches the installers to a GitHub
+# Release. The workflow can also be run by hand to produce build artifacts
+# without publishing.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows
+            target: --win
+          - os: macos-latest
+            label: macOS
+            target: --mac
+          - os: ubuntu-latest
+            label: Linux
+            target: --linux
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            desktop/package-lock.json
+
+      - name: Build web UI
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Freeze server
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+          pyinstaller desktop/server.spec --noconfirm --distpath desktop/build --workpath desktop/work
+
+      - name: Package desktop app
+        working-directory: desktop
+        env:
+          # Unsigned builds: no certificates are configured. Signing can be
+          # added later with CSC_LINK / CSC_KEY_PASSWORD secrets.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          npm ci
+          npx electron-builder ${{ matrix.target }} --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MeetCompanion-${{ matrix.label }}
+          path: |
+            desktop/release/*.exe
+            desktop/release/*.dmg
+            desktop/release/*.AppImage
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*.exe
+            artifacts/*.dmg
+            artifacts/*.AppImage
+          generate_release_notes: true

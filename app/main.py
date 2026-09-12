@@ -2,7 +2,13 @@
 FastAPI application entry point for Meet Companion.
 """
 from contextlib import asynccontextmanager
+import os
+from pathlib import Path
+from typing import Optional
+
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.api.health import router as health_router
@@ -41,7 +47,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     description="Persistent AI Meeting Companion using MeetStream MIA and pgvector RAG.",
-    version="1.0.0",
+    version=settings.APP_VERSION,
     lifespan=lifespan,
 )
 
@@ -78,12 +84,44 @@ app.include_router(notebook_router)
 app.include_router(mcp_router)
 
 
-@app.get("/")
-async def root():
-    return {
-        "app": settings.APP_NAME,
-        "version": "1.0.0",
-        "status": "online",
-        "docs_url": "/docs",
-        "mcp_endpoint": "/mcp",
-    }
+def _static_dir() -> Optional[Path]:
+    """
+    The built web UI, when the server is meant to serve it itself.
+
+    Set MEET_COMPANION_STATIC_DIR explicitly (the desktop bundle does), or
+    build the frontend into frontend/dist for a single-process deployment.
+    During development Vite serves the UI on its own port and this is None.
+    """
+    configured = os.environ.get("MEET_COMPANION_STATIC_DIR")
+    candidates = [Path(configured)] if configured else [Path(__file__).resolve().parents[1] / "frontend" / "dist"]
+    for candidate in candidates:
+        if (candidate / "index.html").is_file():
+            return candidate
+    return None
+
+
+STATIC_DIR = _static_dir()
+
+if STATIC_DIR is None:
+
+    @app.get("/")
+    async def root():
+        return {
+            "app": settings.APP_NAME,
+            "version": settings.APP_VERSION,
+            "status": "online",
+            "docs_url": "/docs",
+            "mcp_endpoint": "/mcp",
+        }
+
+else:
+    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    async def spa(path: str):
+        """Files from the build when they exist; index.html for every app route."""
+        if path and not path.startswith("api/"):
+            candidate = (STATIC_DIR / path).resolve()
+            if candidate.is_file() and STATIC_DIR in candidate.parents:
+                return FileResponse(candidate)
+        return FileResponse(STATIC_DIR / "index.html")

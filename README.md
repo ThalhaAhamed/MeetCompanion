@@ -44,7 +44,26 @@ hard-wired to a vendor:
 - **In-call recall** — an MCP server lets the in-meeting agent query your past
   meetings live, so it can answer "what did we decide last time?" during a call.
 
-## Quick start
+## Download
+
+Grab the installer for your platform from the
+[latest release](https://github.com/ThalhaAhamed/MeetCompanion/releases/latest):
+
+| Platform | File |
+| --- | --- |
+| Windows | `MeetCompanion-Windows-Setup.exe` |
+| macOS (Apple silicon / Intel) | `MeetCompanion-macOS-arm64.dmg` / `MeetCompanion-macOS-x64.dmg` |
+| Linux | `MeetCompanion-Linux-x64.AppImage` (`chmod +x`, then run) |
+
+The desktop app is the full application - server, database and web UI in one
+window, with everything stored under your user data directory. First launch
+walks you through choosing an AI provider and storage; the embedding model
+(~90 MB) is downloaded once on first use.
+
+The builds are not code-signed yet, so Windows SmartScreen and macOS Gatekeeper
+will ask you to confirm the first launch (macOS: right-click → Open).
+
+## Quick start (from source)
 
 Requires Python 3.12+ and Node 20+.
 
@@ -117,8 +136,8 @@ OpenAI-compatible API (vLLM, LM Studio, OpenRouter, together.ai)
 
 **Database** — SQLite (default, zero setup) · PostgreSQL with pgvector
 
-**Embeddings** run locally via `sentence-transformers`; they never require an API
-key and never leave the machine.
+**Embeddings** run locally (`all-MiniLM-L6-v2` via ONNX); they never require an
+API key and never leave the machine.
 
 **Meeting bots** — MeetStream.
 
@@ -181,6 +200,22 @@ npm --prefix frontend run build         # production build
 
 The test suite is hermetic: it runs against a throwaway SQLite file and needs no
 Postgres, no Docker and no network.
+
+### Building the desktop app
+
+The desktop app is an Electron shell around a PyInstaller-frozen server.
+
+```bash
+npm --prefix frontend run build                       # web UI -> frontend/dist
+pip install pyinstaller
+pyinstaller desktop/server.spec --noconfirm   --distpath desktop/build --workpath desktop/work    # server -> desktop/build/
+npm --prefix desktop install
+npm --prefix desktop run dist                         # installer -> desktop/release/
+```
+
+`npm --prefix desktop start` runs the shell against the frozen server without
+packaging it. Releases are built for all three platforms by
+`.github/workflows/release.yml` when a `v*` tag is pushed.
 
 ### Using PostgreSQL
 

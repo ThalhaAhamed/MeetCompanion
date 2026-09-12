@@ -2,6 +2,7 @@
 Configuration management for Meet Companion.
 Loads settings from environment variables and .env file.
 """
+import os
 from typing import List, Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -9,13 +10,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # The packaged desktop build sets MEET_COMPANION_NO_DOTENV so a stray
+        # .env in the data directory cannot override the UI's settings.
+        env_file=None if os.environ.get("MEET_COMPANION_NO_DOTENV") else ".env",
         env_file_encoding="utf-8",
         extra="ignore"
     )
 
     # ---- Application ----
     APP_NAME: str = "Meet Companion"
+    APP_VERSION: str = "1.0.0"
     APP_ENV: str = "development"
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000
