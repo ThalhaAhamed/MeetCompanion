@@ -279,3 +279,46 @@ async def test_keyword_search_with_no_usable_terms_returns_nothing(session):
 )
 def test_tokenize_deduplicates_and_lowercases(query, expected):
     assert tokenize(query) == expected
+
+
+# ---------------------------------------------------------------------------
+# Provider catalog -> URL
+# ---------------------------------------------------------------------------
+
+import pytest as _pytest
+
+from app.providers.database.catalog import build_database_url, describe_databases, provider_for_url
+
+
+def test_catalog_lists_available_and_coming_soon():
+    names = {entry["name"]: entry for entry in describe_databases()}
+    assert names["sqlite"]["available"] and names["sqlite"]["recommended"]
+    assert names["mysql"]["available"] is False
+
+
+def test_sqlite_defaults_to_data_directory():
+    assert build_database_url("sqlite", {}) == "sqlite+aiosqlite:///data/meet-companion.db"
+    assert build_database_url("sqlite", {"path": "/srv/mc.db"}) == "sqlite+aiosqlite:////srv/mc.db"
+
+
+def test_postgres_fields_become_asyncpg_url_with_escaping():
+    url = build_database_url("postgresql", {
+        "host": "db.local", "port": "5433", "database": "meet", "user": "me@corp", "password": "p@ss/w", "sslmode": "require",
+    })
+    assert url == "postgresql+asyncpg://me%40corp:p%40ss%2Fw@db.local:5433/meet?ssl=require"
+
+
+def test_postgres_requires_host_and_user():
+    with _pytest.raises(ValueError, match="Host"):
+        build_database_url("postgresql", {"database": "x", "user": "u"})
+
+
+def test_hosted_string_is_normalized_to_async_driver():
+    url = build_database_url("neon", {"url": "postgresql://u:p@ep-1.neon.tech/db?sslmode=require"})
+    assert url == "postgresql+asyncpg://u:p@ep-1.neon.tech/db?ssl=require"
+    assert provider_for_url(url) == "neon"
+
+
+def test_unavailable_provider_is_refused():
+    with _pytest.raises(ValueError, match="not supported"):
+        build_database_url("mysql", {"url": "mysql://x"})

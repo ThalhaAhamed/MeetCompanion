@@ -11,6 +11,7 @@ import {
   setMeetstreamApiKey,
   testLlmProvider,
 } from '../api'
+import DatabasePicker, { isDatabaseFormComplete } from '../components/DatabasePicker'
 
 const SECTIONS = [
   { id: 'ai', label: 'AI provider' },
@@ -44,6 +45,12 @@ export default function Settings() {
   const [saved, setSaved] = useState(false)
 
   const [meetstreamKey, setMeetstreamKey] = useState('')
+
+  const [dbProvider, setDbProvider] = useState('')
+  const [dbValues, setDbValues] = useState({})
+  const [dbTest, setDbTest] = useState(null)
+  const [dbSaved, setDbSaved] = useState(false)
+  const [dbBusy, setDbBusy] = useState(false)
   const [theme, toggleTheme] = useTheme()
 
   async function load() {
@@ -52,6 +59,7 @@ export default function Settings() {
       setStatus(statusData)
       setCatalog(catalogData)
       setProvider(statusData.llm?.provider || 'ollama')
+      setDbProvider(statusData.database?.provider || 'sqlite')
       setValues({
         model: statusData.llm?.model || '',
         base_url: statusData.llm?.base_url || '',
@@ -240,27 +248,75 @@ export default function Settings() {
           {section === 'database' && (
             <Card>
               <h2 className="mb-1 text-base font-semibold">Database</h2>
-              <p className="mb-5 text-sm" style={{ color: 'var(--text-muted)' }}>
-                Where meetings, notes and memory are stored.
+              <p className="mb-4 text-sm" style={{ color: 'var(--text-muted)' }}>
+                Where meetings, notes and memory are stored. Pick any provider you like.
               </p>
 
-              <div className="flex items-center gap-2 mb-4">
+              <div className="mb-5 flex flex-wrap items-center gap-2 text-sm">
+                <span style={{ color: 'var(--text-muted)' }}>Currently using</span>
                 <Badge tone="brand">{status.database?.dialect}</Badge>
-                <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                  {status.database?.dialect === 'sqlite'
-                    ? 'Local file — no server required.'
-                    : 'External database server.'}
-                </span>
+                {status.database?.url && (
+                  <code className="rounded px-1.5 py-0.5 text-xs" style={{ backgroundColor: 'var(--surface-raised)' }}>
+                    {status.database.url}
+                  </code>
+                )}
               </div>
 
-              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                Changing the database requires restarting the server, so it is set through the
-                <code className="mx-1 rounded px-1" style={{ backgroundColor: 'var(--surface-raised)' }}>
-                  DATABASE_URL
-                </code>
-                environment variable or during first-run setup. Switching does not migrate existing
-                data.
-              </p>
+              {status.environment_managed?.['database.url'] ? (
+                <EnvManagedNotice />
+              ) : (
+                <>
+                  {status.database?.pending && (
+                    <p
+                      className="mb-4 rounded-lg px-3 py-2 text-xs"
+                      style={{ backgroundColor: 'var(--color-peach-100)', color: 'var(--color-peach-700)' }}
+                    >
+                      A new database ({status.database.pending}) is saved and will be used after the server restarts.
+                    </p>
+                  )}
+                  <DatabasePicker
+                    catalog={catalog.databases}
+                    provider={dbProvider}
+                    values={dbValues}
+                    onProviderChange={(name) => {
+                      setDbProvider(name)
+                      setDbSaved(false)
+                    }}
+                    onValuesChange={(next) => {
+                      setDbValues(next)
+                      setDbSaved(false)
+                    }}
+                    testResult={dbTest}
+                    onTestResult={setDbTest}
+                  />
+                  <div className="mt-5 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      className="mc-btn mc-btn-primary"
+                      disabled={dbBusy || !isDatabaseFormComplete(catalog.databases.find((d) => d.name === dbProvider), dbValues)}
+                      onClick={async () => {
+                        setDbBusy(true)
+                        setError(null)
+                        try {
+                          setStatus(await completeSetup({ database: { provider: dbProvider, values: dbValues } }))
+                          setDbSaved(true)
+                        } catch (err) {
+                          setError(err.message)
+                        } finally {
+                          setDbBusy(false)
+                        }
+                      }}
+                    >
+                      {dbBusy ? <Spinner size={14} /> : null} Save database
+                    </button>
+                    {dbSaved && (
+                      <span className="text-sm" style={{ color: 'var(--color-brand-600)' }}>
+                        Saved. Restart the server to switch — existing data is not migrated.
+                      </span>
+                    )}
+                  </div>
+                </>
+              )}
             </Card>
           )}
 

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.database.connection import DATABASE_URL, dialect_of, normalize_database_url
-from app.providers.database import describe_databases
+from app.providers.database import build_database_url, describe_databases, provider_for_url
 from app.providers.llm import (
     DESCRIPTORS,
     LLMConfig,
@@ -47,7 +47,20 @@ class LLMConfigPayload(BaseModel):
 
 
 class DatabaseConfigPayload(BaseModel):
+    """Either a provider with its form values, or a ready-made URL."""
+    provider: Optional[str] = None
+    values: Optional[Dict[str, Any]] = None
     url: Optional[str] = None
+
+    def resolve_url(self) -> Optional[str]:
+        if self.provider:
+            try:
+                return build_database_url(self.provider, self.values)
+            except ValueError as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        if self.url:
+            return normalize_database_url(self.url)
+        return None
 
 
 class MeetStreamConfigPayload(BaseModel):
@@ -85,7 +98,15 @@ async def setup_status() -> Dict[str, Any]:
         "llm": llm_summary,
         "database": {
             "dialect": dialect_of(DATABASE_URL),
+            "provider": provider_for_url(DATABASE_URL),
             "url": mask_secret(DATABASE_URL),
+            # What is saved in config, which differs from the live URL until
+            # the server restarts (or when DATABASE_URL overrides it).
+            "pending": (
+                mask_secret(config.database.url)
+                if config.database.url and normalize_database_url(config.database.url) != DATABASE_URL
+                else None
+            ),
         },
         "meetstream": {
             "configured": bool(config.meetstream.api_key or settings.MEETSTREAM_API_KEY),
@@ -135,19 +156,21 @@ async def test_llm(payload: LLMConfigPayload) -> Dict[str, Any]:
 
 @router.post("/test-database")
 async def test_database(payload: DatabaseConfigPayload) -> Dict[str, Any]:
-    """Verify a database URL is reachable before onboarding saves it."""
-    if not payload.url:
+    """Verify a database is reachable before it is saved."""
+    url = payload.resolve_url()
+    if not url:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="A database URL is required."
         )
-
-    url = normalize_database_url(payload.url)
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import create_async_engine
 
     engine = None
     try:
-        engine = create_async_engine(url)
+        # A wrong host should fail fast, not leave the form spinning until
+        # the OS gives up on the socket.
+        connect_args = {"timeout": 5} if dialect_of(url) == "postgresql" else {}
+        engine = create_async_engine(url, connect_args=connect_args)
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
         return {"ok": True, "detail": "Connected.", "dialect": dialect_of(url)}
@@ -182,8 +205,10 @@ async def complete_setup(payload: CompleteSetupPayload) -> Dict[str, Any]:
         )
 
     database = current.database
-    if payload.database is not None and payload.database.url:
-        database = DatabaseSettings(url=normalize_database_url(payload.database.url))
+    if payload.database is not None:
+        resolved = payload.database.resolve_url()
+        if resolved:
+            database = DatabaseSettings(url=resolved)
 
     meetstream = current.meetstream
     if payload.meetstream is not None:

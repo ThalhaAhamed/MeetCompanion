@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import Logo from '../components/Logo'
 import { CheckIcon, ChevronRightIcon } from '../components/Icons'
 import { Card, ErrorMessage, Field, Loading, Spinner } from '../components/ui'
-import { completeSetup, getProviderCatalog, testDatabase, testLlmProvider } from '../api'
+import { completeSetup, getProviderCatalog, testLlmProvider } from '../api'
+import DatabasePicker, { isDatabaseFormComplete } from '../components/DatabasePicker'
 
 const STEPS = ['Welcome', 'AI provider', 'Storage', 'Review']
 
@@ -104,10 +105,9 @@ export default function Onboarding({ onComplete }) {
   const [llmTest, setLlmTest] = useState(null)
   const [testing, setTesting] = useState(false)
 
-  const [storage, setStorage] = useState('sqlite')
-  const [databaseUrl, setDatabaseUrl] = useState('')
+  const [storage, setStorage] = useState('')
+  const [dbValues, setDbValues] = useState({})
   const [dbTest, setDbTest] = useState(null)
-  const [testingDb, setTestingDb] = useState(false)
 
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState(null)
@@ -162,25 +162,13 @@ export default function Onboarding({ onComplete }) {
     }
   }
 
-  async function runDbTest() {
-    setTestingDb(true)
-    setDbTest(null)
-    try {
-      setDbTest(await testDatabase(databaseUrl))
-    } catch (error) {
-      setDbTest({ ok: false, detail: error.message })
-    } finally {
-      setTestingDb(false)
-    }
-  }
-
   async function finish() {
     setSaving(true)
     setSaveError(null)
     try {
       await completeSetup({
         llm: buildLlmPayload(),
-        database: storage === 'sqlite' ? null : { url: databaseUrl },
+        database: { provider: storage, values: dbValues },
       })
       onComplete?.()
     } catch (error) {
@@ -212,7 +200,8 @@ export default function Onboarding({ onComplete }) {
       .filter((field) => field.required)
       .every((field) => String(values[field.key] ?? '').trim().length > 0)
 
-  const canFinish = storage === 'sqlite' || Boolean(databaseUrl.trim())
+  const dbEntry = catalog.databases.find((item) => item.name === storage)
+  const canFinish = isDatabaseFormComplete(dbEntry, dbValues)
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: 'var(--surface-page)' }}>
@@ -329,56 +318,15 @@ export default function Onboarding({ onComplete }) {
               Meetings, notes and memory all live here.
             </p>
 
-            <div className="grid gap-2">
-              {catalog.databases.map((option) => (
-                <ProviderOption
-                  key={option.name}
-                  descriptor={option}
-                  selected={option.name === storage}
-                  onSelect={setStorage}
-                />
-              ))}
-            </div>
-
-            {storage !== 'sqlite' && (
-              <div className="mt-6 border-t pt-5" style={{ borderColor: 'var(--border-subtle)' }}>
-                <Field
-                  label="Connection URL"
-                  hint="Stored in your local configuration and never sent anywhere."
-                  htmlFor="database-url"
-                >
-                  <input
-                    id="database-url"
-                    className="mc-input"
-                    placeholder="postgresql+asyncpg://user:password@localhost:5432/meet_companion"
-                    value={databaseUrl}
-                    onChange={(event) => {
-                      setDatabaseUrl(event.target.value)
-                      setDbTest(null)
-                    }}
-                  />
-                </Field>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    className="mc-btn mc-btn-secondary"
-                    onClick={runDbTest}
-                    disabled={testingDb || !databaseUrl.trim()}
-                  >
-                    {testingDb ? <Spinner size={14} /> : null}
-                    Test connection
-                  </button>
-                  {dbTest && (
-                    <span
-                      className="text-sm"
-                      style={{ color: dbTest.ok ? 'var(--color-brand-600)' : 'var(--color-rose-700)' }}
-                    >
-                      {dbTest.ok ? 'Connected.' : dbTest.detail}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
+            <DatabasePicker
+              catalog={catalog.databases}
+              provider={storage}
+              values={dbValues}
+              onProviderChange={setStorage}
+              onValuesChange={setDbValues}
+              testResult={dbTest}
+              onTestResult={setDbTest}
+            />
 
             <div className="mt-6 flex justify-between">
               <button type="button" className="mc-btn mc-btn-ghost" onClick={() => setStep(1)}>
@@ -422,7 +370,7 @@ export default function Onboarding({ onComplete }) {
               <div className="flex justify-between gap-4 py-3">
                 <dt className="text-sm" style={{ color: 'var(--text-muted)' }}>Storage</dt>
                 <dd className="text-sm font-medium">
-                  {storage === 'sqlite' ? 'Local SQLite' : 'PostgreSQL'}
+                  {dbEntry?.label || storage}
                 </dd>
               </div>
             </dl>

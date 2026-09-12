@@ -143,7 +143,8 @@ async def test_providers_endpoint_describes_llms_and_databases(client, clean_env
 
     body = response.json()
     assert {p["name"] for p in body["llm"]} >= {"openai", "anthropic", "gemini", "ollama"}
-    assert {d["name"] for d in body["databases"]} == {"sqlite", "postgresql"}
+    names = {d["name"] for d in body["databases"]}
+    assert {"sqlite", "postgresql", "supabase", "neon"} <= names
 
 
 @pytest.mark.asyncio

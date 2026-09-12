@@ -13,6 +13,7 @@ from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import settings
+from app.runtime_config import is_env_managed, load_config
 
 SQLITE = "sqlite"
 POSTGRESQL = "postgresql"
@@ -69,7 +70,20 @@ def _engine_options(url: str) -> Dict[str, Any]:
     return options
 
 
-DATABASE_URL = normalize_database_url(settings.DATABASE_URL)
+def resolve_database_url() -> str:
+    """
+    Explicit environment (or .env) first, then the URL saved from the UI,
+    then the SQLite default - the same precedence as every other setting.
+    """
+    if is_env_managed("DATABASE_URL"):
+        return normalize_database_url(settings.DATABASE_URL)
+    stored = load_config().database.url
+    if stored:
+        return normalize_database_url(stored)
+    return normalize_database_url(settings.DATABASE_URL)
+
+
+DATABASE_URL = resolve_database_url()
 DIALECT = dialect_of(DATABASE_URL)
 
 engine = create_async_engine(DATABASE_URL, **_engine_options(DATABASE_URL))

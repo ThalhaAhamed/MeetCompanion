@@ -18,6 +18,12 @@ import httpx  # noqa: E402
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 
+from app.config import settings  # noqa: E402
+
+# Whatever the developer keeps in their own .env must not leak into the
+# suite: only DATABASE_URL (set above) counts as environment-managed here.
+settings.__pydantic_fields_set__ = {"DATABASE_URL"}
+
 from app.database.connection import engine  # noqa: E402
 from app.main import app, _ensure_default_workspace  # noqa: E402
 from app.models.database import Base  # noqa: E402
