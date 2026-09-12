@@ -279,6 +279,64 @@ class ProcessingJob(Base):
     meeting: Mapped["Meeting"] = relationship("Meeting", back_populates="processing_jobs")
 
 
+class NotebookFolder(Base):
+    """
+    A folder in the notebook tree.
+
+    Self-referential so folders nest arbitrarily. Deleting a folder does not
+    delete its contents by default - see the notebook repository, which lifts
+    children to the parent unless the caller explicitly asks to cascade.
+    """
+
+    __tablename__ = "notebook_folders"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    parent_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID(), ForeignKey("notebook_folders.id", ondelete="CASCADE"), nullable=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    children: Mapped[List["NotebookFolder"]] = relationship(
+        "NotebookFolder", back_populates="parent", cascade="all, delete-orphan"
+    )
+    parent: Mapped[Optional["NotebookFolder"]] = relationship(
+        "NotebookFolder", back_populates="children", remote_side=[id]
+    )
+    notes: Mapped[List["Note"]] = relationship("Note", back_populates="folder")
+
+
+class Note(Base):
+    """
+    A note in the notebook.
+
+    Carries its own embedding so Ask AI retrieval runs through the same search
+    backend as meeting memory, on whichever database is configured, without a
+    separate index table.
+    """
+
+    __tablename__ = "notes"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    folder_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID(), ForeignKey("notebook_folders.id", ondelete="SET NULL"), nullable=True)
+    # Notes generated from a meeting keep a link back to it, which is what
+    # makes "filter by meeting" and meeting-scoped Ask AI possible.
+    meeting_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID(), ForeignKey("meetings.id", ondelete="SET NULL"), nullable=True)
+    created_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    title: Mapped[str] = mapped_column(String(500), nullable=False, default="Untitled")
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    note_type: Mapped[str] = mapped_column(String(50), default="note")  # note, meeting, idea, research
+    tags: Mapped[List[str]] = mapped_column(JSONDocument, default=list)
+    is_favorite: Mapped[bool] = mapped_column(Boolean, default=False)
+    embedding: Mapped[Optional[List[float]]] = mapped_column(Embedding(settings.EMBEDDING_DIMENSION), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    folder: Mapped[Optional["NotebookFolder"]] = relationship("NotebookFolder", back_populates="notes")
+    meeting: Mapped[Optional["Meeting"]] = relationship("Meeting")
+
+
 # ---------------------------------------------------------------------------
 # Indexes
 #
@@ -322,3 +380,12 @@ Index("idx_webhook_processed", WebhookEvent.processed)
 
 Index("idx_jobs_meeting", ProcessingJob.meeting_id)
 Index("idx_jobs_status", ProcessingJob.status)
+
+Index("idx_folders_org", NotebookFolder.organization_id)
+Index("idx_folders_parent", NotebookFolder.parent_id)
+
+Index("idx_notes_org", Note.organization_id)
+Index("idx_notes_folder", Note.folder_id)
+Index("idx_notes_meeting", Note.meeting_id)
+Index("idx_notes_favorite", Note.organization_id, Note.is_favorite)
+Index("idx_notes_updated", Note.organization_id, Note.updated_at.desc())

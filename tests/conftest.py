@@ -33,10 +33,14 @@ def event_loop_policy():
 @pytest_asyncio.fixture(autouse=True)
 async def database_schema():
     """
-    Bring the database to the same state a fresh install starts in: schema
-    created and the default workspace bootstrapped.
+    Give every test the state a fresh install starts in.
+
+    The schema is rebuilt per test rather than merely created once, so rows
+    written by one test cannot leak into the next and make assertions about
+    counts or ordering depend on execution order.
     """
     async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     await _ensure_default_workspace()
     yield
@@ -47,4 +51,45 @@ async def client():
     """Async HTTP test client for the FastAPI application."""
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+@pytest_asyncio.fixture
+async def authed_client():
+    """
+    Client carrying a real signed session for a real member.
+
+    Signs an actual cookie rather than overriding the dependency, so the
+    session gate and member lookup are exercised the way production runs them.
+    """
+    import time
+    import uuid
+
+    from sqlalchemy import select
+
+    from app.config import settings
+    from app.database.connection import AsyncSessionLocal
+    from app.middleware.auth_gate import COOKIE_NAME, SESSION_TTL_SECONDS, sign_session
+    from app.models.database import User
+
+    email = f"tester-{uuid.uuid4().hex[:8]}@example.com"
+    async with AsyncSessionLocal() as session:
+        user = User(
+            organization_id=uuid.UUID(settings.DEFAULT_ORG_ID),
+            email=email,
+            name="Tester",
+            is_active=True,
+            settings={},
+        )
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        user_id = user.id
+
+    token = sign_session(str(user_id), int(time.time()) + SESSION_TTL_SECONDS)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", cookies={COOKIE_NAME: token}
+    ) as c:
+        c.user_id = user_id
         yield c
