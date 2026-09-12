@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  One-shot dev environment startup for MeetStream Companion.
+  One-shot dev environment startup for Meet Companion.
   Starts Docker/Postgres, the FastAPI backend, a Cloudflare quick tunnel,
   then re-points the MIA agent's MCP server URL and webhook callback at the
   fresh tunnel URL automatically.

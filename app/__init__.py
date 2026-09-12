@@ -1,3 +1,3 @@
 """
-MeetStream Companion application package.
+Meet Companion application package.
 """

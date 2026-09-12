@@ -1,232 +1,216 @@
-# MeetStream Companion 🎙️🧠
+<div align="center">
 
-**[▶ Try it now](https://meetstreamcompanion.up.railway.app)** — create your own private workspace (or join one with a code) and launch a bot into a real meeting.
+<img src="assets/branding/logo-icon.png" alt="Meet Companion" width="120" />
 
-> **Persistent AI Meeting Companion** — deploys a voice agent into your meetings via **MeetStream MIA**, remembers everything across every call using **PostgreSQL + pgvector**, and exposes that memory back to the live agent through **MCP (Model Context Protocol)** — plus a hosted web dashboard the whole team can sign into.
+# Meet Companion
 
-Most meeting bots hand you a transcript and forget everything the moment the call ends. MeetStream Companion is different: it deploys a bot that joins your call, records and transcribes it, runs the transcript through an LLM to extract structured memory (decisions, commitments, action items, concerns), and makes that memory queryable — both by a **live in-meeting AI agent** ("MeetStream Companion, what did we decide about pricing three weeks ago?") and by a **web dashboard** for browsing meetings, searching memory, and managing the agent's configuration.
+**Make meeting data smarter.**
 
-The backend and frontend are deployed on Railway (not a local-only dev tool). It's genuinely multi-tenant: every meeting, memory, and agent belongs to a specific **workspace**, and signing up means creating a brand new empty workspace or joining an existing one by its join code — nobody sees another workspace's data by default.
+Your open-source AI meeting companion. Choose your own AI models, storage and infrastructure.
 
----
-
-## 🌟 Key Features
-
-- **Live in-meeting AI agent, name-gated** — MeetStream's MIA agent joins your Google Meet / Zoom / Teams call and stays silent until addressed by name (e.g. "MeetStream Companion, ..."), then answers using full historical context pulled from past meetings.
-- **Persistent hybrid RAG memory** — every meeting's transcript and extracted memories are embedded and indexed with **Reciprocal Rank Fusion** (vector similarity + Postgres full-text keyword search), so exact terms (names, dates) aren't lost to embedding-only ranking. The ivfflat index is queried with `probes=10` rather than the pgvector default of 1 — at this app's per-workspace data volume, scanning ~1% of clusters was dropping genuinely relevant rows outright, not just ranking them lower.
-- **MCP server with 9 tools** — a date-resolution tool, 4 read tools (search memory, get a meeting, list/count previous meetings, list action items) and 4 write tools (add a memory, add a note, create an action item, update an action item), all org-scoped and audit-logged. Tool output is rendered as plain natural language, not raw JSON, so it reads cleanly if it ever reaches meeting chat.
-- **On-demand chat sharing** — the agent has a `share_in_chat` tool it only calls when a speaker explicitly asks it to post something to the meeting chat; it never dumps tool output into chat automatically.
-- **Chat-based join greeting** — when the bot joins, it posts an intro to the meeting chat explaining who it is, how to address it, and what it can do (realtime voice models don't reliably self-introduce out loud, so this is deliberately chat-based, not spoken).
-- **Automated memory extraction** — post-call transcripts are analyzed by an LLM (Groq / OpenAI) into categorized memories (decisions, requirements, commitments, concerns, facts, unresolved questions) and tracked action items.
-- **Real multi-tenant workspaces** — every meeting, memory, document, and agent belongs to one workspace; signup creates a new one or joins an existing one by join code, and each workspace's MCP tool calls are authenticated with their own bearer token so one workspace's agent can never read another's data.
-- **Web dashboard with real accounts** — a Members page for adding/removing who's in your workspace, and for sharing the join code that lets someone else join it; removing someone revokes their session immediately, not just future logins.
-- **Multi-agent management** — create, switch between, and activate multiple MIA agent configs from the dashboard; activating an agent auto-repairs its MCP/database wiring to your workspace if it was ever set up outside this app (e.g. directly in MeetStream's dashboard).
-- **Masked credentials panel** — Agent Settings shows which provider credentials are configured (MeetStream API key, memory-extraction LLM, this workspace's own MCP auth token) without ever exposing full secret values.
-- **Notebook — search + knowledge graph** — hybrid search and a force-directed knowledge graph in one page. The graph is derived from data already stored (meetings, participants, memories, action items) rather than a second extraction pipeline, so it stays in sync for free: people link to the meetings they attended and the memories they spoke, and meetings link to their customers, projects, memories, and action items.
-- **Date-aware retrieval** — a query naming a day ("what did we decide on September 2", "what did Thalha say yesterday") promotes results that are actually *from* that day over ones merely talking about it. Relative words inside transcripts are resolved at index time against the **meeting's own date**, not against whenever the search runs, so "yesterday" spoken in an old call can't collide with an unrelated query that also says "yesterday".
-- **Import bots launched outside the app** — meetings started directly in MeetStream can be pulled in after the fact, with filters, their real start/end dates, and the bot's own name as the meeting title.
-- **Company knowledge RAG** — upload PDFs/docs/notes as a separate knowledge base the agent can also draw on.
-- **Secure by construction** — every table is scoped by `organization_id` and every API route resolves it from your session, not a hardcoded default; HMAC-signed webhooks with replay protection; secrets are redacted server-side before any MeetStream API response reaches the browser.
+</div>
 
 ---
 
-## 🏗️ Architecture Overview
+Meet Companion sends an AI assistant into your meetings, then turns what was said
+into something you can actually use afterwards: decisions, commitments and action
+items you can search, organise and ask questions about.
 
-```
-                              MeetStream Platform
-        ┌────────────────┬──────────────────┬─────────────────┐
-        │   Bots (Calls) │   MIA Agent (AI) │    Transcript    │
-        └───────┬────────┴────────┬─────────┴────────┬────────┘
-                │                 │                   │
-             Webhooks      MCP + chat-relay        Webhooks
-                │           (both HTTP)                │
-                ▼                 ▼                   ▼
-   ┌──────────────────────────────────────────────────────────────┐
-   │                FastAPI Backend  ·  Railway service            │
-   │                                                                 │
-   │  ┌────────────┐ ┌─────────────┐ ┌────────────┐ ┌─────────────┐│
-   │  │ Webhook API│ │ MCP Server  │ │ Meeting API│ │ Auth/Members││
-   │  │            │ │ (9 tools +  │ │  + Graph   │ │     API     ││
-   │  │            │ │ chat-relay) │ │            │ │             ││
-   │  └──────┬─────┘ └──────┬──────┘ └─────┬──────┘ └──────┬──────┘│
-   │         │              │              │               │       │
-   │         ▼              ▼              ▼               ▼       │
-   │  ┌───────────────────────────────────────────────────────┐   │
-   │  │                        Services                        │   │
-   │  │  • MeetStream Client   • Memory Extractor              │   │
-   │  │  • Embedding Service   • Ingestion Pipeline             │   │
-   │  └────────────────────────────┬────────────────────────────┘   │
-   │                               ▼                                │
-   │  ┌───────────────────────────────────────────────────────┐   │
-   │  │                PostgreSQL 17 + pgvector                 │   │
-   │  │  • users (members)          • memories, action_items   │   │
-   │  │  • meetings, participants   • meeting_memory_embeddings │   │
-   │  │  • transcript_segments      • company_knowledge_embeds  │   │
-   │  └───────────────────────────────────────────────────────┘   │
-   └─────────────────────────────────────────────────────────────┘
-                                ▲
-                                │ REST API (session-cookie authenticated)
-                                │
-                 ┌───────────────────────────────┐
-                 │   React Dashboard · Railway     │
-                 │   Day view · Notebook · Agent · │
-                 │   Members · sign-in gate        │
-                 └───────────────────────────────┘
-```
+It is built on top of [MeetStream](https://meetstream.ai), which provides the bot
+that joins calls and produces transcripts.
 
-The MCP Server handles both the 9 read/write memory tools and the `share_in_chat` chat-relay call (the agent's only path to post into meeting chat, and only on explicit request) — both are called by MeetStream's MIA agent over HTTP, authenticated by that workspace's own bearer token (not one token shared by every workspace), which is how a tool call gets scoped to the right workspace's data. In production, the backend and frontend are separate Railway services with stable public URLs — no tunnel involved. Local development still uses a **Cloudflare Tunnel** to give MeetStream a public URL to reach your dev machine's MCP server and webhooks; see [Local development](#-local-development) below.
+The point of this project is that **you own the infrastructure**. Nothing is
+hard-wired to a vendor:
 
----
+- Bring your own LLM — OpenAI, Anthropic, Gemini, Groq, a local Ollama model, or
+  any OpenAI-compatible endpoint.
+- Bring your own database — a local SQLite file by default, PostgreSQL if you
+  want it.
+- Run it entirely on your own machine. With Ollama and SQLite, no data leaves
+  your computer and no API key is required.
 
-## 🚀 Using the Hosted App
+## Features
 
-The dashboard is already deployed — you don't need to run anything locally just to use it.
+- **Meeting capture** — launch a bot into Google Meet, Zoom or Teams, or import
+  bots that already ran on your MeetStream account.
+- **Memory extraction** — transcripts are turned into structured decisions,
+  commitments, requirements, concerns and action items.
+- **Semantic search** — hybrid vector and keyword search across everything ever
+  said, not just keyword matching.
+- **Notebook** — a real workspace: nested folders, notes, tags, favourites,
+  filtering and sorting.
+- **Ask AI** — ask questions about your own notes. Answers are grounded in
+  retrieved content and the model is instructed never to invent details.
+- **In-call recall** — an MCP server lets the in-meeting agent query your past
+  meetings live, so it can answer "what did we decide last time?" during a call.
 
-1. Open the frontend URL.
-2. Use the **Create account** tab: either **create a new workspace** (you're the only member until you invite others) or **join an existing one** with its join code, or sign in if you already have an account.
-3. From there: launch bots into meetings, browse history, search memory, and manage agents from the dashboard as described below.
+## Quick start
 
-Every workspace is isolated — you only ever see meetings, memories, and agents that belong to your own workspace. Share your workspace's join code from the **Members** page to invite teammates into it; removing a member from that page kills their session immediately, so access control is real, not just a UI convenience.
-
----
-
-## 🛠️ Deploying Your Own Instance
-
-### 1. Prerequisites
-- A [MeetStream](https://app.meetstream.ai) account and API key
-- An LLM API key for memory extraction (Groq is free-tier and works well; OpenAI/Anthropic also supported)
-- A host that can run a Docker container with a stable public URL and a Postgres+pgvector database (Railway is what this project is set up for; Render/Fly.io/a VPS would also work)
-
-### 2. Required environment variables
-Set these on your backend service (see `app/config.py` for the full list):
-
-| Variable | Purpose |
-|---|---|
-| `DATABASE_URL` | Postgres connection string (with pgvector extension available) |
-| `MEETSTREAM_API_KEY` | Your MeetStream account API key |
-| `MEETSTREAM_AGENT_CONFIG_ID` | Fallback MIA agent config id (the dashboard can override which agent is active without this) |
-| `MCP_SERVER_URL` | This backend's own public `/mcp` URL — MeetStream's agents call back into it |
-| `MCP_AUTH_TOKEN` | Any random string — used only as the *first* workspace's MCP token at startup (see below); every workspace after that gets its own, generated automatically |
-| `GROQ_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Whichever `LLM_PROVIDER` you set, for memory extraction |
-| `CORS_ORIGINS` | JSON list including your deployed frontend's origin |
-| `API_KEY_SALT` | Used to sign member session cookies — set this to a real secret in production |
-
-Deploy the backend from the repo root (it builds from the top-level `Dockerfile`) and the frontend from `frontend/` with `VITE_API_BASE_URL` set to the backend's public origin at build time.
-
-Signup is open — the first person to visit a fresh deployment just uses the **Create account** tab to create a new workspace (no invite needed), and everyone after that either joins that workspace with its join code or creates their own. Each workspace's MCP token is generated automatically the moment it's created; `MCP_AUTH_TOKEN` only seeds the original default workspace so an existing deployment's already-wired agent doesn't break when this feature is added. If you'd rather seed an account without exposing the app publicly first, `python scripts/create_first_member.py "Your Name" you@example.com yourpassword "Workspace Name"` creates one directly against the database.
-
-### 3. Local development
-```bash
-docker compose up -d
-python scripts/setup_db.py
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-```bash
-cd frontend
-npm install
-npm run dev
-```
-You'll also need a tunnel (e.g. `cloudflared tunnel --url http://localhost:8000`) so MeetStream can reach your local `/mcp` endpoint and deliver webhooks — set `MCP_SERVER_URL` to that tunnel's `/mcp` URL and push it to your agent config via `PUT /api/agent`. On Windows, `.\start.ps1` automates all of the above (Docker, backend, a fresh tunnel, re-pointing the agent, and the frontend dev server); `.\stop.ps1` tears it down.
-
----
-
-## 📖 How to Use It
-
-### From the dashboard
-1. **Day view** — pick a date to see every meeting and document from that day. Click **Launch bot** and paste a meeting link (Google Meet / Zoom / Teams) to deploy the agent into a live call. The Title field is just a label for this dashboard — it does not change what the bot is named or addressed as in the meeting.
-2. Click into a meeting to see its **Summary**, **Decisions & Memories**, **Action Items** (editable status), **Transcript**, and live **Bot** status — with a **Stop bot** button while it's still recording.
-3. **Notebook** — semantic + keyword search across every indexed meeting, ranked by match %, alongside a force-directed knowledge graph of how people, meetings, customers, projects, memories, and action items connect. Naming a date in the query surfaces that day's meetings first.
-4. **Agent** — view and edit the live MIA agent's system prompt, voice, model, and response settings; create additional agents and switch which one is active; see masked provider credentials.
-5. **Members** — see your workspace's join code (for inviting people directly into it), add someone yourself, or remove someone (revokes their session immediately).
-6. **Import old bots** — pull in meetings that were launched directly in MeetStream rather than through this dashboard; they land on their real date with the bot's name as the title.
-7. Upload company documents (PDF/DOCX/TXT/MD/CSV) from the Day view's Documents panel to add them to the company-knowledge RAG.
-
-### From a live meeting
-Once a bot joins, it stays silent until addressed by its configured name (e.g. *"MeetStream Companion, what did we decide about the pricing tier last week?"* or *"MeetStream Companion, how many meetings did we have yesterday?"*) — it answers using the MCP tools below, drawing on the same memory the dashboard shows you. Ask it to *"share that in chat"* and it'll post a clean, plain-language version of its answer into the meeting chat — it never does this unprompted.
-
-### From the API directly
-```bash
-# Deploy a bot into a meeting
-curl -X POST https://<your-backend-url>/api/meetings \
-  -H "Content-Type: application/json" \
-  -b "hub_session=<your session cookie>" \
-  -d '{"meeting_url": "https://meet.google.com/xxx-xxxx-xxx", "title": "Sync"}'
-
-# Search meeting memory
-curl -X POST https://<your-backend-url>/api/search/memory \
-  -H "Content-Type: application/json" \
-  -b "hub_session=<your session cookie>" \
-  -d '{"query": "pricing decisions"}'
-```
-Most `/api/*` routes require an authenticated member session (sign in via `POST /api/auth/login` first) — the `/mcp/*` routes the agent itself calls use a separate bearer token (`MCP_AUTH_TOKEN`) instead. Full interactive API docs are available at `/docs` on your backend URL.
-
----
-
-## 🛠️ MCP Tools Reference
-
-Exposed at `POST /mcp` (JSON-RPC 2.0) and individually at `POST /mcp/tools/{tool_name}`, authenticated with `Authorization: Bearer <token>` — that token is looked up against the `organizations` table to resolve which workspace's data the call can touch, so each workspace's agent needs its own token (shown, masked, in Agent Settings → credentials). Every tool's response is rendered as plain natural-language text, not raw JSON — it's what the agent reads and, on request, what can end up in meeting chat.
-
-**Read tools**
-
-| Tool | Purpose | Key Parameters |
-|---|---|---|
-| `get_current_datetime` | Resolve the actual current date/time — the model has no built-in sense of "today" | *(none)* |
-| `search_meeting_memory` | Hybrid semantic + keyword search across all previous meetings | `query`, `customer_name`, `speaker`, `limit` |
-| `get_meeting` | Full details, summary, participants, and memories for one meeting | `meeting_id` or `title` |
-| `get_previous_meetings` | List and accurately **count** recent meetings, with a real date range filter | `date_from`, `date_to`, `customer_name`, `project_name`, `limit` |
-| `get_action_items` | List open or completed action items | `owner`, `status`, `limit` |
-
-**Write tools** (used by the live agent to persist what it hears)
-
-| Tool | Purpose |
-|---|---|
-| `add_meeting_memory` | Record a structured memory (decision, requirement, concern, fact, etc.) |
-| `add_meeting_note` | Record a quick free-form note that doesn't fit a specific memory type |
-| `create_action_item` | Create a tracked task/commitment with an owner and due date |
-| `update_action_item` | Update an existing action item's status, owner, due date, or notes |
-
-The agent also has a `share_in_chat` custom function (posts a message to the meeting chat, only on explicit request) that isn't part of the MCP tool set above — it's registered directly on the MIA agent config.
-
----
-
-## 🖥️ Local Development Notes
-
-Local dev still runs everything on your own machine, tunneled to the internet. The only thing that reaches the public internet is a **Cloudflare Tunnel**, which forwards traffic back to your local backend so MeetStream's cloud service can deliver webhooks and the live agent can call the MCP server. This means:
-
-- The tunnel's URL changes every time it restarts — `start.ps1` handles regenerating it and re-pointing the agent config automatically.
-- The whole local setup only works while your machine is on and `start.ps1` (or the manual equivalent) is running — that's exactly why the production deployment doesn't use a tunnel at all; see [Deploying Your Own Instance](#-deploying-your-own-instance) above.
-- Postgres runs in Docker purely because it's the simplest way to get Postgres + the pgvector extension on Windows without a native install — the backend itself runs directly via the local Python venv, not in Docker.
-
----
-
-## 🧪 Testing
+Requires Python 3.12+ and Node 20+.
 
 ```bash
-python -m pytest tests/ -v
+git clone https://github.com/ThalhaAhamed/MeetCompanion.git
+cd MeetCompanion
+
+python -m venv .venv
+.venv/Scripts/activate        # Windows
+# source .venv/bin/activate   # macOS / Linux
+pip install -r requirements.txt
+
+npm --prefix frontend install
 ```
 
-Run the interactive pipeline demonstration:
+Start the backend:
+
 ```bash
-python scripts/test_memory_pipeline.py
+.venv/Scripts/python -m uvicorn app.main:app --port 8000 --reload
 ```
 
----
+And the frontend, in a second terminal:
 
-## 📁 Project Structure
+```bash
+npm --prefix frontend run dev
+```
+
+Open <http://localhost:3000>. On first run you are walked through choosing an AI
+provider and where to store your data. **No `.env` file is required** — the
+defaults work, and everything is configurable from the UI.
+
+### Running fully offline
+
+Install [Ollama](https://ollama.com), pull a model, and pick *Ollama (local)*
+during setup:
+
+```bash
+ollama pull llama3.1
+```
+
+With Ollama and the default SQLite storage, Meet Companion makes no outbound
+calls except to MeetStream when you actually launch a bot.
+
+## Configuration
+
+Everything can be set in the UI. For container or CI deployments, environment
+variables take precedence over anything saved in the UI, and the Settings screen
+marks those fields read-only rather than pretending to save them.
+
+Copy `.env.example` to `.env` to configure by file. Every value has a working
+default; the ones you are most likely to want:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | `sqlite+aiosqlite:///data/meet-companion.db` | Storage. Point at `postgresql+asyncpg://…` for Postgres. |
+| `LLM_PROVIDER` | `ollama` | `openai`, `anthropic`, `gemini`, `ollama`, `groq`, `openai_compatible` |
+| `LLM_MODEL` | per provider | Model name. |
+| `LLM_API_KEY` | — | Required for hosted providers; not needed for Ollama. |
+| `LLM_BASE_URL` | per provider | Override for proxies, gateways or self-hosted endpoints. |
+| `MEETSTREAM_API_KEY` | — | Only needed to send bots into live meetings. |
+| `MCP_AUTH_TOKEN` | — | Change before exposing the server beyond your machine. |
+
+Configuration saved through the UI lives in `data/config.json`, alongside the
+SQLite database. Both are gitignored — `config.json` holds API keys.
+
+## Supported providers
+
+**LLM** — OpenAI · Anthropic · Google Gemini · Ollama · Groq · any
+OpenAI-compatible API (vLLM, LM Studio, OpenRouter, together.ai)
+
+**Database** — SQLite (default, zero setup) · PostgreSQL with pgvector
+
+**Embeddings** run locally via `sentence-transformers`; they never require an API
+key and never leave the machine.
+
+**Meeting bots** — MeetStream.
+
+## Architecture
+
+```
+                    UI  (React + Vite + Tailwind)
+                     │
+                    API  (FastAPI)
+                     │
+        Services / domain logic
+                     │
+            Provider abstractions
+        ┌────────────┼─────────────┐
+       LLM        Database      MeetStream
+        │             │
+  OpenAI            pgvector  (PostgreSQL)
+  Anthropic         in-process cosine  (SQLite)
+  Gemini
+  Ollama
+  Groq
+  OpenAI-compatible
+```
+
+Two ideas carry most of the weight:
+
+**Providers are interfaces, not conditionals.** Adding an LLM vendor means
+writing one adapter in `app/providers/llm/` and registering it. No application
+code changes. Each adapter also declares which configuration fields it needs,
+and that metadata drives the setup forms — which is why Ollama never shows an
+API key box.
+
+**The database is swapped, not abstracted away.** Only two operations actually
+differ between databases: similarity search and keyword search. Those live in
+`app/providers/database/`, selected from the live connection's dialect. On
+Postgres they use pgvector and full-text search; elsewhere similarity is
+computed with numpy and keywords are scored by term matching. Everything else is
+ordinary SQLAlchemy that runs anywhere, using portable column types from
+`app/models/types.py`.
 
 ```
 app/
-  api/          REST endpoints (meetings, documents, agent, members, auth, search, graph, action items, webhooks, health)
-  api/deps.py   Shared dependency that resolves the signed-in member's own workspace (org_id) from the session
-  mcp/          MCP server (JSON-RPC + REST tool endpoints), tool implementations, and per-workspace token auth
-  middleware/   Per-member session gate (auth_gate.py)
-  services/     MeetStream API client, LLM memory extraction, embedding service, ingestion pipeline
-  rag/          Hybrid vector+keyword search (meeting memory) and company knowledge RAG
-  database/     SQLAlchemy repositories (org-scoped data access)
-  models/       ORM models and Pydantic schemas
-frontend/       React + Vite dashboard (Day view, Notebook, Agent settings, Members, sign-in gate)
-migrations/     SQL schema (Postgres + pgvector) - additive columns are patched in at startup, see app/main.py
-tests/          Unit, integration, and security tests
-start.ps1       One-command local dev environment bootstrap (Windows)
-stop.ps1        Stops the local backend/frontend/tunnel
+├── api/            HTTP endpoints
+├── providers/      LLM and database adapters
+├── services/       application logic
+├── database/       repositories
+├── models/         ORM models and portable column types
+├── rag/            chunking, indexing, retrieval
+├── mcp/            MCP server for in-call tool use
+└── runtime_config  configuration persisted from the UI
 ```
+
+## Development
+
+```bash
+.venv/Scripts/python -m pytest          # backend tests
+npm --prefix frontend run lint          # frontend lint
+npm --prefix frontend run build         # production build
+```
+
+The test suite is hermetic: it runs against a throwaway SQLite file and needs no
+Postgres, no Docker and no network.
+
+### Using PostgreSQL
+
+```bash
+docker compose up -d
+export DATABASE_URL=postgresql+asyncpg://meet:meet_dev_password@localhost:5432/meet_companion
+```
+
+The schema, indexes and pgvector extension are created automatically at startup.
+
+## Contributing
+
+Contributions are welcome. A few things worth knowing:
+
+- Adding an LLM provider is a single file in `app/providers/llm/` plus a
+  registry entry and a descriptor. Look at `ollama.py` for the smallest example.
+- Anything database-specific belongs behind `SearchBackend`; if you find
+  yourself writing dialect checks elsewhere, that is a sign it belongs there.
+- Keep secrets out of API responses. `app/runtime_config.py` masks them, and
+  there are tests asserting they are never returned in full.
+- Run the tests before opening a pull request.
+
+## Roadmap
+
+- Local transcription provider, so meeting capture can run without MeetStream
+- Rich-text and Markdown rendering in the notebook editor
+- Re-indexing task for notes and meetings after changing embedding models
+- Export (Markdown, JSON) for notes and meetings
+
+## License
+
+No license file is present yet. Until one is added, all rights are reserved by
+the copyright holder — if you intend to use this, open an issue to ask.

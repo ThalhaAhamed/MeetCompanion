@@ -1,5 +1,5 @@
 """
-Standalone Demonstration Script for MeetStream Companion Pipeline.
+Standalone Demonstration Script for Meet Companion Pipeline.
 Simulates Meeting 1 with Acme Corp, extracts memories, indexes embeddings,
 and runs semantic search queries to answer questions from the meeting history.
 """

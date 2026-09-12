@@ -1,5 +1,5 @@
 """
-FastAPI application entry point for MeetStream Companion.
+FastAPI application entry point for Meet Companion.
 """
 from contextlib import asynccontextmanager
 from fastapi import FastAPI

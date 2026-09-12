@@ -224,7 +224,7 @@ class MeetStreamClient:
         if mcp_server_url:
             server_config: Dict[str, Any] = {
                 "url": mcp_server_url,
-                "name": "MeetStream Companion MCP",
+                "name": "Meet Companion MCP",
                 "timeout": 30,
                 "active": True,
                 "allowed_tools": [

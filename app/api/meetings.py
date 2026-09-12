@@ -96,10 +96,10 @@ async def create_meeting(
             # respond when addressed by <AgentName>") - it used to fall back to
             # the free-text meeting title instead, so a meeting titled "Agent P"
             # made the bot show up as "Agent P" while it was still only
-            # listening for "MeetStream Companion", and it stayed silent no
+            # listening for "Meet Companion", and it stayed silent no
             # matter what anyone said. The title field is purely our own
             # dashboard label now; it never reaches MeetStream as bot_name.
-            bot_name = "MeetStream Companion"
+            bot_name = "Meet Companion"
             if active_agent_config_id:
                 try:
                     agent_cfg = await meetstream_client.get_mia_agent(active_agent_config_id, api_key=own_meetstream_key)

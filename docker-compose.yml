@@ -1,20 +1,29 @@
-version: "3.9"
+# Optional PostgreSQL for Meet Companion.
+#
+# Meet Companion runs on a local SQLite file by default and needs nothing from
+# this file. Start this only if you want Postgres - for a shared deployment, or
+# a corpus large enough to want pgvector's indexed similarity search:
+#
+#   docker compose up -d
+#   DATABASE_URL=postgresql+asyncpg://meet:meet_dev_password@localhost:5432/meet_companion
+#
+# The schema is created by the application from its own models, so no init
+# scripts are mounted here - there is exactly one source of truth for it.
 
 services:
   postgres:
     image: pgvector/pgvector:pg17
-    container_name: meetstream_companion_db
+    container_name: meet_companion_db
     environment:
-      POSTGRES_DB: meetstream_companion
-      POSTGRES_USER: meetstream
-      POSTGRES_PASSWORD: meetstream_dev_password
+      POSTGRES_DB: meet_companion
+      POSTGRES_USER: meet
+      POSTGRES_PASSWORD: meet_dev_password
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U meetstream -d meetstream_companion"]
+      test: ["CMD-SHELL", "pg_isready -U meet -d meet_companion"]
       interval: 5s
       timeout: 5s
       retries: 5

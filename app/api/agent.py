@@ -498,7 +498,7 @@ async def _ensure_mcp_wired(agent_config_id: str, mcp_token: Optional[str], api_
         existing_tools = set(mcp_servers[0].get("allowed_tools") or []) if mcp_servers else set()
         default_tools = {"get_current_datetime", "search_meeting_memory", "get_meeting", "get_previous_meetings", "get_action_items"}
         server_config = {
-            "name": "MeetStream Companion MCP",
+            "name": "Meet Companion MCP",
             "url": settings.MCP_SERVER_URL,
             "timeout": 30,
             "active": True,

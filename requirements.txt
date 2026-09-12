@@ -1,5 +1,5 @@
 # ============================================================
-# MeetStream Companion — Python Dependencies
+# Meet Companion — Python Dependencies
 # ============================================================
 
 # ---- Web Framework ----

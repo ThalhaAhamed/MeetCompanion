@@ -1,5 +1,5 @@
 """
-Configuration management for MeetStream Companion.
+Configuration management for Meet Companion.
 Loads settings from environment variables and .env file.
 """
 from typing import List, Optional
@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     )
 
     # ---- Application ----
-    APP_NAME: str = "MeetStream Companion"
+    APP_NAME: str = "Meet Companion"
     APP_ENV: str = "development"
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000
@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 100
 
     # ---- Security ----
-    API_KEY_SALT: str = "meetstream_companion_secure_salt_2026"
+    API_KEY_SALT: str = "meet_companion_secure_salt_2026"
 
 
 settings = Settings()
