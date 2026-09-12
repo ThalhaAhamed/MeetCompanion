@@ -10,6 +10,7 @@
 [![Downloads](https://img.shields.io/github/downloads/meetstream-ai/companion/total?color=7b87be)](https://github.com/meetstream-ai/companion/releases)
 [![Stars](https://img.shields.io/github/stars/meetstream-ai/companion?style=flat&color=a7a5cb)](https://github.com/meetstream-ai/companion/stargazers)
 [![Build](https://img.shields.io/github/actions/workflow/status/meetstream-ai/companion/release.yml?label=build)](https://github.com/meetstream-ai/companion/actions)
+[![License: MIT](https://img.shields.io/badge/license-MIT-e3b1bc)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-3b4873)
 
 **Open Source • Bring Your Own AI • Runs On Your Machine**
@@ -317,9 +318,7 @@ Contributions are welcome — issues, pull requests, providers, docs.
 
 ## 📄 License
 
-No license file has been added yet, which means all rights are currently
-reserved. A `LICENSE` file will be added before the first public release; open
-an issue if you need clarity before then.
+[MIT](LICENSE) — use it, change it, ship it. Attribution appreciated.
 
 ## 🙏 Acknowledgments
 
