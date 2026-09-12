@@ -23,7 +23,9 @@ function serverExecutable() {
 }
 
 function dataDir() {
-  return path.join(app.getPath('userData'), 'workspace')
+  // Overridable so a developer can run the shell against an existing
+  // workspace (for example the repository checkout) instead of a fresh one.
+  return process.env.MEET_COMPANION_DATA_DIR || path.join(app.getPath('userData'), 'workspace')
 }
 
 function waitForHealth(port, timeoutMs) {
