@@ -103,9 +103,39 @@ def _serialize_note(note: Note, *, include_content: bool = True) -> Dict[str, An
     if include_content:
         data["content"] = note.content
     else:
-        # Markers and other comments are plumbing, not something to preview.
-        data["excerpt"] = re.sub(r"<!--.*?-->", "", note.content or "", flags=re.S)[:240]
+        data["excerpt"] = excerpt_of(note.content)
     return data
+
+
+_MD_NOISE = [
+    (re.compile(r"<!--.*?-->", re.S), ""),            # markers and comments
+    (re.compile(r"```.*?```", re.S), " "),            # fenced code
+    (re.compile(r"^\s{0,3}#{1,6}\s+", re.M), ""),      # headings
+    (re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+\[[ xX]\]\s+", re.M), ""),  # task boxes
+    (re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+", re.M), ""),  # list bullets
+    (re.compile(r"^\s*>\s?", re.M), ""),              # block quotes
+    (re.compile(r"^\s*(?:-{3,}|\*{3,}|_{3,})\s*$", re.M), ""),  # rules
+    (re.compile(r"!?\[([^\]]*)\]\([^)]*\)"), r"\1"),  # links and images
+    (re.compile(r"(\*\*|__)(.+?)\1"), r"\2"),        # bold
+    (re.compile(r"(?<!\w)[*_](.+?)[*_](?!\w)"), r"\1"),  # italics
+    (re.compile(r"`([^`]*)`"), r"\1"),                # inline code
+]
+
+
+def excerpt_of(content: str, limit: int = 240) -> str:
+    """
+    The first few lines of a note as plain text.
+
+    Lists and dashboards show this next to the title, so Markdown syntax
+    would be noise there: headings, bullets, emphasis and the action-item
+    markers are all stripped and lines are joined with a separator.
+    """
+    text = content or ""
+    for pattern, replacement in _MD_NOISE:
+        text = pattern.sub(replacement, text)
+    lines = [" ".join(line.split()) for line in text.splitlines()]
+    joined = " · ".join(line for line in lines if line and not line.startswith("Generated from the meeting record"))
+    return joined[:limit].rstrip(" ·")
 
 
 async def _embed_note(title: str, content: str) -> Optional[List[float]]:
