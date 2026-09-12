@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Page, PageHeader } from '../components/AppShell'
 import { MeetingsIcon, PlusIcon, SearchIcon } from '../components/Icons'
@@ -14,6 +14,15 @@ import {
 } from '../api'
 
 const LIVE_STATUSES = ['pending', 'joining', 'recording', 'in_progress']
+
+/**
+ * Some summaries were stored with escaped newlines rather than real ones, so
+ * a literal "\n" reaches the browser and renders as text. Convert those back
+ * before display; genuine newlines are unaffected.
+ */
+function withRealNewlines(text) {
+  return (text || '').replace(/\\r\\n|\\n/g, '\n')
+}
 
 function statusTone(status) {
   if (['completed', 'done'].includes(status)) return 'success'
@@ -269,7 +278,7 @@ function MeetingDetail({ meetingId, onChanged }) {
       <div className="mc-scroll max-h-[60vh] overflow-y-auto p-5">
         {tab === 'summary' &&
           (meeting.summary ? (
-            <p className="whitespace-pre-wrap text-sm leading-relaxed">{meeting.summary}</p>
+            <p className="whitespace-pre-wrap text-sm leading-relaxed">{withRealNewlines(meeting.summary)}</p>
           ) : (
             <EmptyState title="No summary yet" description="A summary appears once the transcript has been processed." />
           ))}
@@ -359,6 +368,30 @@ export default function Meetings() {
     setMeetings(null)
     refresh()
   }, [refresh])
+
+  // Opening on today is right for someone using this daily, but it strands
+  // anyone returning after a gap on an empty page while meetings sit a few
+  // days back. If today is empty, fall through to the most recent day that
+  // has something - once only, so it never fights a date the user picked.
+  // A ref, not state: flipping state here would re-run this effect, and its
+  // cleanup would cancel the request that is still in flight.
+  const jumpedToRecent = useRef(false)
+  useEffect(() => {
+    if (jumpedToRecent.current || meetings === null || meetings.length > 0) return
+    jumpedToRecent.current = true
+
+    listMeetings(null)
+      .then((data) => {
+        const all = Array.isArray(data) ? data : data?.meetings || []
+        const latest = all
+          .map((meeting) => (meeting.started_at || meeting.created_at || '').slice(0, 10))
+          .filter(Boolean)
+          .sort()
+          .pop()
+        if (latest && latest !== day) setDay(latest)
+      })
+      .catch(() => {})
+  }, [meetings, day])
 
   const urlQuery = searchParams.get('q') || ''
   useEffect(() => {
