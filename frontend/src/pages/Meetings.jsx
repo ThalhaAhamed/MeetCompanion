@@ -10,7 +10,9 @@ import {
   importBot,
   listImportableBots,
   listMeetings,
+  reprocessMeeting,
   stopMeetingBot,
+  uploadTranscript,
 } from '../api'
 
 const LIVE_STATUSES = ['pending', 'joining', 'recording', 'in_progress']
@@ -190,12 +192,81 @@ function ImportBotsModal({ open, onClose, onImported }) {
   )
 }
 
+function UploadTranscriptModal({ open, onClose, onUploaded }) {
+  const [form, setForm] = useState({ title: '', transcript: '', project_name: '', started_at: '' })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  function update(key, value) {
+    setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  async function submit(event) {
+    event.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      const meeting = await uploadTranscript({
+        title: form.title,
+        transcript: form.transcript,
+        project_name: form.project_name || null,
+        started_at: form.started_at ? new Date(form.started_at).toISOString() : null,
+      })
+      onUploaded?.(meeting)
+      setForm({ title: '', transcript: '', project_name: '', started_at: '' })
+      onClose()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Upload a transcript" width="38rem">
+      <p className="mb-4 text-sm" style={{ color: 'var(--text-muted)' }}>
+        Paste a transcript from anywhere - another recorder, meeting notes, a call you transcribed
+        yourself. One line per utterance, <code>Name: what they said</code>. It goes through the same
+        extraction as a recorded call.
+      </p>
+      <form onSubmit={submit}>
+        <Field label="Title" htmlFor="up-title">
+          <input id="up-title" className="mc-input" required value={form.title} onChange={(e) => update('title', e.target.value)} />
+        </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="When" htmlFor="up-when" hint="Used to resolve deadlines like “by Friday”.">
+            <input id="up-when" type="datetime-local" className="mc-input" value={form.started_at} onChange={(e) => update('started_at', e.target.value)} />
+          </Field>
+          <Field label="Project" htmlFor="up-project">
+            <input id="up-project" className="mc-input" value={form.project_name} onChange={(e) => update('project_name', e.target.value)} />
+          </Field>
+        </div>
+        <Field label="Transcript" htmlFor="up-text">
+          <textarea
+            id="up-text"
+            className="mc-input min-h-56 font-mono text-xs"
+            required
+            placeholder={'Priya: Morning everyone. Quick agenda…\nMarcus: Let\'s start with Northwind…'}
+            value={form.transcript}
+            onChange={(e) => update('transcript', e.target.value)}
+          />
+        </Field>
+        {error && <div className="mb-4"><ErrorMessage title="Upload failed" detail={error} /></div>}
+        <button type="submit" className="mc-btn mc-btn-primary w-full" disabled={busy || !form.transcript.trim()}>
+          {busy ? <Spinner size={14} /> : null} {busy ? 'Extracting…' : 'Upload and extract'}
+        </button>
+      </form>
+    </Modal>
+  )
+}
+
 function MeetingDetail({ meetingId, onChanged }) {
   const [meeting, setMeeting] = useState(null)
   const [transcript, setTranscript] = useState(null)
   const [tab, setTab] = useState('summary')
   const [error, setError] = useState(null)
   const [stopping, setStopping] = useState(false)
+  const [reprocessing, setReprocessing] = useState(false)
 
   useEffect(() => {
     setMeeting(null)
@@ -218,6 +289,21 @@ function MeetingDetail({ meetingId, onChanged }) {
       setError(err.message)
     } finally {
       setStopping(false)
+    }
+  }
+
+  async function reprocess() {
+    setReprocessing(true)
+    setError(null)
+    try {
+      await reprocessMeeting(meetingId)
+      setMeeting(await getMeeting(meetingId))
+      setTranscript(null)
+      onChanged?.()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setReprocessing(false)
     }
   }
 
@@ -247,11 +333,24 @@ function MeetingDetail({ meetingId, onChanged }) {
               {meeting.created_by_name && <span>Started by {meeting.created_by_name}</span>}
             </div>
           </div>
-          {isLive && (
-            <button type="button" className="mc-btn mc-btn-danger" onClick={stop} disabled={stopping}>
-              {stopping ? <Spinner size={13} /> : null} Stop bot
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {!isLive && (
+              <button
+                type="button"
+                className="mc-btn mc-btn-secondary"
+                onClick={reprocess}
+                disabled={reprocessing}
+                title="Run extraction again with the current AI provider"
+              >
+                {reprocessing ? <Spinner size={13} /> : null} {reprocessing ? 'Extracting…' : 'Reprocess'}
+              </button>
+            )}
+            {isLive && (
+              <button type="button" className="mc-btn mc-btn-danger" onClick={stop} disabled={stopping}>
+                {stopping ? <Spinner size={13} /> : null} Stop bot
+              </button>
+            )}
+          </div>
         </div>
 
         {meeting.processing_error && (
@@ -354,6 +453,7 @@ export default function Meetings() {
   const [filter, setFilter] = useState(() => searchParams.get('q') || '')
   const [launchOpen, setLaunchOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [uploadOpen, setUploadOpen] = useState(false)
 
   const refresh = useCallback(async () => {
     try {
@@ -424,6 +524,9 @@ export default function Meetings() {
               onChange={(event) => setDay(event.target.value)}
               aria-label="Day"
             />
+            <button type="button" className="mc-btn mc-btn-secondary" onClick={() => setUploadOpen(true)}>
+              Upload transcript
+            </button>
             <button type="button" className="mc-btn mc-btn-secondary" onClick={() => setImportOpen(true)}>
               Import past bots
             </button>
@@ -501,6 +604,7 @@ export default function Meetings() {
 
       <LaunchBotModal open={launchOpen} onClose={() => setLaunchOpen(false)} onLaunched={handleLaunched} />
       <ImportBotsModal open={importOpen} onClose={() => setImportOpen(false)} onImported={handleLaunched} />
+      <UploadTranscriptModal open={uploadOpen} onClose={() => setUploadOpen(false)} onUploaded={handleLaunched} />
     </Page>
   )
 }

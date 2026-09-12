@@ -3,6 +3,7 @@ End-to-end background processing pipeline for meetings:
 Transcript Retrieval -> Segment Storage -> Memory Extraction -> Action Item Tracking -> Vector Indexing.
 """
 import uuid
+from datetime import date
 from typing import Optional, List, Dict, Any
 from app.config import settings
 from app.database.connection import get_db_context
@@ -13,6 +14,16 @@ from app.database.repositories import (
 from app.services.meetstream import meetstream_client
 from app.services.memory import memory_extractor
 from app.rag.meeting_memory import meeting_memory_rag
+
+
+def _parse_due_date(value):
+    """The model is asked for YYYY-MM-DD; anything else is treated as no date."""
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value.strip()[:10])
+    except ValueError:
+        return None
 
 
 class MeetingProcessingPipeline:
@@ -92,8 +103,9 @@ class MeetingProcessingPipeline:
                             "confidence": t_resp.get("confidence"),
                         }]
 
+                segments_are_new = bool(raw_segments)
                 if not raw_segments:
-                    # Check if already in DB
+                    # Reprocessing: the transcript is already stored.
                     existing_segs = await transcript_repo.get_segments_by_meeting(meeting.id)
                     raw_segments = [
                         {
@@ -109,8 +121,10 @@ class MeetingProcessingPipeline:
                 if not raw_segments:
                     raise ValueError(f"No transcript content available for meeting {meeting_id}")
 
-                # 3. Store transcript segments in database
-                await transcript_repo.add_segments(meeting.id, raw_segments)
+                # 3. Store transcript segments in database - only ones that
+                # did not come from the database in the first place.
+                if segments_are_new:
+                    await transcript_repo.add_segments(meeting.id, raw_segments)
                 await participant_repo.sync_from_speaker_names(
                     meeting.id,
                     [s.get("speaker", "") for s in raw_segments],
@@ -129,6 +143,7 @@ class MeetingProcessingPipeline:
                     meeting_title=meeting.title,
                     customer_name=meeting.customer_name,
                     project_name=meeting.project_name,
+                    meeting_date=meeting.started_at or meeting.created_at,
                 )
 
                 extracted_memories_data = extraction_result.get("memories", [])
@@ -150,6 +165,7 @@ class MeetingProcessingPipeline:
                         task=act.get("task", ""),
                         owner=act.get("owner"),
                         priority=act.get("priority", "medium"),
+                        due_date=_parse_due_date(act.get("due_date")),
                     )
 
                 # 8. Index into Meeting Memory RAG

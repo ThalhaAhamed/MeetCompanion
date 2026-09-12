@@ -83,6 +83,21 @@ class MeetingRepository:
         result = await self.session.execute(stmt)
         return {row[0] for row in result.all()}
 
+    async def clear_extraction(self, meeting_id: uuid.UUID) -> None:
+        """
+        Drop everything derived from a meeting's transcript - memories, action
+        items, embeddings, summary - so extraction can run again without
+        duplicating results. The transcript itself and its participants stay.
+        """
+        from app.models.database import ActionItem, MeetingMemoryEmbedding, Memory
+
+        for model in (ActionItem, Memory, MeetingMemoryEmbedding):
+            await self.session.execute(delete(model).where(model.meeting_id == meeting_id))
+        await self.session.execute(
+            update(Meeting).where(Meeting.id == meeting_id).values(summary=None, processing_error=None)
+        )
+        await self.session.flush()
+
     async def get_all_existing_bot_ids(self) -> set:
         """Every meetstream_bot_id tracked anywhere, across every
         organization - meetings.meetstream_bot_id has a *global* unique

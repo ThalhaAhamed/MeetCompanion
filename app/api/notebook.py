@@ -36,13 +36,15 @@ router = APIRouter(prefix="/api/notebook", tags=["notebook"])
 ASK_CONTEXT_NOTES = 8
 #: Characters of each note included in that context.
 ASK_NOTE_EXCERPT = 2000
+#: Transcript / memory passages added alongside the notes.
+ASK_CONTEXT_EXCERPTS = 6
 
-ASK_SYSTEM_PROMPT = """You are a research assistant answering questions about the user's own notes.
+ASK_SYSTEM_PROMPT = """You are a research assistant answering questions about the user's own notes and meetings.
 
 Rules:
-- Answer only from the provided notes. Never invent details.
-- If the notes do not contain the answer, say so plainly.
-- Cite the notes you used by their title.
+- Answer only from the provided notes and meeting excerpts. Never invent details.
+- If they do not contain the answer, say so plainly.
+- Cite what you used by note title or meeting title.
 - Be concise and specific."""
 
 
@@ -455,26 +457,40 @@ async def ask_notebook(
         note_ids=body.note_ids,
     )
 
+    excerpts: List[Dict[str, Any]] = []
     if body.note_ids:
         notes, _ = await repo.list(conditions, limit=ASK_CONTEXT_NOTES)
     else:
         notes = await _retrieve_relevant_notes(db, conditions, body.question)
+        # Only when the question ranges over everything: a scoped question
+        # ("in this folder", "these notes") should stay within that scope.
+        if body.folder_id is None and not body.favorites_only:
+            excerpts = await _retrieve_meeting_excerpts(db, org_id, body.question)
 
-    if not notes:
+    if not notes and not excerpts:
         return {
             "answer": "There are no notes in scope to answer from yet.",
             "sources": [],
             "provider": provider.name,
         }
 
-    context = "\n\n".join(
-        f"### {note.title}\n{(note.content or '')[:ASK_NOTE_EXCERPT]}" for note in notes
-    )
+    sections = []
+    if notes:
+        sections.append("Notes:\n\n" + "\n\n".join(
+            f"### {note.title}\n{(note.content or '')[:ASK_NOTE_EXCERPT]}" for note in notes
+        ))
+    if excerpts:
+        sections.append("Meeting excerpts:\n\n" + "\n\n".join(
+            f"### {e['meeting_title']} ({e['meeting_date'] or 'undated'})"
+            + (f" — {e['speaker']}" if e.get("speaker") else "")
+            + f"\n{e['content']}"
+            for e in excerpts
+        ))
     messages = [
         ChatMessage(role="system", content=ASK_SYSTEM_PROMPT),
         ChatMessage(
             role="user",
-            content=f"Notes:\n\n{context}\n\n---\n\nQuestion: {body.question.strip()}",
+            content="\n\n---\n\n".join(sections) + f"\n\n---\n\nQuestion: {body.question.strip()}",
         ),
     ]
 
@@ -497,34 +513,53 @@ async def _retrieve_relevant_notes(
     """
     Pick the notes most likely to answer the question.
 
-    Semantic retrieval first; literal keyword matching fills the remainder so
-    exact terms (names, dates, acronyms) that embeddings under-rank still make
-    it into context.
+    Semantic and keyword rankings are fused by rank (reciprocal rank fusion)
+    rather than taking one and topping up with the other: whole-note
+    embeddings blur together for notes that share a template, so a note the
+    keywords nail must be able to win even when the embedding puts it tenth.
     """
     backend = get_search_backend(db)
-    selected: List[Note] = []
-    seen: set = set()
+    ranked: Dict[uuid.UUID, float] = {}
+    notes: Dict[uuid.UUID, Note] = {}
+    pool = ASK_CONTEXT_NOTES * 3
+
+    def fuse(results, weight: float) -> None:
+        for rank, (note, _score) in enumerate(results, start=1):
+            notes[note.id] = note
+            ranked[note.id] = ranked.get(note.id, 0.0) + weight / (60 + rank)
 
     try:
         embedded = await embedding_service.embed_text_async(question)
         embeddable = list(conditions) + [Note.embedding.isnot(None)]
-        for note, _score in await backend.vector_search(
-            Note, embeddable, embedded, limit=ASK_CONTEXT_NOTES
-        ):
-            if note.id not in seen:
-                seen.add(note.id)
-                selected.append(note)
+        fuse(await backend.vector_search(Note, embeddable, embedded, limit=pool), 1.0)
     except Exception as exc:
         print(f"[WARN] Semantic note retrieval unavailable: {exc}")
 
-    if len(selected) < ASK_CONTEXT_NOTES:
-        for note, _score in await backend.keyword_search(
-            Note, conditions, question, limit=ASK_CONTEXT_NOTES
-        ):
-            if note.id not in seen:
-                seen.add(note.id)
-                selected.append(note)
-            if len(selected) >= ASK_CONTEXT_NOTES:
-                break
+    fuse(await backend.keyword_search(Note, conditions, question, limit=pool), 1.0)
 
-    return selected[:ASK_CONTEXT_NOTES]
+    ordered = sorted(ranked, key=lambda note_id: -ranked[note_id])
+    return [notes[note_id] for note_id in ordered[:ASK_CONTEXT_NOTES]]
+
+
+async def _retrieve_meeting_excerpts(db: AsyncSession, org_id: uuid.UUID, question: str) -> List[Dict[str, Any]]:
+    """
+    Passages from the chunk-level meeting index - transcript chunks and
+    extracted memories. These are embedded at the size the model actually
+    reads, so they pin down the specific exchange a note only summarises.
+    """
+    try:
+        from app.rag.meeting_memory import meeting_memory_rag
+
+        hits = await meeting_memory_rag.search(db, org_id, question, limit=ASK_CONTEXT_EXCERPTS, min_similarity=0.35)
+    except Exception as exc:
+        print(f"[WARN] Meeting excerpt retrieval unavailable: {exc}")
+        return []
+    return [
+        {
+            "meeting_title": hit.meeting_title or "Untitled meeting",
+            "meeting_date": hit.meeting_date,
+            "speaker": hit.speaker,
+            "content": hit.content,
+        }
+        for hit in hits
+    ]

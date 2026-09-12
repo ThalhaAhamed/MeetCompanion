@@ -75,7 +75,7 @@ class OpenAICompatibleProvider(LLMProvider):
         models = sorted(
             str(item.get("id"))
             for item in data.get("data", [])
-            if isinstance(item, dict) and item.get("id")
+            if isinstance(item, dict) and item.get("id") and _is_chat_model(str(item["id"]))
         )
         return ProviderStatus(ok=True, detail="Connected.", models=models)
 
@@ -84,6 +84,16 @@ class OpenAICompatibleProvider(LLMProvider):
         if self.config.api_key:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
         return headers
+
+
+#: Model ids that a /models listing includes but that cannot hold a chat:
+#: speech, moderation, embedding and image models.
+_NON_CHAT_MARKERS = ("whisper", "tts", "orpheus", "guard", "embed", "moderation", "dall-e", "image", "safeguard", "rerank")
+
+
+def _is_chat_model(model_id: str) -> bool:
+    lowered = model_id.lower()
+    return not any(marker in lowered for marker in _NON_CHAT_MARKERS)
 
 
 class OpenAIProvider(OpenAICompatibleProvider):

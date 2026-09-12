@@ -322,6 +322,123 @@ async def import_bot(
     return meeting
 
 
+class TranscriptUploadRequest(BaseModel):
+    """
+    A transcript from anywhere - pasted notes, another recorder, a file.
+
+    `transcript` is plain text, one utterance per line, optionally prefixed
+    with the speaker: "Sara: We should ship on Friday." Lines without a
+    speaker are attributed to "Speaker".
+    """
+    title: str
+    transcript: str
+    started_at: Optional[datetime] = None
+    platform: Optional[str] = None
+    customer_name: Optional[str] = None
+    project_name: Optional[str] = None
+
+
+def parse_transcript_text(text: str) -> List[dict]:
+    """'Name: words' lines into the segment shape the pipeline expects."""
+    segments = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        speaker, sep, spoken = line.partition(":")
+        # A colon inside ordinary prose ("Note: ...") should not turn the
+        # first word into a speaker; require a short, name-like prefix.
+        if sep and 0 < len(speaker) <= 40 and not speaker[0].isdigit() and spoken.strip():
+            segments.append({"speaker": speaker.strip(), "text": spoken.strip()})
+        else:
+            segments.append({"speaker": "Speaker", "text": line})
+    return segments
+
+
+@router.post("/upload", response_model=MeetingResponse, status_code=status.HTTP_201_CREATED)
+async def upload_transcript(
+    body: TranscriptUploadRequest,
+    user: User = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_current_org_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Create a meeting from a transcript you already have and run it through
+    the same extraction pipeline as a recorded call. Needs no MeetStream
+    account - this is also how the app is exercised without one.
+    """
+    segments = parse_transcript_text(body.transcript)
+    if not segments:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The transcript is empty.")
+
+    meeting_repo = MeetingRepository(db)
+    meeting = await meeting_repo.create(
+        org_id=org_id,
+        meeting_url=None,
+        title=body.title.strip() or "Uploaded transcript",
+        platform=body.platform,
+        customer_name=body.customer_name,
+        project_name=body.project_name,
+        created_by_user_id=user.id,
+    )
+    await meeting_repo.update_status(
+        meeting.id,
+        status="completed",
+        started_at=body.started_at or datetime.now(),
+        ended_at=body.started_at,
+        processing_status="queued_for_processing",
+    )
+    await db.commit()
+
+    from app.services.processing import processing_pipeline
+    try:
+        await processing_pipeline.process_meeting_transcript(
+            meeting_id=meeting.id, transcript_segments_input=segments
+        )
+    except Exception as e:
+        await meeting_repo.update_status(meeting.id, processing_status="failed", processing_error=str(e))
+        await db.commit()
+    await db.refresh(meeting)
+    return meeting
+
+
+@router.post("/{meeting_id}/reprocess", response_model=MeetingResponse)
+async def reprocess_meeting(
+    meeting_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_org_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Run extraction again - after a failure, a provider change, or an
+    improved prompt. Uses the transcript already stored, or fetches it from
+    MeetStream if only a transcript id is known. Previous memories and
+    action items for the meeting are replaced.
+    """
+    meeting_repo = MeetingRepository(db)
+    meeting = await meeting_repo.get_by_id(org_id, meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
+
+    segments = await TranscriptRepository(db).get_segments_by_meeting(meeting.id)
+    if not segments and not meeting.meetstream_transcript_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This meeting has no transcript to process.")
+
+    await meeting_repo.clear_extraction(meeting.id)
+    await db.commit()
+
+    from app.services.processing import processing_pipeline
+    try:
+        await processing_pipeline.process_meeting_transcript(
+            meeting_id=meeting.id,
+            transcript_id=None if segments else meeting.meetstream_transcript_id,
+        )
+    except Exception as e:
+        await meeting_repo.update_status(meeting.id, processing_status="failed", processing_error=str(e))
+        await db.commit()
+    await db.refresh(meeting)
+    return meeting
+
+
 @router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_meeting(
     meeting_id: uuid.UUID,

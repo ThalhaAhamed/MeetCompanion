@@ -130,12 +130,19 @@ async def test_llm(payload: LLMConfigPayload) -> Dict[str, Any]:
             detail=f"Unknown provider '{payload.provider}'.",
         )
 
+    # A blank key means "the one already saved", exactly as it does on save -
+    # otherwise Test connection fails right after a successful save.
+    api_key = payload.api_key
+    stored = load_config().llm
+    if not api_key and stored.provider == payload.provider:
+        api_key = stored.api_key
+
     try:
         provider = create_llm_provider(
             LLMConfig(
                 provider=payload.provider,
                 model=payload.model or "",
-                api_key=payload.api_key,
+                api_key=api_key,
                 base_url=payload.base_url,
                 temperature=payload.temperature if payload.temperature is not None else 0.2,
                 max_tokens=payload.max_tokens,

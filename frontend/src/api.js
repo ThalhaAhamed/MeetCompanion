@@ -373,3 +373,15 @@ export function updateAgentTemplate(patch) {
 export function syncMeetingNotes() {
   return req('/notebook/sync-meetings', { method: 'POST' })
 }
+
+export function uploadTranscript(payload) {
+  return req('/meetings/upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function reprocessMeeting(id) {
+  return req(`/meetings/${id}/reprocess`, { method: 'POST' })
+}

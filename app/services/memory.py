@@ -3,6 +3,7 @@ LLM Memory Extraction Service.
 Extracts structured knowledge (decisions, commitments, action items, requirements, facts)
 and meeting summaries from raw meeting transcripts.
 """
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 from app.models.database import MemoryType
@@ -36,7 +37,7 @@ Output valid JSON ONLY with the following structure:
     {
       "task": "Specific actionable description of the task",
       "owner": "Name of the assigned person, or null if unassigned",
-      "due_date": "YYYY-MM-DD or null if no deadline specified",
+      "due_date": "YYYY-MM-DD, resolved from the meeting date when the deadline is relative (\"by Friday\", \"next Wednesday\", \"end of next sprint\" -> leave null if no concrete date can be inferred); null if no deadline was mentioned",
       "priority": "low|medium|high|critical"
     }
   ]
@@ -59,6 +60,7 @@ class MemoryExtractionService:
         meeting_title: Optional[str] = None,
         customer_name: Optional[str] = None,
         project_name: Optional[str] = None,
+        meeting_date: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         provider = try_get_llm_provider()
         if provider is not None:
@@ -67,7 +69,7 @@ class MemoryExtractionService:
                 ChatMessage(
                     role="user",
                     content=self._build_prompt(
-                        transcript_text, meeting_title, customer_name, project_name
+                        transcript_text, meeting_title, customer_name, project_name, meeting_date
                     ),
                 ),
             ]
@@ -87,8 +89,18 @@ class MemoryExtractionService:
         meeting_title: Optional[str],
         customer_name: Optional[str],
         project_name: Optional[str],
+        meeting_date: Optional[datetime] = None,
     ) -> str:
         prompt = f"Meeting Title: {meeting_title or 'Untitled Meeting'}\n"
+        if meeting_date:
+            # Without this, "by Friday" has nothing to be relative to - and
+            # models are unreliable at weekday arithmetic, so the next two
+            # weeks are spelled out rather than left to be computed.
+            prompt += f"Meeting date: {meeting_date.strftime('%A, %Y-%m-%d')}\n"
+            upcoming = ", ".join(
+                (meeting_date + timedelta(days=offset)).strftime("%a %Y-%m-%d") for offset in range(1, 15)
+            )
+            prompt += f"Calendar for resolving deadlines: {upcoming}\n"
         if customer_name:
             prompt += f"Customer: {customer_name}\n"
         if project_name:

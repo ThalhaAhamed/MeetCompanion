@@ -463,3 +463,17 @@ async def test_handwritten_tasks_become_action_items(authed_client):
     await authed_client.patch(f"/api/action-items/{by_task['Call the vendor']['id']}", json={"status": "completed"})
     body = (await authed_client.get(f"/api/notebook/notes/{created['id']}")).json()["content"]
     assert "- [x] Call the vendor" in body
+
+
+@pytest.mark.asyncio
+async def test_transcript_upload_parses_speakers_and_rejects_empty(authed_client):
+    from app.api.meetings import parse_transcript_text
+
+    segments = parse_transcript_text("Priya: Hello team.\n\nNote: this line has no speaker really\nTom: Hi.\n")
+    assert [(s["speaker"], s["text"]) for s in segments] == [
+        ("Priya", "Hello team."),
+        ("Note", "this line has no speaker really"),
+        ("Tom", "Hi."),
+    ]
+    response = await authed_client.post("/api/meetings/upload", json={"title": "x", "transcript": "  \n "})
+    assert response.status_code == 400

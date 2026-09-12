@@ -273,7 +273,7 @@ async def test_keyword_search_with_no_usable_terms_returns_nothing(session):
     "query,expected",
     [
         ("Database MIGRATE database", ["database", "migrate"]),
-        ("a to be", ["to", "be"]),
+        ("a to be finished", ["finished"]),  # stopwords dropped
         ("", []),
     ],
 )

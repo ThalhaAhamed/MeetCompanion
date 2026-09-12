@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Page, PageHeader } from '../components/AppShell'
 import { AskAiIcon } from '../components/Icons'
 import { Badge, Card, EmptyState, ErrorMessage, Spinner } from '../components/ui'
+import Markdown from '../components/Markdown'
 import { askNotebook, listFolders } from '../api'
 
 const SUGGESTIONS = [
@@ -119,14 +120,14 @@ export default function AskAi() {
                   className={entry.role === 'user' ? 'self-end max-w-[80%]' : 'max-w-[85%]'}
                 >
                   <div
-                    className="rounded-xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap"
+                    className={`rounded-xl px-4 py-3 text-sm leading-relaxed ${entry.role === 'user' ? 'whitespace-pre-wrap' : ''}`}
                     style={
                       entry.role === 'user'
                         ? { backgroundColor: 'var(--brand-solid)', color: 'var(--text-on-brand)' }
                         : { backgroundColor: 'var(--surface-raised)', color: 'var(--text-default)' }
                     }
                   >
-                    {entry.text}
+                    {entry.role === 'user' ? entry.text : <Markdown source={entry.text} className="text-sm" />}
                   </div>
 
                   {entry.sources?.length > 0 && (

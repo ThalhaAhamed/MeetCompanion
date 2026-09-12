@@ -185,11 +185,11 @@ DESCRIPTORS: Dict[str, ProviderDescriptor] = {
         summary="Fast inference for open models.",
         fields=[
             _api_key_field("API key", "Created at console.groq.com."),
-            _model_field("llama-3.3-70b-versatile", "llama-3.3-70b-versatile"),
+            _model_field("openai/gpt-oss-120b", "openai/gpt-oss-120b"),
             _base_url_field("https://api.groq.com/openai/v1"),
             _TEMPERATURE_FIELD,
         ],
-        suggested_models=["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3-32b"],
+        suggested_models=["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "groq/compound"],
     ),
     "openai_compatible": ProviderDescriptor(
         name="openai_compatible",
