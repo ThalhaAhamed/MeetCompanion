@@ -27,7 +27,7 @@ class OpenAICompatibleProvider(LLMProvider):
     requires_api_key = False
     default_base_url = "http://localhost:8000/v1"
 
-    async def complete(
+    async def _complete(
         self,
         messages: List[ChatMessage],
         *,

@@ -20,7 +20,7 @@ class GeminiProvider(LLMProvider):
     requires_api_key = True
     default_base_url = "https://generativelanguage.googleapis.com"
 
-    async def complete(
+    async def _complete(
         self,
         messages: List[ChatMessage],
         *,

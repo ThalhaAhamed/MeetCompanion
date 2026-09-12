@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import httpx
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Dict, List, Literal, Optional
@@ -85,7 +86,6 @@ class LLMProvider(ABC):
             raise LLMConfigError(f"{self.label} requires a base URL.")
         return url.rstrip("/")
 
-    @abstractmethod
     async def complete(
         self,
         messages: List[ChatMessage],
@@ -94,7 +94,30 @@ class LLMProvider(ABC):
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ) -> str:
-        """Return the assistant's reply as plain text."""
+        """
+        Return the assistant's reply as plain text.
+
+        Transport failures - host down, DNS, timeout - surface as LLMError
+        like any other provider failure, so callers with a fallback (memory
+        extraction's rule-based parser, for one) take it instead of crashing.
+        """
+        try:
+            return await self._complete(
+                messages, json_mode=json_mode, temperature=temperature, max_tokens=max_tokens
+            )
+        except httpx.HTTPError as exc:
+            raise LLMError(f"Could not reach {self.label} at {self.base_url}: {exc}") from exc
+
+    @abstractmethod
+    async def _complete(
+        self,
+        messages: List[ChatMessage],
+        *,
+        json_mode: bool = False,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+    ) -> str:
+        """Provider-specific request; may raise httpx errors."""
 
     @abstractmethod
     async def health_check(self) -> ProviderStatus:

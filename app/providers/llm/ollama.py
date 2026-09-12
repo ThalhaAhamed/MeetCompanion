@@ -26,7 +26,7 @@ class OllamaProvider(LLMProvider):
     requires_api_key = False
     default_base_url = "http://localhost:11434"
 
-    async def complete(
+    async def _complete(
         self,
         messages: List[ChatMessage],
         *,

@@ -7,7 +7,9 @@ from app.models.database import MemoryType
 
 
 @pytest.mark.asyncio
-async def test_heuristic_memory_extraction():
+async def test_heuristic_memory_extraction(monkeypatch):
+    # Exercise the rule-based parser itself, whatever provider is configured.
+    monkeypatch.setattr("app.services.memory.try_get_llm_provider", lambda: None)
     service = MemoryExtractionService()
     transcript = """John: Acme requires SSO integration before launch.
 Sarah: I will send the SOC 2 compliance documentation by tomorrow.

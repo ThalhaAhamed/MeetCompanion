@@ -27,7 +27,7 @@ class AnthropicProvider(LLMProvider):
     requires_api_key = True
     default_base_url = "https://api.anthropic.com"
 
-    async def complete(
+    async def _complete(
         self,
         messages: List[ChatMessage],
         *,
