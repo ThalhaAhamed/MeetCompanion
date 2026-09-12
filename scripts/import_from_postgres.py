@@ -100,7 +100,14 @@ async def resolve_organization(session: AsyncSession, email: Optional[str]) -> t
             await session.execute(select(User).where(User.email.ilike(email.strip())))
         ).scalar_one_or_none()
         if user is None:
-            raise SystemExit(f"No account found for {email} in the source database.")
+            # Listing what does exist beats a bare failure: the address is
+            # usually a near miss rather than genuinely absent.
+            known = (await session.execute(select(User.email, User.name))).all()
+            lines = "\n".join(f"  {address}  ({name or 'no name'})" for address, name in known)
+            raise SystemExit(
+                f"No account found for {email} in the source database.\n\n"
+                f"Accounts present:\n{lines or '  (none)'}"
+            )
         org = (
             await session.execute(select(Organization).where(Organization.id == user.organization_id))
         ).scalar_one_or_none()

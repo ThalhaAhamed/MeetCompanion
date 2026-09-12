@@ -181,6 +181,11 @@ async def test_dry_run_writes_nothing(source_url, target_url):
 
 
 @pytest.mark.asyncio
-async def test_unknown_account_fails_loudly(source_url, target_url):
-    with pytest.raises(SystemExit, match="No account found"):
+async def test_unknown_account_lists_the_accounts_that_exist(source_url, target_url):
+    """A mistyped address is the common case, so show the near misses."""
+    with pytest.raises(SystemExit) as exc:
         await run(source_url, target_url, "nobody@example.com", dry_run=False)
+
+    message = str(exc.value)
+    assert "No account found" in message
+    assert EMAIL in message
