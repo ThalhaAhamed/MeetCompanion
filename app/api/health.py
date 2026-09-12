@@ -4,7 +4,7 @@ Health check endpoints for service and dependency monitoring.
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-from app.database.connection import get_db
+from app.database.connection import POSTGRESQL, get_db
 from app.config import settings
 
 router = APIRouter(tags=["health"])
@@ -22,27 +22,41 @@ async def health_check():
 
 @router.get("/health/ready", status_code=status.HTTP_200_OK)
 async def readiness_check(db: AsyncSession = Depends(get_db)):
-    """Readiness check verifying database connectivity and pgvector extension."""
-    db_healthy = False
-    pgvector_available = False
+    """
+    Readiness check verifying the database is reachable and similarity search
+    is usable.
+
+    Readiness is judged against whichever backend is actually configured: on
+    SQLite similarity runs in Python and needs no extension, so a missing
+    pgvector is only a problem when running on Postgres.
+    """
+    dialect = db.bind.dialect.name
     details = {}
+    db_healthy = False
+    vector_search = "unavailable"
 
     try:
-        res = await db.execute(text("SELECT 1"))
-        if res.scalar() == 1:
-            db_healthy = True
+        result = await db.execute(text("SELECT 1"))
+        db_healthy = result.scalar() == 1
 
-        vec_res = await db.execute(text("SELECT extname FROM pg_extension WHERE extname = 'vector'"))
-        if vec_res.scalar() == "vector":
-            pgvector_available = True
-    except Exception as e:
-        details["error"] = str(e)
+        if dialect == POSTGRESQL:
+            extension = await db.execute(
+                text("SELECT extname FROM pg_extension WHERE extname = 'vector'")
+            )
+            vector_search = "pgvector" if extension.scalar() == "vector" else "unavailable"
+        else:
+            vector_search = "in-process"
+    except Exception as exc:
+        details["error"] = str(exc)
 
-    overall_status = "ready" if (db_healthy and pgvector_available) else "degraded"
+    ready = db_healthy and vector_search != "unavailable"
+    if dialect == POSTGRESQL and vector_search == "unavailable":
+        details["hint"] = "Run: CREATE EXTENSION vector;"
 
     return {
-        "status": overall_status,
+        "status": "ready" if ready else "degraded",
         "database": "connected" if db_healthy else "disconnected",
-        "pgvector": "installed" if pgvector_available else "missing",
+        "dialect": dialect,
+        "vector_search": vector_search,
         "details": details,
     }

@@ -1,0 +1,281 @@
+"""
+Tests for the database abstraction.
+
+The point of these is that the application behaves the same whichever database
+backs it, so they exercise the portable (SQLite) path that has no pgvector and
+no Postgres full-text search to lean on.
+"""
+import uuid
+
+import pytest
+import pytest_asyncio
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from app.database.connection import dialect_of, normalize_database_url
+from app.models.database import Base, Memory, MemoryType, Meeting, MeetingMemoryEmbedding, Organization
+from app.providers.database import get_search_backend
+from app.providers.database.base import tokenize
+from app.providers.database.portable import PortableSearchBackend
+
+ORG_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
+
+
+@pytest_asyncio.fixture
+async def session():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    maker = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    async with maker() as s:
+        s.add(Organization(id=ORG_ID, name="Test", slug="test", settings={}))
+        await s.commit()
+        yield s
+    await engine.dispose()
+
+
+async def _add_embedding(session, content, vector, **metadata):
+    record = MeetingMemoryEmbedding(
+        organization_id=ORG_ID,
+        source_type="memory",
+        content=content,
+        embedding=vector,
+        metadata_=metadata,
+    )
+    session.add(record)
+    await session.commit()
+    return record
+
+
+# --------------------------------------------------------------------------
+# URL handling
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "given,expected",
+    [
+        ("sqlite:///app.db", "sqlite+aiosqlite:///app.db"),
+        ("sqlite+aiosqlite:///app.db", "sqlite+aiosqlite:///app.db"),
+        ("postgresql://u:p@h/db", "postgresql+asyncpg://u:p@h/db"),
+        ("postgres://u:p@h/db", "postgresql+asyncpg://u:p@h/db"),
+        ("postgresql+asyncpg://u:p@h/db", "postgresql+asyncpg://u:p@h/db"),
+    ],
+)
+def test_sync_urls_are_upgraded_to_async_drivers(given, expected):
+    assert normalize_database_url(given) == expected
+
+
+@pytest.mark.parametrize(
+    "url,dialect",
+    [
+        ("sqlite+aiosqlite:///a.db", "sqlite"),
+        ("postgresql+asyncpg://u@h/d", "postgresql"),
+    ],
+)
+def test_dialect_detection(url, dialect):
+    assert dialect_of(url) == dialect
+
+
+# --------------------------------------------------------------------------
+# Portable column types
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_uuid_json_and_vector_columns_round_trip_on_sqlite(session):
+    """These columns were Postgres-only types before the abstraction existed."""
+    meeting = Meeting(organization_id=ORG_ID, title="Kickoff", custom_attributes={"a": 1})
+    session.add(meeting)
+    await session.commit()
+
+    memory = Memory(
+        organization_id=ORG_ID,
+        meeting_id=meeting.id,
+        type=MemoryType.DECISION,
+        content="We ship on Friday",
+        source_segment_ids=[uuid.uuid4(), uuid.uuid4()],
+        metadata_={"nested": {"ok": True}},
+    )
+    session.add(memory)
+    await session.commit()
+
+    assert isinstance(memory.id, uuid.UUID)
+    assert isinstance(meeting.id, uuid.UUID)
+    assert memory.type is MemoryType.DECISION
+    assert len(memory.source_segment_ids) == 2
+    assert all(isinstance(v, uuid.UUID) for v in memory.source_segment_ids)
+    assert memory.metadata_["nested"]["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_embedding_column_round_trips_floats(session):
+    record = await _add_embedding(session, "hello", [0.25, -0.5, 0.75])
+    assert record.embedding == pytest.approx([0.25, -0.5, 0.75])
+
+
+# --------------------------------------------------------------------------
+# Backend selection
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sqlite_session_selects_the_portable_backend(session):
+    assert isinstance(get_search_backend(session), PortableSearchBackend)
+
+
+# --------------------------------------------------------------------------
+# Vector search without pgvector
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_vector_search_ranks_by_cosine_similarity(session):
+    await _add_embedding(session, "aligned", [1.0, 0.0, 0.0])
+    await _add_embedding(session, "orthogonal", [0.0, 1.0, 0.0])
+    await _add_embedding(session, "opposite", [-1.0, 0.0, 0.0])
+
+    hits = await get_search_backend(session).vector_search(
+        MeetingMemoryEmbedding,
+        [MeetingMemoryEmbedding.organization_id == ORG_ID],
+        [1.0, 0.0, 0.0],
+        limit=3,
+    )
+
+    assert [record.content for record, _ in hits] == ["aligned", "orthogonal", "opposite"]
+    assert hits[0][1] == pytest.approx(1.0, abs=1e-5)
+
+
+@pytest.mark.asyncio
+async def test_vector_search_applies_minimum_similarity(session):
+    await _add_embedding(session, "aligned", [1.0, 0.0, 0.0])
+    await _add_embedding(session, "orthogonal", [0.0, 1.0, 0.0])
+
+    hits = await get_search_backend(session).vector_search(
+        MeetingMemoryEmbedding,
+        [MeetingMemoryEmbedding.organization_id == ORG_ID],
+        [1.0, 0.0, 0.0],
+        limit=10,
+        min_similarity=0.5,
+    )
+    assert [record.content for record, _ in hits] == ["aligned"]
+
+
+@pytest.mark.asyncio
+async def test_vector_search_skips_vectors_of_a_different_width(session):
+    """A stored vector from a different embedding model must not be mis-ranked."""
+    await _add_embedding(session, "right width", [1.0, 0.0, 0.0])
+    await _add_embedding(session, "wrong width", [1.0, 0.0])
+
+    hits = await get_search_backend(session).vector_search(
+        MeetingMemoryEmbedding,
+        [MeetingMemoryEmbedding.organization_id == ORG_ID],
+        [1.0, 0.0, 0.0],
+        limit=10,
+    )
+    assert [record.content for record, _ in hits] == ["right width"]
+
+
+@pytest.mark.asyncio
+async def test_vector_search_is_scoped_by_conditions(session):
+    await _add_embedding(session, "mine", [1.0, 0.0, 0.0], speaker="Ada")
+    await _add_embedding(session, "theirs", [1.0, 0.0, 0.0], speaker="Grace")
+
+    hits = await get_search_backend(session).vector_search(
+        MeetingMemoryEmbedding,
+        [
+            MeetingMemoryEmbedding.organization_id == ORG_ID,
+            MeetingMemoryEmbedding.metadata_["speaker"].as_string().ilike("ada"),
+        ],
+        [1.0, 0.0, 0.0],
+        limit=10,
+    )
+    assert [record.content for record, _ in hits] == ["mine"]
+
+
+@pytest.mark.asyncio
+async def test_vector_search_on_empty_corpus_returns_nothing(session):
+    hits = await get_search_backend(session).vector_search(
+        MeetingMemoryEmbedding,
+        [MeetingMemoryEmbedding.organization_id == ORG_ID],
+        [1.0, 0.0, 0.0],
+        limit=5,
+    )
+    assert hits == []
+
+
+# --------------------------------------------------------------------------
+# Keyword search without Postgres full-text
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_keyword_search_ranks_by_number_of_matching_terms(session):
+    await _add_embedding(session, "migrate the database next quarter", [1.0, 0.0, 0.0])
+    await _add_embedding(session, "the database is fine", [0.0, 1.0, 0.0])
+    await _add_embedding(session, "unrelated discussion", [0.0, 0.0, 1.0])
+
+    hits = await get_search_backend(session).keyword_search(
+        MeetingMemoryEmbedding,
+        [MeetingMemoryEmbedding.organization_id == ORG_ID],
+        "database migrate",
+        limit=10,
+    )
+
+    assert [record.content for record, _ in hits] == [
+        "migrate the database next quarter",
+        "the database is fine",
+    ]
+    assert hits[0][1] == 2.0
+
+
+@pytest.mark.asyncio
+async def test_keyword_search_is_case_insensitive(session):
+    await _add_embedding(session, "The SOC2 Report", [1.0, 0.0, 0.0])
+
+    hits = await get_search_backend(session).keyword_search(
+        MeetingMemoryEmbedding,
+        [MeetingMemoryEmbedding.organization_id == ORG_ID],
+        "soc2",
+        limit=5,
+    )
+    assert len(hits) == 1
+
+
+@pytest.mark.asyncio
+async def test_keyword_search_treats_wildcards_literally(session):
+    """A bare % must not turn into a match-everything query."""
+    await _add_embedding(session, "ordinary content", [1.0, 0.0, 0.0])
+
+    hits = await get_search_backend(session).keyword_search(
+        MeetingMemoryEmbedding,
+        [MeetingMemoryEmbedding.organization_id == ORG_ID],
+        "100%",
+        limit=5,
+    )
+    assert hits == []
+
+
+@pytest.mark.asyncio
+async def test_keyword_search_with_no_usable_terms_returns_nothing(session):
+    await _add_embedding(session, "content", [1.0, 0.0, 0.0])
+
+    hits = await get_search_backend(session).keyword_search(
+        MeetingMemoryEmbedding,
+        [MeetingMemoryEmbedding.organization_id == ORG_ID],
+        "a I",
+        limit=5,
+    )
+    assert hits == []
+
+
+@pytest.mark.parametrize(
+    "query,expected",
+    [
+        ("Database MIGRATE database", ["database", "migrate"]),
+        ("a to be", ["to", "be"]),
+        ("", []),
+    ],
+)
+def test_tokenize_deduplicates_and_lowercases(query, expected):
+    assert tokenize(query) == expected

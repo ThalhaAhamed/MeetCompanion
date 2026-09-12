@@ -15,6 +15,7 @@ from app.models.database import (
 from app.models.schemas import (
     MeetingCreate, MeetingUpdate, MemoryCreate, ActionItemCreate, ActionItemUpdate
 )
+from app.providers.database import get_search_backend
 
 
 class OrganizationRepository:
@@ -532,6 +533,31 @@ class VectorRepository:
         await self.session.flush()
         return record
 
+    def _memory_conditions(
+        self,
+        org_id: uuid.UUID,
+        customer_name: Optional[str] = None,
+        project_name: Optional[str] = None,
+        speaker: Optional[str] = None,
+        meeting_id: Optional[uuid.UUID] = None,
+        source_type: Optional[str] = None,
+    ) -> List[Any]:
+        """Filters shared by both search modes so hybrid results stay consistent."""
+        conditions: List[Any] = [MeetingMemoryEmbedding.organization_id == org_id]
+        if meeting_id:
+            conditions.append(MeetingMemoryEmbedding.meeting_id == meeting_id)
+        if source_type:
+            conditions.append(MeetingMemoryEmbedding.source_type == source_type)
+        # as_string() rather than JSONB-only astext, so these filters work on
+        # SQLite as well as Postgres.
+        if customer_name:
+            conditions.append(MeetingMemoryEmbedding.metadata_["customer_name"].as_string().ilike(customer_name))
+        if project_name:
+            conditions.append(MeetingMemoryEmbedding.metadata_["project_name"].as_string().ilike(project_name))
+        if speaker:
+            conditions.append(MeetingMemoryEmbedding.metadata_["speaker"].as_string().ilike(speaker))
+        return conditions
+
     async def search_meeting_memories(
         self,
         org_id: uuid.UUID,
@@ -544,53 +570,16 @@ class VectorRepository:
         min_similarity: float = 0.0,
         limit: int = 10,
     ) -> List[Tuple[MeetingMemoryEmbedding, float]]:
-        """
-        Cosine similarity search using pgvector cosine distance operator `<=>`.
-        Similarity = 1 - distance.
-        """
-        # The ivfflat index (lists=100, see migrations/001_initial_schema.sql)
-        # defaults to probes=1 - i.e. it only scans ~1% of the index's
-        # clusters per query. That's a reasonable speed/recall tradeoff once
-        # a table is large enough for 100 lists to make sense, but at this
-        # app's actual per-org data volume it means real nearest neighbors
-        # are frequently skipped entirely, not just ranked lower - the
-        # search misses relevant results rather than merely deprioritizing
-        # them. Raising probes trades a small amount of query time for
-        # dramatically better recall; 10 is a safe middle ground that stays
-        # fast even as the table grows.
-        await self.session.execute(text("SET LOCAL ivfflat.probes = 10"))
-
-        # Distance calculation
-        distance_expr = MeetingMemoryEmbedding.embedding.cosine_distance(query_embedding).label("distance")
-
-        conditions = [MeetingMemoryEmbedding.organization_id == org_id]
-        if meeting_id:
-            conditions.append(MeetingMemoryEmbedding.meeting_id == meeting_id)
-        if source_type:
-            conditions.append(MeetingMemoryEmbedding.source_type == source_type)
-        if customer_name:
-            conditions.append(MeetingMemoryEmbedding.metadata_["customer_name"].astext.ilike(customer_name))
-        if project_name:
-            conditions.append(MeetingMemoryEmbedding.metadata_["project_name"].astext.ilike(project_name))
-        if speaker:
-            conditions.append(MeetingMemoryEmbedding.metadata_["speaker"].astext.ilike(speaker))
-
-        stmt = (
-            select(MeetingMemoryEmbedding, distance_expr)
-            .where(and_(*conditions))
-            .order_by(distance_expr)
-            .limit(limit)
+        """Cosine similarity search, delegated to the active database backend."""
+        return await get_search_backend(self.session).vector_search(
+            MeetingMemoryEmbedding,
+            self._memory_conditions(
+                org_id, customer_name, project_name, speaker, meeting_id, source_type
+            ),
+            query_embedding,
+            limit=limit,
+            min_similarity=min_similarity,
         )
-        result = await self.session.execute(stmt)
-        rows = result.all()
-
-        output = []
-        for row in rows:
-            record, dist = row[0], float(row[1])
-            similarity = max(0.0, 1.0 - dist)
-            if similarity >= min_similarity:
-                output.append((record, similarity))
-        return output
 
     async def search_meeting_memories_keyword(
         self,
@@ -604,40 +593,22 @@ class VectorRepository:
         limit: int = 10,
     ) -> List[Tuple[MeetingMemoryEmbedding, float]]:
         """
-        Full-text keyword search using Postgres tsvector/tsquery, ranked by ts_rank.
-        Complements vector search for exact terms (names, dates, acronyms) that
-        embeddings can under-rank.
+        Literal keyword search, delegated to the active database backend.
+
+        Complements vector search for exact terms (names, dates, acronyms)
+        that embeddings can under-rank.
         """
         if not query or not query.strip():
             return []
 
-        tsquery = func.plainto_tsquery("english", query)
-        tsvector = func.to_tsvector("english", MeetingMemoryEmbedding.content)
-        rank_expr = func.ts_rank(tsvector, tsquery).label("rank")
-
-        conditions = [
-            MeetingMemoryEmbedding.organization_id == org_id,
-            tsvector.op("@@")(tsquery),
-        ]
-        if meeting_id:
-            conditions.append(MeetingMemoryEmbedding.meeting_id == meeting_id)
-        if source_type:
-            conditions.append(MeetingMemoryEmbedding.source_type == source_type)
-        if customer_name:
-            conditions.append(MeetingMemoryEmbedding.metadata_["customer_name"].astext.ilike(customer_name))
-        if project_name:
-            conditions.append(MeetingMemoryEmbedding.metadata_["project_name"].astext.ilike(project_name))
-        if speaker:
-            conditions.append(MeetingMemoryEmbedding.metadata_["speaker"].astext.ilike(speaker))
-
-        stmt = (
-            select(MeetingMemoryEmbedding, rank_expr)
-            .where(and_(*conditions))
-            .order_by(rank_expr.desc())
-            .limit(limit)
+        return await get_search_backend(self.session).keyword_search(
+            MeetingMemoryEmbedding,
+            self._memory_conditions(
+                org_id, customer_name, project_name, speaker, meeting_id, source_type
+            ),
+            query,
+            limit=limit,
         )
-        result = await self.session.execute(stmt)
-        return [(row[0], float(row[1])) for row in result.all()]
 
 
 class WebhookEventRepository:

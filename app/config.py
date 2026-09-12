@@ -23,8 +23,10 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = ["*"]
 
     # ---- Database ----
-    DATABASE_URL: str = "postgresql+asyncpg://meetstream:meetstream_dev_password@localhost:5432/meetstream_companion"
-    DATABASE_URL_SYNC: str = "postgresql://meetstream:meetstream_dev_password@localhost:5432/meetstream_companion"
+    # Local SQLite by default so the application runs with no external
+    # services. Point this at postgresql+asyncpg://... to use Postgres, which
+    # additionally enables pgvector-backed similarity search.
+    DATABASE_URL: str = "sqlite+aiosqlite:///data/meet-companion.db"
     DEFAULT_ORG_ID: str = "00000000-0000-0000-0000-000000000001"
 
     # ---- MeetStream ----

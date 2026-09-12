@@ -1,5 +1,8 @@
 """
-SQLAlchemy ORM models for MeetStream Companion.
+SQLAlchemy ORM models for Meet Companion.
+
+Column types come from app/models/types.py rather than the Postgres dialect
+directly, so the same schema can run on Postgres or on a local SQLite file.
 """
 import uuid
 from datetime import datetime, timezone
@@ -8,9 +11,9 @@ from sqlalchemy import (
     String, Text, Boolean, Integer, Float, Date, DateTime,
     ForeignKey, Enum as SQLEnum, Index
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from pgvector.sqlalchemy import Vector
+from app.config import settings
+from app.models.types import GUID, GUIDArray, JSONDocument, Embedding
 import enum
 
 
@@ -34,10 +37,10 @@ class MemoryType(str, enum.Enum):
 class Organization(Base):
     __tablename__ = "organizations"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    settings: Mapped[Dict[str, Any]] = mapped_column(JSONB, default=dict)
+    settings: Mapped[Dict[str, Any]] = mapped_column(JSONDocument, default=dict)
     # Bearer token this workspace's MCP tool calls (and chat-relay calls) are
     # authenticated with - each workspace gets its own so tool calls resolve
     # to the right organization instead of everyone sharing one global token.
@@ -59,8 +62,8 @@ class Organization(Base):
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     role: Mapped[str] = mapped_column(String(50), default="member")
@@ -70,7 +73,7 @@ class User(Base):
     # agents belong to the individual member, not the shared workspace;
     # meetings/memory/action items stay workspace-shared via organization_id.
     # Mirrors Organization.settings' shape: {"active_agent_config_id": "...", "agent_config_ids": [...]}.
-    settings: Mapped[Dict[str, Any]] = mapped_column(JSONB, default=dict)
+    settings: Mapped[Dict[str, Any]] = mapped_column(JSONDocument, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -80,13 +83,13 @@ class User(Base):
 class APIKey(Base):
     __tablename__ = "api_keys"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
-    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     key_hash: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     key_prefix: Mapped[str] = mapped_column(String(10), nullable=False)
     name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    scopes: Mapped[List[str]] = mapped_column(JSONB, default=lambda: ["*"])
+    scopes: Mapped[List[str]] = mapped_column(JSONDocument, default=lambda: ["*"])
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -97,9 +100,9 @@ class APIKey(Base):
 class Meeting(Base):
     __tablename__ = "meetings"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
-    created_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    created_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     meetstream_bot_id: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True)
     title: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     meeting_url: Mapped[Optional[str]] = mapped_column(String(2000), nullable=True)
@@ -113,7 +116,7 @@ class Meeting(Base):
     meetstream_transcript_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     processing_status: Mapped[str] = mapped_column(String(50), default="pending")
     processing_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    custom_attributes: Mapped[Dict[str, Any]] = mapped_column(JSONB, default=dict)
+    custom_attributes: Mapped[Dict[str, Any]] = mapped_column(JSONDocument, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -139,8 +142,8 @@ class Meeting(Base):
 class Participant(Base):
     __tablename__ = "participants"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    meeting_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    meeting_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     identifier: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -154,15 +157,15 @@ class Participant(Base):
 class TranscriptSegment(Base):
     __tablename__ = "transcript_segments"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    meeting_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    meeting_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False)
     speaker: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     speaker_identifier: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     start_time: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     end_time: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    word_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    word_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONDocument, nullable=True)
     segment_index: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
@@ -172,11 +175,11 @@ class TranscriptSegment(Base):
 class Memory(Base):
     __tablename__ = "memories"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
-    meeting_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    meeting_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False)
     type: Mapped[MemoryType] = mapped_column(
-        SQLEnum(MemoryType, name="memory_type", create_type=False, values_callable=lambda x: [e.value for e in x]),
+        SQLEnum(MemoryType, name="memory_type", values_callable=lambda x: [e.value for e in x]),
         nullable=False
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -184,8 +187,8 @@ class Memory(Base):
     speaker: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     customer_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     project_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    source_segment_ids: Mapped[Optional[List[uuid.UUID]]] = mapped_column(ARRAY(UUID(as_uuid=True)), nullable=True)
-    metadata_: Mapped[Dict[str, Any]] = mapped_column("metadata", JSONB, default=dict)
+    source_segment_ids: Mapped[Optional[List[uuid.UUID]]] = mapped_column(GUIDArray(), nullable=True)
+    metadata_: Mapped[Dict[str, Any]] = mapped_column("metadata", JSONDocument, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -197,10 +200,10 @@ class Memory(Base):
 class ActionItem(Base):
     __tablename__ = "action_items"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
-    meeting_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False)
-    memory_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("memories.id", ondelete="SET NULL"), nullable=True)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    meeting_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False)
+    memory_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID(), ForeignKey("memories.id", ondelete="SET NULL"), nullable=True)
     owner: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     task: Mapped[str] = mapped_column(Text, nullable=False)
     due_date: Mapped[Optional[datetime.date]] = mapped_column(Date, nullable=True)
@@ -219,38 +222,38 @@ class ActionItem(Base):
 class MeetingMemoryEmbedding(Base):
     __tablename__ = "meeting_memory_embeddings"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
-    meeting_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=True)
-    memory_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("memories.id", ondelete="CASCADE"), nullable=True)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    meeting_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID(), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=True)
+    memory_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID(), ForeignKey("memories.id", ondelete="CASCADE"), nullable=True)
     source_type: Mapped[str] = mapped_column(String(50), nullable=False)  # transcript_chunk, memory, summary
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[List[float]] = mapped_column(Vector(384), nullable=False)
-    metadata_: Mapped[Dict[str, Any]] = mapped_column("metadata", JSONB, default=dict)
+    embedding: Mapped[List[float]] = mapped_column(Embedding(settings.EMBEDDING_DIMENSION), nullable=False)
+    metadata_: Mapped[Dict[str, Any]] = mapped_column("metadata", JSONDocument, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class CompanyKnowledgeEmbedding(Base):
     __tablename__ = "company_knowledge_embeddings"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
-    document_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    document_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID(), nullable=True)
     source_type: Mapped[str] = mapped_column(String(50), nullable=False)  # pdf, markdown, text, docx, csv
     source_name: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[List[float]] = mapped_column(Vector(384), nullable=False)
-    metadata_: Mapped[Dict[str, Any]] = mapped_column("metadata", JSONB, default=dict)
+    embedding: Mapped[List[float]] = mapped_column(Embedding(settings.EMBEDDING_DIMENSION), nullable=False)
+    metadata_: Mapped[Dict[str, Any]] = mapped_column("metadata", JSONDocument, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class WebhookEvent(Base):
     __tablename__ = "webhook_events"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     bot_id: Mapped[str] = mapped_column(String(255), nullable=False)
     event_type: Mapped[str] = mapped_column(String(100), nullable=False)
-    payload: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    payload: Mapped[Dict[str, Any]] = mapped_column(JSONDocument, nullable=False)
     processed: Mapped[bool] = mapped_column(Boolean, default=False)
     processing_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     idempotency_key: Mapped[str] = mapped_column(String(500), unique=True, nullable=False)
@@ -261,16 +264,61 @@ class WebhookEvent(Base):
 class ProcessingJob(Base):
     __tablename__ = "processing_jobs"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    meeting_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    meeting_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False)
     job_type: Mapped[str] = mapped_column(String(100), nullable=False)
     status: Mapped[str] = mapped_column(String(50), default="pending")
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     max_attempts: Mapped[int] = mapped_column(Integer, default=3)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    result: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    result: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONDocument, nullable=True)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     meeting: Mapped["Meeting"] = relationship("Meeting", back_populates="processing_jobs")
+
+
+# ---------------------------------------------------------------------------
+# Indexes
+#
+# Declared here rather than in a hand-maintained .sql file so they are created
+# on every supported database by metadata.create_all(), and so the schema has
+# exactly one source of truth. The pgvector ivfflat index is inherently
+# Postgres-only and is created alongside the extension in app/main.py.
+# ---------------------------------------------------------------------------
+
+Index("idx_meetings_org", Meeting.organization_id)
+Index("idx_meetings_bot", Meeting.meetstream_bot_id)
+Index("idx_meetings_status", Meeting.organization_id, Meeting.status)
+Index("idx_meetings_customer", Meeting.organization_id, Meeting.customer_name)
+Index("idx_meetings_project", Meeting.organization_id, Meeting.project_name)
+Index("idx_meetings_started", Meeting.organization_id, Meeting.started_at.desc())
+
+Index("idx_participants_meeting", Participant.meeting_id)
+Index("idx_participants_name", Participant.name)
+
+Index("idx_segments_meeting", TranscriptSegment.meeting_id)
+Index("idx_segments_speaker", TranscriptSegment.meeting_id, TranscriptSegment.speaker)
+
+Index("idx_memories_org", Memory.organization_id)
+Index("idx_memories_meeting", Memory.meeting_id)
+Index("idx_memories_type", Memory.organization_id, Memory.type)
+Index("idx_memories_customer", Memory.organization_id, Memory.customer_name)
+Index("idx_memories_speaker", Memory.organization_id, Memory.speaker)
+
+Index("idx_actions_org", ActionItem.organization_id)
+Index("idx_actions_status", ActionItem.organization_id, ActionItem.status)
+Index("idx_actions_owner", ActionItem.organization_id, ActionItem.owner)
+Index("idx_actions_meeting", ActionItem.meeting_id)
+
+Index("idx_mme_org", MeetingMemoryEmbedding.organization_id)
+Index("idx_mme_meeting", MeetingMemoryEmbedding.meeting_id)
+
+Index("idx_cke_org", CompanyKnowledgeEmbedding.organization_id)
+
+Index("idx_webhook_bot", WebhookEvent.bot_id)
+Index("idx_webhook_processed", WebhookEvent.processed)
+
+Index("idx_jobs_meeting", ProcessingJob.meeting_id)
+Index("idx_jobs_status", ProcessingJob.status)
