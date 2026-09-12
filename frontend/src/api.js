@@ -255,11 +255,12 @@ export function testLlmProvider(config) {
   })
 }
 
-export function testDatabase(url) {
+export function testDatabase(payload) {
+  // payload: { provider, values } or { url }
   return req('/setup/test-database', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url }),
+    body: JSON.stringify(payload),
   })
 }
 
@@ -355,4 +356,16 @@ export function listActionItems(params = {}) {
   })
   const suffix = query.toString()
   return req(`/action-items${suffix ? `?${suffix}` : ''}`)
+}
+
+export function getAgentTemplate() {
+  return req('/agent/template')
+}
+
+export function updateAgentTemplate(patch) {
+  return req('/agent/template', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
 }

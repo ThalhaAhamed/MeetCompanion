@@ -50,11 +50,32 @@ class MeetStreamSettings:
 
 
 @dataclass
+class AgentTemplateSettings:
+    """
+    The starting point every new MeetStream agent is created from.
+
+    Fields left as None fall back to the built-in defaults in app.api.agent,
+    so a fresh install has a working template before anyone edits it. Text
+    fields may contain ``{agent_name}``, which is filled in at creation time.
+    """
+    system_prompt: Optional[str] = None
+    first_message: Optional[str] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    voice: Optional[str] = None
+    temperature: Optional[float] = None
+    mode: Optional[str] = None
+    response_modality: Optional[str] = None
+    tool_results_to_chat: Optional[bool] = None
+
+
+@dataclass
 class RuntimeConfig:
     onboarding_completed: bool = False
     llm: LLMSettings = field(default_factory=LLMSettings)
     database: DatabaseSettings = field(default_factory=DatabaseSettings)
     meetstream: MeetStreamSettings = field(default_factory=MeetStreamSettings)
+    agent_template: AgentTemplateSettings = field(default_factory=AgentTemplateSettings)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -66,6 +87,7 @@ class RuntimeConfig:
             llm=LLMSettings(**_section(raw, "llm", LLMSettings)),
             database=DatabaseSettings(**_section(raw, "database", DatabaseSettings)),
             meetstream=MeetStreamSettings(**_section(raw, "meetstream", MeetStreamSettings)),
+            agent_template=AgentTemplateSettings(**_section(raw, "agent_template", AgentTemplateSettings)),
         )
 
 
@@ -154,7 +176,16 @@ def env_override(name: str) -> Optional[str]:
 
 
 def is_env_managed(name: str) -> bool:
-    return env_override(name) is not None
+    """
+    True when the value came from the process environment or the .env file.
+
+    pydantic-settings reads .env into `settings` without touching os.environ,
+    so the fields it populated are checked too - a URL someone wrote in .env
+    is just as deliberate as one exported in a shell.
+    """
+    if env_override(name) is not None:
+        return True
+    return name in settings.model_fields_set
 
 
 def resolve(env_name: str, stored: Any, fallback: Any = None) -> Any:

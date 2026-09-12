@@ -12,7 +12,10 @@ from typing import Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from dataclasses import asdict
+
 from app.config import settings
+from app.runtime_config import AgentTemplateSettings, load_config, update_config
 from app.database.connection import get_db
 from app.database.repositories import OrganizationRepository, UserRepository, MeetingRepository
 from app.models.database import User
@@ -24,7 +27,8 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
 
 _SECRET_KEY_PATTERN = ("key", "secret", "token", "password", "authorization")
 
-# Prepended to every newly created agent's system prompt. Covers behavior that
+# The built-in template agent's system prompt - the starting point every new
+# agent is created from until someone edits the template. Covers behavior that
 # has to live in the prompt because the platform doesn't expose a dedicated
 # wake-word/activation-gate field on agent config: name-gated activation (stay
 # silent unless addressed by name), resolving relative dates via
@@ -33,7 +37,7 @@ _SECRET_KEY_PATTERN = ("key", "secret", "token", "password", "authorization")
 # isolated facts, refusing to invent unavailable information, and avoiding
 # redundant tool calls (each one adds latency the realtime voice pipeline has
 # to wait through, which is also when it's most likely to drop out).
-_ACTIVATION_POLICY_TEMPLATE = """You are {agent_name}, a persistent AI meeting assistant with access to real, stored meeting memory tools.
+_DEFAULT_SYSTEM_PROMPT = """You are {agent_name}, a persistent AI meeting assistant with access to real, stored meeting memory tools.
 
 ACTIVATION RULE (critical, always follow this): Only respond when a speaker explicitly addresses you by name ("{agent_name}"). If your name is not said, remain completely silent - do not respond, do not call any tools, do not generate any output at all, even if a question seems directed at an assistant in general. Wait until you are addressed by name before doing anything. Your introduction is handled separately by a chat message posted when you join - do not introduce yourself out loud.
 
@@ -60,19 +64,39 @@ _DEFAULT_FIRST_MESSAGE = (
 )
 
 
-def build_agent_system_prompt(agent_name: str, custom_instructions: str = "") -> str:
-    """Wrap the activation/date/no-hallucination policy around whatever
-    additional instructions the caller wants this agent to have.
+_TEMPLATE_DEFAULTS: Dict[str, Any] = {
+    "system_prompt": _DEFAULT_SYSTEM_PROMPT,
+    "first_message": _DEFAULT_FIRST_MESSAGE,
+    "provider": "openai",
+    "model": "gpt-4.1-mini",
+    "voice": "alloy",
+    "temperature": 0.8,
+    "mode": "realtime",
+    "response_modality": "text",
+    "tool_results_to_chat": False,
+}
+
+
+def get_agent_template() -> Dict[str, Any]:
+    """
+    The template agent: built-in defaults overlaid with whatever the
+    workspace has customised in the runtime config. It is not a MeetStream
+    agent itself (nothing to delete on their side) - it is what "New agent"
+    starts from.
 
     The join greeting is a chat message (bot_message on create_bot, see
     meetings.py) rather than something spoken - model.first_message is
     documented for pipeline-mode agents only and this app's realtime-mode
-    agents silently ignore it, and prompting the model to self-initiate
-    speech turned out to be unreliable in practice.
+    agents silently ignore it.
     """
-    name = agent_name or "the assistant"
-    policy = _ACTIVATION_POLICY_TEMPLATE.format(agent_name=name)
-    return policy + (custom_instructions or "").strip()
+    stored = asdict(load_config().agent_template)
+    return {key: (stored.get(key) if stored.get(key) not in (None, "") else default)
+            for key, default in _TEMPLATE_DEFAULTS.items()}
+
+
+def render_template_text(text: str, agent_name: str) -> str:
+    """Fill ``{agent_name}`` without str.format, so braces elsewhere are safe."""
+    return (text or "").replace("{agent_name}", agent_name or "the assistant")
 
 
 def _redact_secrets(value):
@@ -159,7 +183,7 @@ class ChatRelayRequest(BaseModel):
 @router.post("/chat-relay")
 async def chat_relay(body: ChatRelayRequest, authorization: Optional[str] = Header(default=None), db: AsyncSession = Depends(get_db)):
     """
-    Custom-function endpoint registered on the agent (see build_agent_system_prompt
+    Custom-function endpoint registered on the agent (see _DEFAULT_SYSTEM_PROMPT
     / create_mia_agent) as "share_in_chat" - the only way the agent can post text
     into the meeting chat. Exempted from the browser session gate (MeetStream
     calls this directly, not a browser) but still requires a valid workspace's
@@ -389,23 +413,46 @@ async def list_importable_agents(user: User = Depends(get_current_user), db: Asy
 
 
 class AgentCreateRequest(BaseModel):
+    """Anything omitted is taken from the template agent."""
     agent_name: str
-    system_prompt: str = ""
-    # True (default): system_prompt is treated as extra instructions layered
-    # on top of the built-in policy (name-gated activation, date reasoning,
-    # no-hallucination, etc - see build_agent_system_prompt). False: the
-    # member has opted out of the wrapper and system_prompt is used verbatim
-    # as the entire prompt, with none of the built-in behavior guaranteed.
-    use_default_prompt: bool = True
-    first_message: str = ""  # empty -> auto-filled with a name/how-to-use greeting
-    provider: str = "openai"
-    model: str = "gpt-4.1"
-    voice: str = "alloy"
-    temperature: float = 0.8
-    mode: str = "realtime"
-    response_modality: str = "text"
-    tool_results_to_chat: bool = False
+    system_prompt: Optional[str] = None
+    first_message: Optional[str] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    voice: Optional[str] = None
+    temperature: Optional[float] = None
+    mode: Optional[str] = None
+    response_modality: Optional[str] = None
+    tool_results_to_chat: Optional[bool] = None
     activate: bool = True
+
+
+class AgentTemplateUpdateRequest(BaseModel):
+    system_prompt: Optional[str] = None
+    first_message: Optional[str] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    voice: Optional[str] = None
+    temperature: Optional[float] = None
+    mode: Optional[str] = None
+    response_modality: Optional[str] = None
+    tool_results_to_chat: Optional[bool] = None
+
+
+@router.get("/template")
+async def read_agent_template(user: User = Depends(get_current_user)):
+    """The template every new agent starts from. Cannot be deleted, only edited."""
+    return get_agent_template()
+
+
+@router.put("/template")
+async def update_agent_template(body: AgentTemplateUpdateRequest, user: User = Depends(get_current_user)):
+    """Edit the template. Only fields present in the request change."""
+    current = load_config().agent_template
+    changes = body.model_dump(exclude_unset=True)
+    merged = {**asdict(current), **changes}
+    update_config(agent_template=AgentTemplateSettings(**merged))
+    return get_agent_template()
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -421,28 +468,24 @@ async def create_agent(body: AgentCreateRequest, user: User = Depends(get_curren
     if not org or not org.mcp_token:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This workspace has no MCP token configured")
 
-    first_message = body.first_message.strip() or _DEFAULT_FIRST_MESSAGE.format(agent_name=body.agent_name)
+    template = get_agent_template()
+    merged = {**template, **body.model_dump(exclude_unset=True, exclude_none=True)}
     own_key = await require_meetstream_api_key(db, user.id)
-    system_prompt = (
-        build_agent_system_prompt(body.agent_name, body.system_prompt)
-        if body.use_default_prompt
-        else body.system_prompt
-    )
 
     try:
         result = await meetstream_client.create_mia_agent(
             agent_name=body.agent_name,
-            system_prompt=system_prompt,
-            first_message=first_message,
-            provider=body.provider,
-            model=body.model,
-            voice=body.voice,
-            temperature=body.temperature,
-            mode=body.mode,
+            system_prompt=render_template_text(merged["system_prompt"], body.agent_name),
+            first_message=render_template_text(merged["first_message"], body.agent_name),
+            provider=merged["provider"],
+            model=merged["model"],
+            voice=merged["voice"],
+            temperature=merged["temperature"],
+            mode=merged["mode"],
             mcp_server_url=settings.MCP_SERVER_URL,
             mcp_auth_token=org.mcp_token,
-            response_modality=body.response_modality,
-            tool_results_to_chat=body.tool_results_to_chat,
+            response_modality=merged["response_modality"],
+            tool_results_to_chat=merged["tool_results_to_chat"],
             api_key=own_key,
         )
     except Exception as e:
@@ -536,13 +579,6 @@ async def activate_agent(body: ActivateRequest, user: User = Depends(get_current
 class AgentUpdateRequest(BaseModel):
     agent_config_id: Optional[str] = None
     system_prompt: Optional[str] = None
-    # True: overwrite system_prompt with the built-in policy (name-gated
-    # activation, date reasoning, no-hallucination, etc) wrapped around
-    # whatever `system_prompt` was also sent as extra instructions (empty
-    # string if omitted) - lets a member reset an agent that had its own
-    # fully custom prompt back to the default behavior. Ignored if
-    # system_prompt isn't also part of this request's intent to change it.
-    reset_to_default_prompt: bool = False
     first_message: Optional[str] = None
     voice: Optional[str] = None
     provider: Optional[str] = None
@@ -581,10 +617,7 @@ async def update_current_agent(body: AgentUpdateRequest, user: User = Depends(ge
     current_model: Dict[str, Any] = dict(current_cfg.get("Model") or {})
     current_agent: Dict[str, Any] = dict(current_cfg.get("Agent") or {})
 
-    if body.reset_to_default_prompt:
-        agent_name = current_cfg.get("AgentName") or "the assistant"
-        current_model["system_prompt"] = build_agent_system_prompt(agent_name, body.system_prompt or "")
-    elif body.system_prompt is not None:
+    if body.system_prompt is not None:
         current_model["system_prompt"] = body.system_prompt
     if body.first_message is not None:
         current_model["first_message"] = body.first_message

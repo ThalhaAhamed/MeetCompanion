@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Page, PageHeader } from '../components/AppShell'
-import { AskAiIcon, CheckIcon, PlusIcon } from '../components/Icons'
+import { AskAiIcon, CheckIcon, PlusIcon, RobotIcon } from '../components/Icons'
 import {
   Badge,
   Card,
@@ -17,9 +17,11 @@ import {
   createAgent,
   getAgent,
   getAgentCredentials,
+  getAgentTemplate,
   listAgents,
   listImportableAgents,
   updateAgent,
+  updateAgentTemplate,
 } from '../api'
 
 const MODES = ['realtime', 'pipeline']
@@ -36,19 +38,38 @@ const EMPTY_FORM = {
   tool_results_to_chat: false,
 }
 
-function NewAgentModal({ open, onClose, onCreated }) {
-  const [form, setForm] = useState({
-    agent_name: '',
-    system_prompt: '',
-    use_default_prompt: true,
-    provider: 'openai',
-    model: 'gpt-4.1-mini',
-    voice: 'alloy',
-    mode: 'realtime',
-    activate: true,
-  })
+const BLANK_NEW_AGENT = {
+  agent_name: '',
+  activate: true,
+  provider: '',
+  model: '',
+  voice: '',
+  mode: 'realtime',
+  system_prompt: '',
+  first_message: '',
+}
+
+function NewAgentModal({ open, onClose, onCreated, template }) {
+  const [form, setForm] = useState(BLANK_NEW_AGENT)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+
+  // Every field starts as the template's value, so the modal only asks for
+  // what is genuinely new (the name) and the rest can be tweaked or left.
+  useEffect(() => {
+    if (!open) return
+    setForm({
+      agent_name: '',
+      activate: true,
+      provider: template?.provider || '',
+      model: template?.model || '',
+      voice: template?.voice || '',
+      mode: template?.mode || 'realtime',
+      system_prompt: template?.system_prompt || '',
+      first_message: template?.first_message || '',
+    })
+    setError(null)
+  }, [open, template])
 
   function update(key, value) {
     setForm((current) => ({ ...current, [key]: value }))
@@ -122,30 +143,26 @@ function NewAgentModal({ open, onClose, onCreated }) {
         </div>
 
         <Field
-          label="Extra instructions"
-          hint={
-            form.use_default_prompt
-              ? 'Layered on top of the built-in policy: name-gated activation, date reasoning, no invented answers.'
-              : 'Used verbatim as the entire system prompt. None of the built-in behaviour is guaranteed.'
-          }
+          label="System prompt"
+          hint="Copied from the template agent. {agent_name} is replaced with the name above."
           htmlFor="agent-prompt"
         >
           <textarea
             id="agent-prompt"
-            className="mc-input min-h-24"
-            value={form.system_prompt}
+            className="mc-input min-h-32 font-mono text-xs"
+            value={form.system_prompt || ''}
             onChange={(event) => update('system_prompt', event.target.value)}
           />
         </Field>
 
-        <label className="mb-4 flex items-center gap-2 text-sm" style={{ color: 'var(--text-muted)' }}>
-          <input
-            type="checkbox"
-            checked={form.use_default_prompt}
-            onChange={(event) => update('use_default_prompt', event.target.checked)}
+        <Field label="First message" hint="Posted into the meeting chat when the agent joins." htmlFor="agent-first">
+          <textarea
+            id="agent-first"
+            className="mc-input min-h-20"
+            value={form.first_message || ''}
+            onChange={(event) => update('first_message', event.target.value)}
           />
-          Keep the built-in activation policy
-        </label>
+        </Field>
 
         {error && <div className="mb-4"><ErrorMessage title="Could not create the agent" detail={error} /></div>}
 
@@ -224,12 +241,115 @@ function ImportAgentsModal({ open, onClose, onImported }) {
   )
 }
 
+function AgentForm({ form, update, onSubmit, saving, saved, error, submitLabel, promptHint }) {
+  return (
+    <form onSubmit={onSubmit}>
+      <Field
+        label="System prompt"
+        hint={promptHint}
+        htmlFor="sys-prompt"
+      >
+        <textarea
+          id="sys-prompt"
+          className="mc-input min-h-40 font-mono text-xs"
+          value={form.system_prompt}
+          onChange={(event) => update('system_prompt', event.target.value)}
+        />
+      </Field>
+
+      <Field label="First message" hint="Posted into the meeting chat when the agent joins." htmlFor="first-msg">
+        <textarea
+          id="first-msg"
+          className="mc-input min-h-20"
+          value={form.first_message}
+          onChange={(event) => update('first_message', event.target.value)}
+        />
+      </Field>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Provider" htmlFor="cfg-provider">
+          <input
+            id="cfg-provider"
+            className="mc-input"
+            value={form.provider}
+            onChange={(event) => update('provider', event.target.value)}
+          />
+        </Field>
+        <Field label="Model" htmlFor="cfg-model">
+          <input
+            id="cfg-model"
+            className="mc-input"
+            value={form.model}
+            onChange={(event) => update('model', event.target.value)}
+          />
+        </Field>
+        <Field label="Voice" htmlFor="cfg-voice">
+          <input
+            id="cfg-voice"
+            className="mc-input"
+            value={form.voice}
+            onChange={(event) => update('voice', event.target.value)}
+          />
+        </Field>
+        <Field label="Temperature" htmlFor="cfg-temp">
+          <input
+            id="cfg-temp"
+            type="number"
+            step="0.1"
+            className="mc-input"
+            value={form.temperature}
+            onChange={(event) => update('temperature', event.target.value)}
+          />
+        </Field>
+        <Field label="Response modality" htmlFor="cfg-modality">
+          <select
+            id="cfg-modality"
+            className="mc-input"
+            value={form.response_modality}
+            onChange={(event) => update('response_modality', event.target.value)}
+          >
+            <option value="">unchanged</option>
+            {MODALITIES.map((value) => (
+              <option key={value} value={value}>{value}</option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      <label className="mb-5 flex items-center gap-2 text-sm" style={{ color: 'var(--text-muted)' }}>
+        <input
+          type="checkbox"
+          checked={form.tool_results_to_chat}
+          onChange={(event) => update('tool_results_to_chat', event.target.checked)}
+        />
+        Post tool results into the meeting chat
+      </label>
+
+      {error && (
+        <div className="mb-4">
+          <ErrorMessage title="Could not save" detail={error} />
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="submit" className="mc-btn mc-btn-primary" disabled={saving}>
+          {saving ? <Spinner size={14} /> : null} {submitLabel}
+        </button>
+        {saved && <span className="text-sm" style={{ color: 'var(--color-brand-600)' }}>Saved.</span>}
+      </div>
+    </form>
+  )
+}
+
 export default function Agent() {
   const [agents, setAgents] = useState(null)
   const [agentsError, setAgentsError] = useState(null)
   const [config, setConfig] = useState(null)
   const [configError, setConfigError] = useState(null)
   const [credentials, setCredentials] = useState(null)
+  const [template, setTemplate] = useState(null)
+  // 'template' edits the template agent; 'active' edits the live one.
+  const [selected, setSelected] = useState('active')
 
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
@@ -273,11 +393,42 @@ export default function Agent() {
     }
   }, [])
 
+  const loadTemplate = useCallback(async () => {
+    try {
+      setTemplate(await getAgentTemplate())
+    } catch {
+      // The template has built-in defaults; the page still works without it.
+    }
+  }, [])
+
   useEffect(() => {
     loadAgents()
     loadConfig()
+    loadTemplate()
     getAgentCredentials().then(setCredentials).catch(() => {})
-  }, [loadAgents, loadConfig])
+  }, [loadAgents, loadConfig, loadTemplate])
+
+  // Switching between the template and the active agent swaps what the
+  // editor holds, so unsaved edits to one never leak into the other.
+  useEffect(() => {
+    if (selected !== 'template' || !template) return
+    setForm({
+      system_prompt: template.system_prompt || '',
+      first_message: template.first_message || '',
+      provider: template.provider || '',
+      model: template.model || '',
+      voice: template.voice || '',
+      temperature: template.temperature ?? '',
+      response_modality: template.response_modality || '',
+      tool_results_to_chat: Boolean(template.tool_results_to_chat),
+    })
+    setSaved(false)
+  }, [selected, template])
+
+  function selectActive() {
+    setSelected('active')
+    loadConfig()
+  }
 
   function update(key, value) {
     setForm((current) => ({ ...current, [key]: value }))
@@ -289,6 +440,21 @@ export default function Agent() {
     setSaving(true)
     setSaved(false)
     try {
+      if (selected === 'template') {
+        const next = await updateAgentTemplate({
+          system_prompt: form.system_prompt,
+          first_message: form.first_message,
+          provider: form.provider || undefined,
+          model: form.model || undefined,
+          voice: form.voice || undefined,
+          temperature: form.temperature === '' ? undefined : Number(form.temperature),
+          response_modality: form.response_modality || undefined,
+          tool_results_to_chat: form.tool_results_to_chat,
+        })
+        setTemplate(next)
+        setSaved(true)
+        return
+      }
       await updateAgent({
         system_prompt: form.system_prompt,
         first_message: form.first_message,
@@ -301,19 +467,6 @@ export default function Agent() {
       })
       setSaved(true)
       await loadConfig()
-    } catch (err) {
-      setConfigError(err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function restoreDefaultPrompt() {
-    setSaving(true)
-    try {
-      await updateAgent({ system_prompt: '', reset_to_default_prompt: true })
-      await loadConfig()
-      setSaved(true)
     } catch (err) {
       setConfigError(err.message)
     } finally {
@@ -354,6 +507,35 @@ export default function Agent() {
 
       <div className="grid gap-5 lg:grid-cols-[20rem_1fr] items-start">
         <SectionCard title={`Your agents${agents ? ` (${agents.length})` : ''}`}>
+          {/* The template is not a MeetStream agent - it lives in this app's
+              config, cannot be deleted, and is what every new agent starts
+              from. It is pinned above the real agents so it is always
+              reachable, even before any exist. */}
+          <button
+            type="button"
+            onClick={() => setSelected('template')}
+            className="flex w-full items-center justify-between gap-3 px-5 py-3 text-left"
+            style={{
+              borderBottom: '1px solid var(--border-subtle)',
+              backgroundColor: selected === 'template' ? 'var(--surface-sunken)' : 'transparent',
+            }}
+            aria-pressed={selected === 'template'}
+          >
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="mc-icon-chip" aria-hidden="true"><RobotIcon size={16} /></span>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium" style={{ color: 'var(--text-strong)' }}>
+                  Template agent
+                </div>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  <Badge tone="brand">Template</Badge>
+                  {template?.provider && <Badge>{template.provider}</Badge>}
+                </div>
+              </div>
+            </div>
+            <span className="text-xs" style={{ color: 'var(--text-faint)' }}>Edit</span>
+          </button>
+
           {agentsError && (
             <div className="p-4">
               <ErrorMessage title="Could not load agents" detail={agentsError} onRetry={loadAgents} />
@@ -376,7 +558,13 @@ export default function Agent() {
           ) : (
             <ul className="divide-y" style={{ borderColor: 'var(--border-subtle)' }}>
               {agents.map((agent) => (
-                <li key={agent.AgentConfigID} className="flex items-center justify-between gap-3 px-5 py-3">
+                <li
+                  key={agent.AgentConfigID}
+                  className="flex items-center justify-between gap-3 px-5 py-3"
+                  style={{
+                    backgroundColor: agent.IsActive && selected === 'active' ? 'var(--surface-sunken)' : 'transparent',
+                  }}
+                >
                   <div className="min-w-0">
                     <div className="truncate text-sm font-medium" style={{ color: 'var(--text-strong)' }}>
                       {agent.AgentName || 'Untitled agent'}
@@ -387,7 +575,9 @@ export default function Agent() {
                     </div>
                   </div>
                   {agent.IsActive ? (
-                    <Badge tone="brand"><CheckIcon size={12} /> Active</Badge>
+                    <button type="button" onClick={selectActive} className="flex items-center" aria-label="Edit active agent">
+                      <Badge tone="brand"><CheckIcon size={12} /> Active</Badge>
+                    </button>
                   ) : (
                     <button
                       type="button"
@@ -405,7 +595,29 @@ export default function Agent() {
         </SectionCard>
 
         <div className="min-w-0">
-          {configError && !config ? (
+          {selected === 'template' ? (
+            <Card>
+              <div className="mb-1 flex flex-wrap items-center gap-2">
+                <h2 className="text-base font-semibold">Template agent</h2>
+                <Badge tone="brand">Template</Badge>
+              </div>
+              <p className="mb-5 text-sm" style={{ color: 'var(--text-muted)' }}>
+                Every new agent starts as a copy of this. It cannot be deleted, but everything about it — provider,
+                model, voice, prompt and first message — can be changed. Use <code>{'{agent_name}'}</code> where the
+                agent's name should appear.
+              </p>
+              <AgentForm
+                form={form}
+                update={update}
+                onSubmit={save}
+                saving={saving}
+                saved={saved}
+                error={configError}
+                submitLabel="Save template"
+                promptHint="The starting system prompt for new agents."
+              />
+            </Card>
+          ) : configError && !config ? (
             <Card>
               <ErrorMessage title="No agent configured" detail={configError} onRetry={loadConfig} />
               <p className="mt-4 text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -426,109 +638,16 @@ export default function Agent() {
                 )}
               </div>
 
-              <form onSubmit={save}>
-                <Field
-                  label="System prompt"
-                  hint="Controls when the agent speaks and how it answers. Resetting restores the built-in activation policy."
-                  htmlFor="sys-prompt"
-                >
-                  <textarea
-                    id="sys-prompt"
-                    className="mc-input min-h-40 font-mono text-xs"
-                    value={form.system_prompt}
-                    onChange={(event) => update('system_prompt', event.target.value)}
-                  />
-                </Field>
-
-                <Field label="First message" hint="Posted into the meeting chat when the agent joins." htmlFor="first-msg">
-                  <textarea
-                    id="first-msg"
-                    className="mc-input min-h-20"
-                    value={form.first_message}
-                    onChange={(event) => update('first_message', event.target.value)}
-                  />
-                </Field>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Provider" htmlFor="cfg-provider">
-                    <input
-                      id="cfg-provider"
-                      className="mc-input"
-                      value={form.provider}
-                      onChange={(event) => update('provider', event.target.value)}
-                    />
-                  </Field>
-                  <Field label="Model" htmlFor="cfg-model">
-                    <input
-                      id="cfg-model"
-                      className="mc-input"
-                      value={form.model}
-                      onChange={(event) => update('model', event.target.value)}
-                    />
-                  </Field>
-                  <Field label="Voice" htmlFor="cfg-voice">
-                    <input
-                      id="cfg-voice"
-                      className="mc-input"
-                      value={form.voice}
-                      onChange={(event) => update('voice', event.target.value)}
-                    />
-                  </Field>
-                  <Field label="Temperature" htmlFor="cfg-temp">
-                    <input
-                      id="cfg-temp"
-                      type="number"
-                      step="0.1"
-                      className="mc-input"
-                      value={form.temperature}
-                      onChange={(event) => update('temperature', event.target.value)}
-                    />
-                  </Field>
-                  <Field label="Response modality" htmlFor="cfg-modality">
-                    <select
-                      id="cfg-modality"
-                      className="mc-input"
-                      value={form.response_modality}
-                      onChange={(event) => update('response_modality', event.target.value)}
-                    >
-                      <option value="">unchanged</option>
-                      {MODALITIES.map((value) => (
-                        <option key={value} value={value}>{value}</option>
-                      ))}
-                    </select>
-                  </Field>
-                </div>
-
-                <label className="mb-5 flex items-center gap-2 text-sm" style={{ color: 'var(--text-muted)' }}>
-                  <input
-                    type="checkbox"
-                    checked={form.tool_results_to_chat}
-                    onChange={(event) => update('tool_results_to_chat', event.target.checked)}
-                  />
-                  Post tool results into the meeting chat
-                </label>
-
-                {configError && (
-                  <div className="mb-4">
-                    <ErrorMessage title="Could not save" detail={configError} />
-                  </div>
-                )}
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <button type="submit" className="mc-btn mc-btn-primary" disabled={saving}>
-                    {saving ? <Spinner size={14} /> : null} Save agent
-                  </button>
-                  <button
-                    type="button"
-                    className="mc-btn mc-btn-secondary"
-                    onClick={restoreDefaultPrompt}
-                    disabled={saving}
-                  >
-                    Reset to default prompt
-                  </button>
-                  {saved && <span className="text-sm" style={{ color: 'var(--color-brand-600)' }}>Saved.</span>}
-                </div>
-              </form>
+              <AgentForm
+                form={form}
+                update={update}
+                onSubmit={save}
+                saving={saving}
+                saved={saved}
+                error={configError}
+                submitLabel="Save agent"
+                promptHint="Controls when the agent speaks and how it answers."
+              />
             </Card>
           )}
 
@@ -555,7 +674,7 @@ export default function Agent() {
         </div>
       </div>
 
-      <NewAgentModal open={newOpen} onClose={() => setNewOpen(false)} onCreated={refreshAll} />
+      <NewAgentModal open={newOpen} onClose={() => setNewOpen(false)} onCreated={refreshAll} template={template} />
       <ImportAgentsModal open={importOpen} onClose={() => setImportOpen(false)} onImported={refreshAll} />
     </Page>
   )
