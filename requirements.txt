@@ -20,9 +20,10 @@ langchain-text-splitters==0.3.8
 numpy>=1.26.0
 
 # ---- LLM ----
-openai==1.82.0
-anthropic==0.52.0
-groq==0.26.0
+# No vendor SDKs: every provider (OpenAI, Anthropic, Gemini, Ollama, Groq and
+# any OpenAI-compatible endpoint) is implemented over httpx in
+# app/providers/llm, which keeps the dependency surface small and makes
+# adding a provider a code change rather than a dependency change.
 
 # ---- Documents ----
 pypdf==5.5.0

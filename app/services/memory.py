@@ -3,11 +3,11 @@ LLM Memory Extraction Service.
 Extracts structured knowledge (decisions, commitments, action items, requirements, facts)
 and meeting summaries from raw meeting transcripts.
 """
-import json
-import re
-from typing import List, Dict, Any, Optional, Tuple
-from app.config import settings
+from typing import Any, Dict, Optional
+
 from app.models.database import MemoryType
+from app.providers.llm import ChatMessage, LLMError
+from app.services.llm import try_get_llm_provider
 
 
 EXTRACTION_SYSTEM_PROMPT = """You are an expert AI meeting analyst. Your job is to extract high-value persistent knowledge and structured action items from the provided meeting transcript.
@@ -45,8 +45,13 @@ Output valid JSON ONLY with the following structure:
 
 
 class MemoryExtractionService:
-    def __init__(self):
-        self.provider = settings.LLM_PROVIDER.lower()
+    """
+    Turns a raw transcript into structured memories, action items and a summary.
+
+    Runs against whichever LLM provider the user configured. When no provider
+    is configured or the call fails, a deterministic rule-based parser keeps
+    the pipeline working rather than losing the meeting entirely.
+    """
 
     async def extract_memories(
         self,
@@ -55,63 +60,41 @@ class MemoryExtractionService:
         customer_name: Optional[str] = None,
         project_name: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        Invokes configured LLM to extract memories, action items, and summary.
-        Includes a deterministic parser fallback if no LLM key is configured.
-        """
-        # Format user prompt
-        user_prompt = f"Meeting Title: {meeting_title or 'Untitled Meeting'}\n"
-        if customer_name:
-            user_prompt += f"Customer: {customer_name}\n"
-        if project_name:
-            user_prompt += f"Project: {project_name}\n"
-        user_prompt += f"\n--- TRANSCRIPT ---\n{transcript_text}\n--- END TRANSCRIPT ---"
-
-        # Try LLM providers
-        if settings.OPENAI_API_KEY and self.provider == "openai":
+        provider = try_get_llm_provider()
+        if provider is not None:
+            messages = [
+                ChatMessage(role="system", content=EXTRACTION_SYSTEM_PROMPT),
+                ChatMessage(
+                    role="user",
+                    content=self._build_prompt(
+                        transcript_text, meeting_title, customer_name, project_name
+                    ),
+                ),
+            ]
             try:
-                return await self._call_openai(user_prompt)
-            except Exception as e:
-                print(f"[WARN] OpenAI extraction failed: {e}. Falling back to rule-based parser.")
+                return await provider.complete_json(messages)
+            except (LLMError, OSError) as exc:
+                print(
+                    f"[WARN] Memory extraction via {provider.label} failed: {exc}. "
+                    "Falling back to rule-based parser."
+                )
 
-        if settings.GROQ_API_KEY:
-            try:
-                return await self._call_groq(user_prompt)
-            except Exception as e:
-                print(f"[WARN] Groq extraction failed: {e}. Falling back to rule-based parser.")
-
-        # Deterministic rule-based extraction fallback
         return self._heuristic_extract(transcript_text, meeting_title, customer_name, project_name)
 
-    async def _call_openai(self, prompt: str) -> Dict[str, Any]:
-        from openai import AsyncOpenAI
-        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        response = await client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=[
-                {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.2,
-        )
-        content = response.choices[0].message.content or "{}"
-        return json.loads(content)
-
-    async def _call_groq(self, prompt: str) -> Dict[str, Any]:
-        from groq import AsyncGroq
-        client = AsyncGroq(api_key=settings.GROQ_API_KEY)
-        response = await client.chat.completions.create(
-            model=settings.GROQ_MODEL,
-            messages=[
-                {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.2,
-        )
-        content = response.choices[0].message.content or "{}"
-        return json.loads(content)
+    @staticmethod
+    def _build_prompt(
+        transcript_text: str,
+        meeting_title: Optional[str],
+        customer_name: Optional[str],
+        project_name: Optional[str],
+    ) -> str:
+        prompt = f"Meeting Title: {meeting_title or 'Untitled Meeting'}\n"
+        if customer_name:
+            prompt += f"Customer: {customer_name}\n"
+        if project_name:
+            prompt += f"Project: {project_name}\n"
+        prompt += f"\n--- TRANSCRIPT ---\n{transcript_text}\n--- END TRANSCRIPT ---"
+        return prompt
 
     def _heuristic_extract(
         self,

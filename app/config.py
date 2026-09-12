@@ -37,14 +37,27 @@ class Settings(BaseSettings):
     MCP_AUTH_TOKEN: str = "dev-mcp-token-meetstream-2026"
     MCP_SERVER_URL: str = "http://localhost:8000/mcp"
 
-    # ---- LLM (Memory Extraction) ----
-    LLM_PROVIDER: str = "openai"  # openai, groq, anthropic
+    # ---- LLM ----
+    # Provider-agnostic configuration: one set of variables works for every
+    # supported provider (see app/providers/llm). Anything left unset falls
+    # back to that provider's documented default.
+    LLM_PROVIDER: str = "ollama"  # openai, anthropic, gemini, ollama, groq, openai_compatible
+    LLM_MODEL: Optional[str] = None
+    LLM_API_KEY: Optional[str] = None
+    LLM_BASE_URL: Optional[str] = None
+    LLM_TEMPERATURE: float = 0.2
+    LLM_MAX_TOKENS: Optional[int] = None
+
+    # Legacy per-provider names, still honoured so an existing .env keeps
+    # working. Prefer the LLM_* variables above for new setups.
     OPENAI_API_KEY: Optional[str] = None
-    OPENAI_MODEL: str = "gpt-4.1"
+    OPENAI_MODEL: Optional[str] = None
     GROQ_API_KEY: Optional[str] = None
-    GROQ_MODEL: str = "openai/gpt-oss-120b"
+    GROQ_MODEL: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None
-    ANTHROPIC_MODEL: str = "claude-3-5-sonnet-20241022"
+    ANTHROPIC_MODEL: Optional[str] = None
+    GEMINI_API_KEY: Optional[str] = None
+    GEMINI_MODEL: Optional[str] = None
 
     # ---- Embeddings ----
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
