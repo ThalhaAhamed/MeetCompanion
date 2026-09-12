@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
 import Logo from './Logo'
 import {
   AskAiIcon,
@@ -10,7 +10,6 @@ import {
   GraphIcon,
   NotebookIcon,
   RobotIcon,
-  SearchIcon,
   SettingsIcon,
   SidebarIcon,
   SunIcon,
@@ -28,19 +27,6 @@ const SECONDARY_NAV = [
   { to: '/agent', label: 'Agent', Icon: RobotIcon },
   { to: '/members', label: 'Members', Icon: MembersIcon },
   { to: '/settings', label: 'Settings', Icon: SettingsIcon },
-]
-
-/**
- * What the header search does on each route.
- *
- * A single "Search your notes" box sitting above Meetings, Members and
- * Settings was misleading - it offered to search something the page had
- * nothing to do with. The field now matches the page, and is hidden where
- * there is nothing to search.
- */
-const SEARCH_SCOPES = [
-  { match: (path) => path.startsWith('/notebook'), placeholder: 'Search your notes…', to: '/notebook' },
-  { match: (path) => path.startsWith('/meetings'), placeholder: 'Search meetings…', to: '/meetings' },
 ]
 
 const THEME_KEY = 'meet-companion:theme'
@@ -114,10 +100,6 @@ function Avatar({ user, size = 34 }) {
 
 export default function AppShell({ user, onSignOut, children }) {
   const [theme, toggleTheme] = useTheme()
-  const navigate = useNavigate()
-  const { pathname } = useLocation()
-  const [query, setQuery] = useState('')
-  const searchScope = SEARCH_SCOPES.find((scope) => scope.match(pathname)) || null
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return window.localStorage.getItem(COLLAPSE_KEY) === 'true'
@@ -133,12 +115,6 @@ export default function AppShell({ user, onSignOut, children }) {
       // Non-critical preference.
     }
   }, [collapsed])
-
-  function submitSearch(event) {
-    event.preventDefault()
-    if (!query.trim() || !searchScope) return
-    navigate(`${searchScope.to}?q=${encodeURIComponent(query.trim())}`)
-  }
 
   return (
     <div className="flex min-h-screen" style={{ backgroundColor: 'var(--surface-page)' }}>
@@ -204,21 +180,6 @@ export default function AppShell({ user, onSignOut, children }) {
             <Logo variant="icon" size={30} />
           </div>
 
-          {searchScope && (
-            <form className="mc-search hidden max-w-md flex-1 sm:flex" onSubmit={submitSearch}>
-              {/* A real submit button rather than relying on implicit submission,
-                  which needs no button but is easy to break by adding a field. */}
-              <button type="submit" aria-label="Search" className="flex shrink-0 items-center">
-                <SearchIcon size={17} />
-              </button>
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={searchScope.placeholder}
-                aria-label={searchScope.placeholder}
-              />
-            </form>
-          )}
 
           <div className="ml-auto flex items-center gap-2">
             <button
