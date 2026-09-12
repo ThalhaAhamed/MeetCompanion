@@ -18,6 +18,13 @@ env/
 .env.local
 .env.production
 
+# Local runtime data: the SQLite database and config.json, which holds the
+# API keys entered during onboarding. Never commit these.
+data/
+*.db
+*.sqlite
+*.sqlite3
+
 # IDE
 .vscode/
 .idea/

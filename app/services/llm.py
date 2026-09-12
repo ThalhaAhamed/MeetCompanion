@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Optional
 
 from app.config import settings
+from app.runtime_config import load_config, resolve
 from app.providers.llm import (
     DESCRIPTORS,
     LLMConfig,
@@ -35,10 +36,19 @@ _LEGACY_MODELS = {
 
 
 def build_llm_config() -> LLMConfig:
-    """Assemble an LLMConfig from settings, honouring legacy variable names."""
-    provider = (settings.LLM_PROVIDER or "").strip().lower()
+    """
+    Assemble an LLMConfig from the effective configuration.
+
+    Precedence is environment variable, then the value saved during
+    onboarding, then the provider's documented default. Legacy per-provider
+    variable names are still honoured at the bottom of the chain.
+    """
+    stored = load_config().llm
+
+    provider = str(resolve("LLM_PROVIDER", stored.provider, settings.LLM_PROVIDER) or "")
+    provider = provider.strip().lower()
     if not provider:
-        raise LLMConfigError("No LLM provider configured. Set LLM_PROVIDER.")
+        raise LLMConfigError("No LLM provider configured.")
 
     descriptor = DESCRIPTORS.get(provider)
     if descriptor is None:
@@ -47,19 +57,35 @@ def build_llm_config() -> LLMConfig:
             f"Unknown LLM provider '{provider}'. Supported providers: {supported}."
         )
 
-    api_key = settings.LLM_API_KEY or _legacy(_LEGACY_API_KEYS.get(provider))
-    model = settings.LLM_MODEL or _legacy(_LEGACY_MODELS.get(provider)) or _default_field(
-        descriptor, "model"
+    api_key = resolve(
+        "LLM_API_KEY",
+        stored.api_key,
+        settings.LLM_API_KEY or _legacy(_LEGACY_API_KEYS.get(provider)),
     )
-    base_url = settings.LLM_BASE_URL or _default_field(descriptor, "base_url")
+    model = resolve(
+        "LLM_MODEL",
+        stored.model,
+        settings.LLM_MODEL
+        or _legacy(_LEGACY_MODELS.get(provider))
+        or _default_field(descriptor, "model"),
+    )
+    base_url = resolve(
+        "LLM_BASE_URL",
+        stored.base_url,
+        settings.LLM_BASE_URL or _default_field(descriptor, "base_url"),
+    )
+
+    temperature = stored.temperature
+    if temperature is None:
+        temperature = settings.LLM_TEMPERATURE
 
     return LLMConfig(
         provider=provider,
-        model=model or "",
+        model=str(model or ""),
         api_key=api_key,
         base_url=base_url,
-        temperature=settings.LLM_TEMPERATURE,
-        max_tokens=settings.LLM_MAX_TOKENS,
+        temperature=float(temperature),
+        max_tokens=stored.max_tokens or settings.LLM_MAX_TOKENS,
     )
 
 

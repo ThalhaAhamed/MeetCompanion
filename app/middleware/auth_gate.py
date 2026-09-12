@@ -28,6 +28,11 @@ SESSION_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
 
 EXEMPT_PREFIXES = ("/api/auth/", "/api/members", "/api/agent/chat-relay", "/api/webhooks", "/mcp", "/health", "/docs", "/openapi.json", "/redoc")
 
+#: Setup runs before any account exists, so it cannot require a session - but
+#: only until the application is configured. Leaving it open afterwards would
+#: let anyone reachable on the network read configuration or reset the install.
+FIRST_RUN_PREFIXES = ("/api/setup",)
+
 
 def _key() -> bytes:
     return settings.API_KEY_SALT.encode("utf-8")
@@ -72,6 +77,12 @@ class AuthGateMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         if not path.startswith("/api/") or path.startswith(EXEMPT_PREFIXES):
             return await call_next(request)
+
+        if path.startswith(FIRST_RUN_PREFIXES):
+            from app.runtime_config import is_configured
+
+            if not is_configured():
+                return await call_next(request)
 
         token = request.cookies.get(COOKIE_NAME)
         if not token or not await verify_session(token):

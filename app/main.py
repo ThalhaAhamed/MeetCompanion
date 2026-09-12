@@ -15,6 +15,7 @@ from app.api.action_items import router as action_items_router
 from app.api.graph import router as graph_router
 from app.api.auth import router as auth_router
 from app.api.members import router as members_router
+from app.api.setup import router as setup_router
 from app.mcp.server import router as mcp_router
 from app.middleware.auth_gate import AuthGateMiddleware
 from app.services.embedding import embedding_service
@@ -216,6 +217,7 @@ app.add_middleware(
 
 # Routers
 app.include_router(health_router)
+app.include_router(setup_router)
 app.include_router(webhooks_router)
 app.include_router(auth_router)
 app.include_router(members_router)
