@@ -83,29 +83,83 @@ def resolve_database_url() -> str:
     return normalize_database_url(settings.DATABASE_URL)
 
 
-DATABASE_URL = resolve_database_url()
-DIALECT = dialect_of(DATABASE_URL)
+class DatabaseRuntime:
+    """One engine plus its session factory; replaced wholesale on switch."""
 
-engine = create_async_engine(DATABASE_URL, **_engine_options(DATABASE_URL))
+    def __init__(self, url: str):
+        self.url = url
+        self.dialect = dialect_of(url)
+        self.engine = create_async_engine(url, **_engine_options(url))
+        if self.dialect == SQLITE:
+            event.listens_for(self.engine.sync_engine, "connect")(_enable_sqlite_foreign_keys)
+        self.sessionmaker = async_sessionmaker(
+            bind=self.engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autocommit=False,
+            autoflush=False,
+        )
 
-if DIALECT == SQLITE:
 
-    @event.listens_for(engine.sync_engine, "connect")
-    def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
-        # SQLite ignores foreign keys unless asked, which would let the
-        # ON DELETE CASCADE rules the schema relies on silently do nothing.
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
+    # SQLite ignores foreign keys unless asked, which would let the
+    # ON DELETE CASCADE rules the schema relies on silently do nothing.
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 
-AsyncSessionLocal = async_sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autocommit=False,
-    autoflush=False,
-)
+_runtime = DatabaseRuntime(resolve_database_url())
+
+# Kept for callers that only need to know what was configured at import
+# time (scripts, tests). Live code should use the accessors below.
+DATABASE_URL = _runtime.url
+DIALECT = _runtime.dialect
+
+
+def current_engine():
+    return _runtime.engine
+
+
+def current_url() -> str:
+    return _runtime.url
+
+
+def current_dialect() -> str:
+    return _runtime.dialect
+
+
+def AsyncSessionLocal() -> AsyncSession:  # noqa: N802 - long-standing name
+    """A session on whichever database is active right now."""
+    return _runtime.sessionmaker()
+
+
+async def switch_database(url: str) -> str:
+    """
+    Point the running application at a different database, without restart.
+
+    The new engine is built and bootstrapped (schema, default workspace)
+    before anything is swapped, so a URL that turns out to be unreachable or
+    unwritable leaves the current database untouched. Requests already
+    holding a session finish on the old engine; it is disposed afterwards.
+    """
+    from app.database.bootstrap import bootstrap
+
+    global _runtime
+    url = normalize_database_url(url)
+    if url == _runtime.url:
+        return url
+
+    candidate = DatabaseRuntime(url)
+    try:
+        await bootstrap(candidate.engine)
+    except Exception:
+        await candidate.engine.dispose()
+        raise
+
+    previous, _runtime = _runtime, candidate
+    await previous.engine.dispose()
+    return url
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -135,7 +189,7 @@ async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
 
 async def check_connection() -> bool:
     try:
-        async with engine.connect() as conn:
+        async with current_engine().connect() as conn:
             await conn.execute(text("SELECT 1"))
         return True
     except Exception:

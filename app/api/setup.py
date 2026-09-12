@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.config import settings
-from app.database.connection import DATABASE_URL, dialect_of, normalize_database_url
+from app.database.connection import current_url, dialect_of, normalize_database_url, switch_database
 from app.providers.database import build_database_url, describe_databases, provider_for_url
 from app.providers.llm import (
     DESCRIPTORS,
@@ -27,6 +27,7 @@ from app.runtime_config import (
     MeetStreamSettings,
     describe_environment_managed,
     is_configured,
+    is_env_managed,
     load_config,
     mask_secret,
     reset_config,
@@ -97,16 +98,9 @@ async def setup_status() -> Dict[str, Any]:
         "environment_managed": describe_environment_managed(),
         "llm": llm_summary,
         "database": {
-            "dialect": dialect_of(DATABASE_URL),
-            "provider": provider_for_url(DATABASE_URL),
-            "url": mask_secret(DATABASE_URL),
-            # What is saved in config, which differs from the live URL until
-            # the server restarts (or when DATABASE_URL overrides it).
-            "pending": (
-                mask_secret(config.database.url)
-                if config.database.url and normalize_database_url(config.database.url) != DATABASE_URL
-                else None
-            ),
+            "dialect": dialect_of(current_url()),
+            "provider": provider_for_url(current_url()),
+            "url": mask_secret(current_url()),
         },
         "meetstream": {
             "configured": bool(config.meetstream.api_key or settings.MEETSTREAM_API_KEY),
@@ -208,6 +202,20 @@ async def complete_setup(payload: CompleteSetupPayload) -> Dict[str, Any]:
     if payload.database is not None:
         resolved = payload.database.resolve_url()
         if resolved:
+            if is_env_managed("DATABASE_URL"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="DATABASE_URL is set in the environment; change it there.",
+                )
+            # Switched before anything is saved: a database that cannot be
+            # reached or prepared must not end up in the config either.
+            try:
+                await switch_database(resolved)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Could not switch database: {exc}",
+                )
             database = DatabaseSettings(url=resolved)
 
     meetstream = current.meetstream

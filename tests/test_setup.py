@@ -235,3 +235,54 @@ async def test_setup_is_locked_down_once_configured(client, clean_env):
 
     locked = await client.get("/api/setup/status")
     assert locked.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Live database switch
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_switching_database_takes_effect_without_restart(client, clean_env, tmp_path, monkeypatch):
+    """Saving a new database from Settings moves the running app onto it."""
+    from sqlalchemy import select
+
+    from app.database import connection
+    from app.models.database import Organization
+
+    # conftest pins DATABASE_URL in the environment so the suite is hermetic;
+    # here the point is precisely that no environment override exists.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    original = connection.current_url()
+    target = tmp_path / "switched.db"
+
+    try:
+        response = await client.post(
+            "/api/setup/complete",
+            json={"database": {"provider": "sqlite", "values": {"path": target.as_posix()}}},
+        )
+        assert response.status_code == 200, response.text
+        assert target.exists()
+        assert connection.current_url().endswith("switched.db")
+
+        # Bootstrapped: schema created and the default workspace seeded.
+        async with connection.AsyncSessionLocal() as session:
+            orgs = (await session.execute(select(Organization))).scalars().all()
+        assert len(orgs) == 1
+    finally:
+        await connection.switch_database(original)
+
+
+@pytest.mark.asyncio
+async def test_unreachable_database_is_refused_and_nothing_changes(client, clean_env, monkeypatch):
+    from app.database import connection
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    before = connection.current_url()
+    response = await client.post(
+        "/api/setup/complete",
+        json={"database": {"provider": "neon", "values": {"url": "postgresql://u:p@127.0.0.1:1/nope"}}},
+    )
+    assert response.status_code == 400
+    assert "Could not switch" in response.json()["detail"]
+    assert connection.current_url() == before

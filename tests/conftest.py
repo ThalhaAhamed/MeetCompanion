@@ -18,8 +18,9 @@ import httpx  # noqa: E402
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 
-from app.database.connection import engine  # noqa: E402
-from app.main import app, _ensure_default_workspace  # noqa: E402
+from app.database.connection import current_engine  # noqa: E402
+from app.database.bootstrap import ensure_default_workspace  # noqa: E402
+from app.main import app  # noqa: E402
 from app.models.database import Base  # noqa: E402
 
 
@@ -39,10 +40,10 @@ async def database_schema():
     written by one test cannot leak into the next and make assertions about
     counts or ordering depend on execution order.
     """
-    async with engine.begin() as conn:
+    async with current_engine().begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
-    await _ensure_default_workspace()
+    await ensure_default_workspace(current_engine())
     yield
 
 

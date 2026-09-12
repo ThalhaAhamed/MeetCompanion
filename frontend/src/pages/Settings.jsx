@@ -266,14 +266,6 @@ export default function Settings() {
                 <EnvManagedNotice />
               ) : (
                 <>
-                  {status.database?.pending && (
-                    <p
-                      className="mb-4 rounded-lg px-3 py-2 text-xs"
-                      style={{ backgroundColor: 'var(--color-peach-100)', color: 'var(--color-peach-700)' }}
-                    >
-                      A new database ({status.database.pending}) is saved and will be used after the server restarts.
-                    </p>
-                  )}
                   <DatabasePicker
                     catalog={catalog.databases}
                     provider={dbProvider}
@@ -300,6 +292,9 @@ export default function Settings() {
                         try {
                           setStatus(await completeSetup({ database: { provider: dbProvider, values: dbValues } }))
                           setDbSaved(true)
+                          // The new database may not know this account; the
+                          // boot sequence sorts out sign-in or carries on.
+                          setTimeout(() => window.location.reload(), 1200)
                         } catch (err) {
                           setError(err.message)
                         } finally {
@@ -311,7 +306,7 @@ export default function Settings() {
                     </button>
                     {dbSaved && (
                       <span className="text-sm" style={{ color: 'var(--color-brand-600)' }}>
-                        Saved. Restart the server to switch — existing data is not migrated.
+                        Switched. Existing data is not migrated — reloading…
                       </span>
                     )}
                   </div>
