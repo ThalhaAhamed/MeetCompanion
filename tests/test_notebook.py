@@ -377,7 +377,7 @@ async def test_sync_files_meeting_under_year_and_month(authed_client):
 
     body = (await authed_client.get(f"/api/notebook/notes/{note['id']}")).json()["content"]
     assert "## Summary" in body and "We agreed the launch date." in body
-    assert "- [ ] **Sara** — Write the release notes _(high)_" in body
+    assert "- [ ] **Sara** — Write the release notes _(high)_ <!-- action:" in body
     assert "## Decisions" in body and "Launch on 1 October" in body
 
     folders = (await authed_client.get("/api/notebook/folders")).json()["folders"]
@@ -403,3 +403,35 @@ async def test_sync_is_idempotent_and_respects_edits(authed_client):
     assert result["skipped"] == 1
     body = (await authed_client.get(f"/api/notebook/notes/{note_id}")).json()["content"]
     assert body == "my own words"
+
+
+@pytest.mark.asyncio
+async def test_ticking_a_note_checkbox_completes_the_action_item(authed_client):
+    meeting_id = await _seed_completed_meeting()
+    await authed_client.post("/api/notebook/sync-meetings")
+    notes = (await authed_client.get("/api/notebook/notes", params={"meeting_id": str(meeting_id)})).json()
+    note_id = notes["notes"][0]["id"]
+    body = (await authed_client.get(f"/api/notebook/notes/{note_id}")).json()["content"]
+
+    ticked = body.replace("- [ ] **Sara**", "- [x] **Sara**")
+    await authed_client.patch(f"/api/notebook/notes/{note_id}", json={"content": ticked})
+
+    items = (await authed_client.get("/api/action-items", params={"meeting_id": str(meeting_id)})).json()
+    item = items["action_items"][0]
+    assert item["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_completing_an_action_item_ticks_the_note(authed_client):
+    meeting_id = await _seed_completed_meeting()
+    await authed_client.post("/api/notebook/sync-meetings")
+    items = (await authed_client.get("/api/action-items", params={"meeting_id": str(meeting_id)})).json()
+    item = items["action_items"][0]
+
+    await authed_client.patch(f"/api/action-items/{item['id']}", json={"status": "completed"})
+
+    notes = (await authed_client.get("/api/notebook/notes", params={"meeting_id": str(meeting_id)})).json()
+    note = (await authed_client.get(f"/api/notebook/notes/{notes['notes'][0]['id']}")).json()
+    assert "- [x] **Sara** — Write the release notes" in note["content"]
+    # Not a person's edit: the note still regenerates on a later sync.
+    assert note["updated_at"] == note["created_at"]

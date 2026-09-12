@@ -73,6 +73,10 @@ async def update_action_item(
     action = await action_repo.update(org_id, action_id, update_in)
     if not action:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Action item not found")
+    if "status" in update_in.model_dump(exclude_unset=True):
+        from app.services.meeting_notes import apply_action_item_to_notes
+
+        await apply_action_item_to_notes(db, action)
     await db.commit()
     await db.refresh(action)
     return action

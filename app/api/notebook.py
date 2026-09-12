@@ -336,7 +336,14 @@ async def update_note(
             body.content if body.content is not None else note.content,
         )
 
+    previous_content = note.content
     note = await repo.update(note, **fields)
+
+    if body.content is not None and note.meeting_id:
+        from app.services.meeting_notes import apply_note_tasks_to_action_items
+
+        if await apply_note_tasks_to_action_items(db, note, previous_content):
+            await db.commit()
 
     if body.move_to_root:
         note.folder_id = None

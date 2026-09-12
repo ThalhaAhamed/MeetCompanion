@@ -13,11 +13,13 @@ generated text is a starting point, not something that overwrites their work.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, List, Optional, Sequence
 
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import (
@@ -32,6 +34,11 @@ from app.models.database import (
 
 ROOT_FOLDER = "Meetings"
 MEETING_TAG = "meeting"
+
+#: Ties a task line in a note to its action item. HTML comments are invisible
+#: in the rendered preview and survive editing the surrounding text.
+TASK_MARKER = "<!-- action:{id} -->"
+TASK_LINE = re.compile(r"^(\s*(?:[-*+]|\d+[.)])\s+)\[( |x|X)\](.*?)\s*<!-- action:([0-9a-fA-F-]{36}) -->\s*$")
 
 #: Section heading per memory type, in the order they appear in the note.
 SECTIONS: Sequence[tuple[MemoryType, str]] = (
@@ -119,7 +126,7 @@ def render_note(
                 extras.append(item.priority)
             if extras:
                 detail += f" _({', '.join(extras)})_"
-            lines.append(f"- [{box}] {detail}")
+            lines.append(f"- [{box}] {detail} {TASK_MARKER.format(id=item.id)}")
         lines.append("")
 
     by_type: Dict[MemoryType, List[Memory]] = {}
@@ -247,3 +254,82 @@ class MeetingNoteService:
                 created += 1
         await self.session.commit()
         return {"meetings": len(meetings), "synced": created, "skipped": skipped}
+
+
+# ---------------------------------------------------------------------------
+# Keeping note checkboxes and action items in step
+# ---------------------------------------------------------------------------
+
+
+def task_states(content: str) -> Dict[uuid.UUID, bool]:
+    """action item id -> checked, for every marked task line in a note."""
+    states: Dict[uuid.UUID, bool] = {}
+    for line in (content or "").splitlines():
+        match = TASK_LINE.match(line)
+        if match:
+            states[uuid.UUID(match.group(4))] = match.group(2).lower() == "x"
+    return states
+
+
+def set_task_state(content: str, action_id: uuid.UUID, checked: bool) -> str:
+    """Return the note text with that action item's checkbox set."""
+    out = []
+    for line in (content or "").splitlines():
+        match = TASK_LINE.match(line)
+        if match and match.group(4).lower() == str(action_id).lower():
+            line = f"{match.group(1)}[{'x' if checked else ' '}]{match.group(3)} {TASK_MARKER.format(id=action_id)}"
+        out.append(line)
+    text = "\n".join(out)
+    return text + ("\n" if (content or "").endswith("\n") else "")
+
+
+async def apply_note_tasks_to_action_items(session: AsyncSession, note: Note, previous_content: str) -> int:
+    """
+    A checkbox flipped in the note flips the action item. Only lines whose
+    state actually changed are touched, so editing unrelated text never
+    resets a task someone completed from the dashboard.
+    """
+    before = task_states(previous_content)
+    after = task_states(note.content)
+    changed = {aid: done for aid, done in after.items() if before.get(aid) != done}
+    if not changed:
+        return 0
+
+    items = (
+        await session.execute(
+            select(ActionItem).where(
+                ActionItem.organization_id == note.organization_id, ActionItem.id.in_(list(changed))
+            )
+        )
+    ).scalars().all()
+    for item in items:
+        done = changed[item.id]
+        item.status = "completed" if done else "open"
+        item.completed_at = datetime.now(timezone.utc) if done else None
+    await session.flush()
+    return len(items)
+
+
+async def apply_action_item_to_notes(session: AsyncSession, item: ActionItem) -> int:
+    """
+    An action item completed (or reopened) elsewhere ticks its checkbox in
+    the meeting's note. The note's timestamps are preserved so this does not
+    count as a person editing it.
+    """
+    notes = (
+        await session.execute(select(Note).where(Note.meeting_id == item.meeting_id))
+    ).scalars().all()
+    touched = 0
+    for note in notes:
+        updated = set_task_state(note.content, item.id, item.status == "completed")
+        if updated == note.content:
+            continue
+        stamp = note.updated_at
+        note.content = updated
+        # Re-assigning the same value is not a change to SQLAlchemy, so the
+        # column's onupdate would still fire; flagging it keeps the stamp.
+        note.updated_at = stamp
+        flag_modified(note, "updated_at")
+        touched += 1
+    await session.flush()
+    return touched
