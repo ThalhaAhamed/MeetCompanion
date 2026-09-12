@@ -119,7 +119,10 @@ export default function AppShell({ user, onSignOut, children }) {
   return (
     <div className="flex min-h-screen" style={{ backgroundColor: 'var(--surface-page)' }}>
       <aside
-        className="hidden md:flex flex-col shrink-0 transition-[width] duration-200"
+        // Sticky and viewport-high: the collapse button at the bottom must stay
+        // reachable on pages taller than the window, and the nav should not
+        // scroll away with the page.
+        className="sticky top-0 hidden h-screen md:flex flex-col shrink-0 transition-[width] duration-200"
         style={{
           width: collapsed ? '5rem' : '16rem',
           backgroundColor: 'var(--surface-nav)',
