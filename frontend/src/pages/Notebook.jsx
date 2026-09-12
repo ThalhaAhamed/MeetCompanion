@@ -97,6 +97,71 @@ function FolderRow({ node, depth, selectedId, onSelect, onContextMenu }) {
   )
 }
 
+/**
+ * Scopes and the folder tree. Lives in the sidebar on wide screens and in a
+ * collapsible panel above the note list on narrower ones, so folders are
+ * reachable everywhere instead of only past the lg breakpoint.
+ */
+function FolderNav({ scope, setScope, counts, tree, onDeleteFolder, className = '' }) {
+  return (
+  <div className={`mc-scroll px-2 pb-4 ${className}`}>
+    <div
+      className="mc-nav-item cursor-pointer"
+      aria-current={scope.kind === 'all' ? 'page' : undefined}
+      onClick={() => setScope({ kind: 'all' })}
+    >
+      <NoteIcon size={16} />
+      <span className="flex-1">All notes</span>
+      <span className="text-[0.7rem]" style={{ color: 'var(--text-faint)' }}>{counts.total ?? 0}</span>
+    </div>
+    <div
+      className="mc-nav-item cursor-pointer"
+      aria-current={scope.kind === 'favorites' ? 'page' : undefined}
+      onClick={() => setScope({ kind: 'favorites' })}
+    >
+      <StarIcon size={16} />
+      <span className="flex-1">Favourites</span>
+      <span className="text-[0.7rem]" style={{ color: 'var(--text-faint)' }}>{counts.favorites ?? 0}</span>
+    </div>
+    <div
+      className="mc-nav-item cursor-pointer"
+      aria-current={scope.kind === 'unfiled' ? 'page' : undefined}
+      onClick={() => setScope({ kind: 'unfiled' })}
+    >
+      <FolderIcon size={16} />
+      <span className="flex-1">Unfiled</span>
+      <span className="text-[0.7rem]" style={{ color: 'var(--text-faint)' }}>{counts.unfiled ?? 0}</span>
+    </div>
+
+    <div
+      className="mt-4 mb-1 px-3 text-[0.65rem] font-semibold uppercase tracking-[0.14em]"
+      style={{ color: 'var(--text-faint)' }}
+    >
+      Folders
+    </div>
+
+    {tree === null ? (
+      <div className="px-3 py-2"><Spinner size={14} /></div>
+    ) : tree.length === 0 ? (
+      <p className="px-3 py-2 text-xs" style={{ color: 'var(--text-faint)' }}>
+        No folders yet.
+      </p>
+    ) : (
+      tree.map((node) => (
+        <FolderRow
+          key={node.id}
+          node={node}
+          depth={0}
+          selectedId={scope.kind === 'folder' ? scope.id : null}
+          onSelect={(id) => setScope({ kind: 'folder', id })}
+          onContextMenu={onDeleteFolder}
+        />
+      ))
+    )}
+  </div>
+  )
+}
+
 const VIEW_KEY = 'meet-companion:note-view'
 
 function NoteEditor({ note, onChange, onDelete, onBack, saving }) {
@@ -313,6 +378,7 @@ export default function Notebook() {
   const [saving, setSaving] = useState(false)
 
   const [scope, setScope] = useState({ kind: 'all' })
+  const [foldersOpen, setFoldersOpen] = useState(false)
   // Seeded from ?q= so the header search actually lands somewhere, and so a
   // filtered view can be linked to or reloaded.
   const [query, setQuery] = useState(() => searchParams.get('q') || '')
@@ -490,61 +556,14 @@ export default function Notebook() {
           </button>
         </div>
 
-        <div className="mc-scroll flex-1 overflow-y-auto px-2 pb-4">
-          <div
-            className="mc-nav-item cursor-pointer"
-            aria-current={scope.kind === 'all' ? 'page' : undefined}
-            onClick={() => setScope({ kind: 'all' })}
-          >
-            <NoteIcon size={16} />
-            <span className="flex-1">All notes</span>
-            <span className="text-[0.7rem]" style={{ color: 'var(--text-faint)' }}>{counts.total ?? 0}</span>
-          </div>
-          <div
-            className="mc-nav-item cursor-pointer"
-            aria-current={scope.kind === 'favorites' ? 'page' : undefined}
-            onClick={() => setScope({ kind: 'favorites' })}
-          >
-            <StarIcon size={16} />
-            <span className="flex-1">Favourites</span>
-            <span className="text-[0.7rem]" style={{ color: 'var(--text-faint)' }}>{counts.favorites ?? 0}</span>
-          </div>
-          <div
-            className="mc-nav-item cursor-pointer"
-            aria-current={scope.kind === 'unfiled' ? 'page' : undefined}
-            onClick={() => setScope({ kind: 'unfiled' })}
-          >
-            <FolderIcon size={16} />
-            <span className="flex-1">Unfiled</span>
-            <span className="text-[0.7rem]" style={{ color: 'var(--text-faint)' }}>{counts.unfiled ?? 0}</span>
-          </div>
-
-          <div
-            className="mt-4 mb-1 px-3 text-[0.65rem] font-semibold uppercase tracking-[0.14em]"
-            style={{ color: 'var(--text-faint)' }}
-          >
-            Folders
-          </div>
-
-          {tree === null ? (
-            <div className="px-3 py-2"><Spinner size={14} /></div>
-          ) : tree.length === 0 ? (
-            <p className="px-3 py-2 text-xs" style={{ color: 'var(--text-faint)' }}>
-              No folders yet.
-            </p>
-          ) : (
-            tree.map((node) => (
-              <FolderRow
-                key={node.id}
-                node={node}
-                depth={0}
-                selectedId={scope.kind === 'folder' ? scope.id : null}
-                onSelect={(id) => setScope({ kind: 'folder', id })}
-                onContextMenu={setFolderToDelete}
-              />
-            ))
-          )}
-        </div>
+        <FolderNav
+          scope={scope}
+          setScope={setScope}
+          counts={counts}
+          tree={tree}
+          onDeleteFolder={setFolderToDelete}
+          className="flex-1 overflow-y-auto"
+        />
       </div>
 
       {/* Note list. On small screens the list and the editor share the width:
@@ -555,11 +574,57 @@ export default function Notebook() {
       >
         <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm font-semibold">{scopeLabel}</span>
+            <button
+              type="button"
+              className="flex items-center gap-1 text-sm font-semibold lg:pointer-events-none"
+              onClick={() => setFoldersOpen((open) => !open)}
+              aria-expanded={foldersOpen}
+              aria-controls="notebook-folder-panel"
+            >
+              {scopeLabel}
+              <span className="lg:hidden" style={{ color: 'var(--text-faint)' }}>
+                {foldersOpen ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
+              </span>
+            </button>
             <button type="button" className="mc-btn mc-btn-primary px-2 py-1" onClick={handleCreateNote}>
               <PlusIcon size={15} /> New
             </button>
           </div>
+
+          {/* Below lg the sidebar is gone; the same navigation folds out here. */}
+          {foldersOpen && (
+            <div
+              id="notebook-folder-panel"
+              className="mb-3 rounded-lg lg:hidden"
+              style={{ backgroundColor: 'var(--surface-sunken)', border: '1px solid var(--border-subtle)' }}
+            >
+              <div className="flex items-center justify-between px-3 pt-2">
+                <span className="text-[0.65rem] font-semibold uppercase tracking-[0.14em]" style={{ color: 'var(--text-faint)' }}>
+                  Browse
+                </span>
+                <button
+                  type="button"
+                  className="mc-btn mc-btn-ghost px-1.5 py-0.5"
+                  onClick={() => setNewFolderOpen(true)}
+                  title="New folder"
+                  aria-label="New folder"
+                >
+                  <PlusIcon size={14} />
+                </button>
+              </div>
+              <FolderNav
+                scope={scope}
+                setScope={(next) => {
+                  setScope(next)
+                  setFoldersOpen(false)
+                }}
+                counts={counts}
+                tree={tree}
+                onDeleteFolder={setFolderToDelete}
+                className="max-h-64 overflow-y-auto"
+              />
+            </div>
+          )}
 
           <div className="relative">
             <span className="absolute left-2.5 top-2.5" style={{ color: 'var(--text-faint)' }}>
