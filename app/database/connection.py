@@ -72,8 +72,8 @@ def _engine_options(url: str) -> Dict[str, Any]:
 
 def resolve_database_url() -> str:
     """
-    Explicit environment (or .env) first, then the URL saved from the UI,
-    then the SQLite default - the same precedence as every other setting.
+    Process environment first, then the URL saved from the UI, then the
+    .env file / SQLite default - the same precedence as every other setting.
     """
     if is_env_managed("DATABASE_URL"):
         return normalize_database_url(settings.DATABASE_URL)

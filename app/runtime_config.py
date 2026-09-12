@@ -177,15 +177,15 @@ def env_override(name: str) -> Optional[str]:
 
 def is_env_managed(name: str) -> bool:
     """
-    True when the value came from the process environment or the .env file.
+    True only for a real process environment variable.
 
-    pydantic-settings reads .env into `settings` without touching os.environ,
-    so the fields it populated are checked too - a URL someone wrote in .env
-    is just as deliberate as one exported in a shell.
+    Values from the .env file are deliberately not counted: pydantic reads
+    them into `settings` as convenient defaults, but they must not lock the
+    Settings screen the way a container's explicit environment does. The
+    precedence is therefore: process environment > saved UI config > .env >
+    built-in default.
     """
-    if env_override(name) is not None:
-        return True
-    return name in settings.model_fields_set
+    return env_override(name) is not None
 
 
 def resolve(env_name: str, stored: Any, fallback: Any = None) -> Any:
