@@ -1,4 +1,4 @@
-# MeetStream Companion backend - production image for Railway/Render/Fly/etc.
+# Meet Companion backend - production image.
 FROM python:3.12-slim
 
 WORKDIR /app
