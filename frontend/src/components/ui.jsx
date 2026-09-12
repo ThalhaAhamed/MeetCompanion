@@ -57,9 +57,9 @@ export function ErrorMessage({ title = 'Something went wrong', detail, onRetry }
     <div
       className="flex items-start gap-3 rounded-xl p-4 text-sm"
       style={{
-        backgroundColor: 'var(--color-rose-100)',
-        border: '1px solid var(--color-rose-200)',
-        color: 'var(--color-rose-700)',
+        backgroundColor: 'var(--danger-bg)',
+        border: '1px solid var(--danger-border)',
+        color: 'var(--danger-fg)',
       }}
       role="alert"
     >

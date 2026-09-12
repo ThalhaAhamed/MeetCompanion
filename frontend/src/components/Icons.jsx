@@ -172,3 +172,17 @@ export const AlertIcon = (p) => (
     <path d="M12 7.5v5M12 16v.01" />
   </Icon>
 )
+
+export const ChevronLeftIcon = (p) => (
+  <Icon {...p}>
+    <path d="M15 5l-7 7 7 7" />
+  </Icon>
+)
+
+export const RobotIcon = (p) => (
+  <Icon {...p}>
+    <rect x="4" y="7.5" width="16" height="12" rx="4" />
+    <path d="M12 3v4.5M9 12.5v1.5M15 12.5v1.5" />
+    <path d="M2 13v2M22 13v2" />
+  </Icon>
+)

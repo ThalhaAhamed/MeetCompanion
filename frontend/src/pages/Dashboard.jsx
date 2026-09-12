@@ -1,92 +1,147 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Page, PageHeader } from '../components/AppShell'
-import { Badge, Card, EmptyState, ErrorMessage, Loading, StatTile } from '../components/ui'
-import { AskAiIcon, MeetingsIcon, NotebookIcon, PlusIcon, StarIcon } from '../components/Icons'
-import { listFolders, listMeetings, listNotes } from '../api'
+import {
+  AskAiIcon,
+  CheckIcon,
+  MeetingsIcon,
+  NotebookIcon,
+  PlusIcon,
+  StarIcon,
+} from '../components/Icons'
+import {
+  Badge,
+  Card,
+  EmptyState,
+  ErrorMessage,
+  IconChip,
+  Loading,
+  SectionCard,
+  StatTile,
+} from '../components/ui'
+import { listActionItems, listFolders, listMeetings, listNotes, updateActionItem } from '../api'
 
 function today() {
   return new Date().toISOString().slice(0, 10)
 }
 
-function formatTime(value) {
-  if (!value) return ''
-  return new Date(value).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+function dueLabel(dueDate) {
+  if (!dueDate) return null
+  const due = new Date(`${dueDate}T00:00:00`)
+  const days = Math.round((due - new Date(today())) / 86400000)
+  if (days < 0) return { text: `${Math.abs(days)}d overdue`, tone: 'danger' }
+  if (days === 0) return { text: 'Due today', tone: 'warning' }
+  if (days === 1) return { text: 'Due tomorrow', tone: 'warning' }
+  return { text: `Due in ${days}d`, tone: 'neutral' }
 }
 
-function statusTone(status) {
-  if (['completed', 'done'].includes(status)) return 'success'
-  if (['failed', 'error'].includes(status)) return 'danger'
-  if (['recording', 'joining', 'in_progress'].includes(status)) return 'warning'
-  return 'neutral'
-}
+const PRIORITY_TONE = { critical: 'danger', high: 'warning', medium: 'neutral', low: 'neutral' }
 
 export default function Dashboard() {
-  const [meetings, setMeetings] = useState(null)
-  const [notes, setNotes] = useState(null)
+  const [live, setLive] = useState([])
+  const [meetingCount, setMeetingCount] = useState(0)
+  const [notes, setNotes] = useState([])
+  const [actionItems, setActionItems] = useState(null)
   const [counts, setCounts] = useState(null)
   const [error, setError] = useState(null)
+  const [completing, setCompleting] = useState(null)
 
-  useEffect(() => {
-    let cancelled = false
+  const load = useCallback(async () => {
+    try {
+      const [meetingList, noteList, folderData, actions] = await Promise.all([
+        listMeetings(today()).catch(() => []),
+        listNotes({ limit: 5, sort: 'updated' }).catch(() => ({ notes: [], total: 0 })),
+        listFolders().catch(() => ({ counts: {} })),
+        listActionItems({ status: 'open', limit: 8 }).catch(() => ({ action_items: [] })),
+      ])
 
-    Promise.all([
-      listMeetings(today()).catch(() => []),
-      listNotes({ limit: 5, sort: 'updated' }).catch(() => ({ notes: [], total: 0 })),
-      listFolders().catch(() => ({ counts: {} })),
-    ])
-      .then(([meetingList, noteList, folderData]) => {
-        if (cancelled) return
-        setMeetings(Array.isArray(meetingList) ? meetingList : meetingList?.meetings || [])
-        setNotes(noteList.notes || [])
-        setCounts({ ...(folderData.counts || {}), notes: noteList.total || 0 })
-      })
-      .catch((err) => !cancelled && setError(err.message))
-
-    return () => {
-      cancelled = true
+      const meetings = Array.isArray(meetingList) ? meetingList : meetingList?.meetings || []
+      setMeetingCount(meetings.length)
+      setLive(meetings.filter((m) => !['completed', 'stopped', 'failed'].includes(m.status)))
+      setNotes(noteList.notes || [])
+      setCounts({ ...(folderData.counts || {}), notes: noteList.total || 0 })
+      setActionItems(actions.action_items || [])
+    } catch (err) {
+      setError(err.message)
     }
   }, [])
 
-  const live = useMemo(
-    () => (meetings || []).filter((m) => !['completed', 'stopped', 'failed'].includes(m.status)),
-    [meetings],
+  useEffect(() => {
+    load()
+  }, [load])
+
+  async function complete(item) {
+    setCompleting(item.id)
+    try {
+      await updateActionItem(item.id, { status: 'completed' })
+      setActionItems((current) => current.filter((candidate) => candidate.id !== item.id))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setCompleting(null)
+    }
+  }
+
+  const overdue = useMemo(
+    () => (actionItems || []).filter((item) => item.due_date && new Date(`${item.due_date}T00:00:00`) < new Date(today())),
+    [actionItems],
   )
 
-  if (error) return <Page><ErrorMessage title="Could not load your workspace" detail={error} /></Page>
-  if (meetings === null) return <Page><Loading /></Page>
+  if (error && actionItems === null) {
+    return <Page><ErrorMessage title="Could not load your workspace" detail={error} onRetry={load} /></Page>
+  }
+  if (actionItems === null) return <Page><Loading /></Page>
 
   return (
     <Page>
       <PageHeader
         title="Dashboard"
-        description="What is happening across your meetings and notes today."
+        description="Everything waiting on you, pulled from your meetings and notes."
         actions={
           <>
             <Link to="/notebook" className="mc-btn mc-btn-secondary">
               <PlusIcon size={16} /> New note
             </Link>
-            <Link to="/meetings" className="mc-btn mc-btn-primary">
-              <MeetingsIcon size={16} /> Meetings
+            <Link to="/ask" className="mc-btn mc-btn-primary">
+              <AskAiIcon size={16} /> Ask AI
             </Link>
           </>
         }
       />
 
+      {error && <div className="mb-4"><ErrorMessage title="Something went wrong" detail={error} /></div>}
+
+      {/* Live calls get a dedicated strip: it is the only thing here that is
+          time-critical, and burying it in a list would hide it. */}
+      {live.length > 0 && (
+        <Card className="mb-5 flex flex-wrap items-center gap-4">
+          <IconChip icon={<MeetingsIcon size={19} />} tone="peach" />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold" style={{ color: 'var(--text-strong)' }}>
+              {live.length} bot{live.length === 1 ? '' : 's'} in a call right now
+            </div>
+            <div className="truncate text-xs" style={{ color: 'var(--text-muted)' }}>
+              {live.map((meeting) => meeting.title || 'Untitled meeting').join(' · ')}
+            </div>
+          </div>
+          <Link to="/meetings" className="mc-btn mc-btn-secondary">Open meetings</Link>
+        </Card>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatTile
-          label="Meetings today"
-          value={meetings.length}
+          label="Open action items"
+          value={actionItems.length}
           tone="brand"
-          icon={<MeetingsIcon size={19} />}
-          hint={meetings.length ? 'Captured by Meet Companion' : 'Nothing scheduled yet'}
+          icon={<CheckIcon size={19} />}
+          hint={overdue.length ? `${overdue.length} overdue` : 'Nothing overdue'}
         />
         <StatTile
-          label="Live now"
-          value={live.length}
+          label="Meetings today"
+          value={meetingCount}
           tone="peach"
-          icon={<AskAiIcon size={19} />}
-          hint={live.length ? 'Bot is in a call' : 'No active bots'}
+          icon={<MeetingsIcon size={19} />}
+          hint={live.length ? `${live.length} live now` : 'None active'}
         />
         <StatTile
           label="Notes"
@@ -104,74 +159,80 @@ export default function Dashboard() {
         />
       </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <Card padded={false}>
-          <div
-            className="flex items-center justify-between px-5 py-4"
-            style={{ borderBottom: '1px solid var(--border-subtle)' }}
-          >
-            <h2 className="text-sm font-semibold">Today's meetings</h2>
+      <div className="mt-5 grid gap-5 lg:grid-cols-[1.4fr_1fr] items-start">
+        <SectionCard
+          title="Outstanding action items"
+          action={
             <Link to="/meetings" className="text-xs font-medium" style={{ color: 'var(--brand-soft-text)' }}>
-              View all
+              From your meetings
             </Link>
-          </div>
-
-          {meetings.length === 0 ? (
+          }
+        >
+          {actionItems.length === 0 ? (
             <EmptyState
-              icon={<MeetingsIcon size={22} />}
-              title="No meetings today"
-              description="Launch a bot into a call and it will show up here."
-              action={
-                <Link to="/meetings" className="mc-btn mc-btn-secondary">
-                  Go to meetings
-                </Link>
-              }
+              icon={<CheckIcon size={22} />}
+              title="Nothing outstanding"
+              description="Action items extracted from your meetings show up here until they are done."
             />
           ) : (
             <ul className="divide-y" style={{ borderColor: 'var(--border-subtle)' }}>
-              {meetings.slice(0, 6).map((meeting) => (
-                <li key={meeting.id}>
-                  <Link
-                    to={`/meetings/${meeting.id}`}
-                    className="flex items-center justify-between gap-3 px-5 py-3 transition-colors hover:bg-[var(--surface-raised)]"
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium" style={{ color: 'var(--text-strong)' }}>
-                        {meeting.title || 'Untitled meeting'}
-                      </div>
-                      <div className="mt-0.5 text-xs" style={{ color: 'var(--text-faint)' }}>
-                        {formatTime(meeting.started_at || meeting.created_at)}
-                        {meeting.created_by_name ? ` · ${meeting.created_by_name}` : ''}
+              {actionItems.map((item) => {
+                const due = dueLabel(item.due_date)
+                return (
+                  <li key={item.id} className="flex items-start gap-3 px-5 py-3.5">
+                    <button
+                      type="button"
+                      className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition-colors"
+                      style={{ border: '1.5px solid var(--border-strong)', color: 'var(--text-faint)' }}
+                      onClick={() => complete(item)}
+                      disabled={completing === item.id}
+                      aria-label={`Mark "${item.task}" complete`}
+                      title="Mark complete"
+                    >
+                      {completing === item.id ? '·' : <CheckIcon size={13} />}
+                    </button>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm" style={{ color: 'var(--text-strong)' }}>{item.task}</p>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        {item.owner && <Badge>{item.owner}</Badge>}
+                        {item.priority && item.priority !== 'medium' && (
+                          <Badge tone={PRIORITY_TONE[item.priority] || 'neutral'}>{item.priority}</Badge>
+                        )}
+                        {due && <Badge tone={due.tone}>{due.text}</Badge>}
+                        {item.meeting_id && (
+                          <Link
+                            to={`/meetings/${item.meeting_id}`}
+                            className="text-[0.7rem] hover:underline"
+                            style={{ color: 'var(--text-faint)' }}
+                          >
+                            {item.meeting_title || 'View meeting'}
+                          </Link>
+                        )}
                       </div>
                     </div>
-                    <Badge tone={statusTone(meeting.status)}>{meeting.status}</Badge>
-                  </Link>
-                </li>
-              ))}
+                  </li>
+                )
+              })}
             </ul>
           )}
-        </Card>
+        </SectionCard>
 
-        <Card padded={false}>
-          <div
-            className="flex items-center justify-between px-5 py-4"
-            style={{ borderBottom: '1px solid var(--border-subtle)' }}
-          >
-            <h2 className="text-sm font-semibold">Recent notes</h2>
+        <SectionCard
+          title="Recent notes"
+          action={
             <Link to="/notebook" className="text-xs font-medium" style={{ color: 'var(--brand-soft-text)' }}>
               Open notebook
             </Link>
-          </div>
-
-          {(notes || []).length === 0 ? (
+          }
+        >
+          {notes.length === 0 ? (
             <EmptyState
               icon={<NotebookIcon size={22} />}
               title="Your notebook is empty"
               description="Capture a thought, or let a meeting write one for you."
               action={
-                <Link to="/notebook" className="mc-btn mc-btn-secondary">
-                  Create a note
-                </Link>
+                <Link to="/notebook" className="mc-btn mc-btn-secondary">Create a note</Link>
               }
             />
           ) : (
@@ -186,7 +247,7 @@ export default function Dashboard() {
                       {note.title}
                     </div>
                     {note.excerpt && (
-                      <div className="mt-0.5 line-clamp-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                      <div className="mt-0.5 line-clamp-2 text-xs" style={{ color: 'var(--text-muted)' }}>
                         {note.excerpt}
                       </div>
                     )}
@@ -195,7 +256,7 @@ export default function Dashboard() {
               ))}
             </ul>
           )}
-        </Card>
+        </SectionCard>
       </div>
     </Page>
   )

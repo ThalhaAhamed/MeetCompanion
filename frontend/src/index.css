@@ -112,6 +112,10 @@
   --chip-peach-fg: var(--color-peach-700);
   --chip-rose-bg: var(--color-rose-200);
   --chip-rose-fg: var(--color-rose-700);
+
+  --danger-bg: var(--color-rose-100);
+  --danger-border: var(--color-rose-200);
+  --danger-fg: var(--color-rose-700);
 }
 
 .dark {
@@ -150,6 +154,12 @@
   --chip-peach-fg: var(--color-peach-300);
   --chip-rose-bg: rgba(198, 125, 142, 0.20);
   --chip-rose-fg: var(--color-rose-300);
+
+  /* A light pink panel on a dark surface reads as a rendering fault, so
+     errors stay dark and carry their meaning through the border and text. */
+  --danger-bg: rgba(155, 77, 96, 0.16);
+  --danger-border: rgba(198, 125, 142, 0.35);
+  --danger-fg: #f0b7c2;
 }
 
 @layer base {

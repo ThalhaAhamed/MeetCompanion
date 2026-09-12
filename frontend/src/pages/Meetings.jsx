@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Page, PageHeader } from '../components/AppShell'
 import { MeetingsIcon, PlusIcon, SearchIcon } from '../components/Icons'
 import { Badge, Card, EmptyState, ErrorMessage, Field, Loading, Modal, Spinner } from '../components/ui'
@@ -336,11 +336,13 @@ function MeetingDetail({ meetingId, onChanged }) {
 export default function Meetings() {
   const { meetingId } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   const [day, setDay] = useState(() => new Date().toISOString().slice(0, 10))
   const [meetings, setMeetings] = useState(null)
   const [error, setError] = useState(null)
-  const [filter, setFilter] = useState('')
+  // Seeded from ?q= so the header search reaches this page too.
+  const [filter, setFilter] = useState(() => searchParams.get('q') || '')
   const [launchOpen, setLaunchOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
 
@@ -357,6 +359,11 @@ export default function Meetings() {
     setMeetings(null)
     refresh()
   }, [refresh])
+
+  const urlQuery = searchParams.get('q') || ''
+  useEffect(() => {
+    setFilter((current) => (current === urlQuery ? current : urlQuery))
+  }, [urlQuery])
 
   function handleLaunched(meeting) {
     const meetingDay = (meeting.started_at || meeting.created_at || '').slice(0, 10)

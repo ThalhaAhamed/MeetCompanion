@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ChevronDownIcon,
+  ChevronLeftIcon,
   ChevronRightIcon,
   FolderIcon,
   FolderOpenIcon,
@@ -94,12 +95,16 @@ function FolderRow({ node, depth, selectedId, onSelect, onContextMenu }) {
   )
 }
 
-function NoteEditor({ note, onChange, onDelete, saving }) {
+function NoteEditor({ note, onChange, onDelete, onBack, saving }) {
   const [draft, setDraft] = useState(note)
   const timer = useRef(null)
 
+  // Only reset the draft when a different note is opened. Re-syncing on every
+  // prop change would overwrite what the user is typing each time a save
+  // returns the freshly persisted record.
   useEffect(() => {
     setDraft(note)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.id])
 
   // Debounced autosave: typing should not fire a request per keystroke, but
@@ -125,6 +130,14 @@ function NoteEditor({ note, onChange, onDelete, saving }) {
         className="flex items-center gap-2 px-5 py-3"
         style={{ borderBottom: '1px solid var(--border-subtle)' }}
       >
+        <button
+          type="button"
+          className="mc-btn mc-btn-ghost px-2 md:hidden"
+          onClick={onBack}
+          aria-label="Back to notes"
+        >
+          <ChevronLeftIcon size={18} />
+        </button>
         <input
           className="mc-input border-transparent bg-transparent px-0 text-lg font-semibold"
           value={draft.title}
@@ -206,6 +219,7 @@ function NoteEditor({ note, onChange, onDelete, saving }) {
 export default function Notebook() {
   const { noteId } = useParams()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const [tree, setTree] = useState(null)
   const [counts, setCounts] = useState({})
@@ -218,12 +232,31 @@ export default function Notebook() {
   const [saving, setSaving] = useState(false)
 
   const [scope, setScope] = useState({ kind: 'all' })
-  const [query, setQuery] = useState('')
+  // Seeded from ?q= so the header search actually lands somewhere, and so a
+  // filtered view can be linked to or reloaded.
+  const [query, setQuery] = useState(() => searchParams.get('q') || '')
   const [sort, setSort] = useState('updated')
   const [tagFilter, setTagFilter] = useState('')
   const [newFolderOpen, setNewFolderOpen] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
   const [folderToDelete, setFolderToDelete] = useState(null)
+
+  // Keep the search box and ?q= in step in both directions: the header search
+  // writes the URL, typing here writes it back. Each side only acts when the
+  // values actually differ, so they converge rather than ping-pong.
+  const urlQuery = searchParams.get('q') || ''
+
+  useEffect(() => {
+    setQuery((current) => (current === urlQuery ? current : urlQuery))
+  }, [urlQuery])
+
+  useEffect(() => {
+    if (urlQuery === query) return
+    const next = new URLSearchParams(searchParams)
+    if (query) next.set('q', query)
+    else next.delete('q')
+    setSearchParams(next, { replace: true })
+  }, [query, urlQuery, searchParams, setSearchParams])
 
   const refreshFolders = useCallback(async () => {
     const data = await listFolders()
@@ -416,9 +449,10 @@ export default function Notebook() {
         </div>
       </div>
 
-      {/* Note list */}
+      {/* Note list. On small screens the list and the editor share the width:
+          opening a note replaces the list, and the editor offers a way back. */}
       <div
-        className="flex w-full shrink-0 flex-col md:w-80"
+        className={`${noteId ? 'hidden md:flex' : 'flex'} w-full shrink-0 flex-col md:w-80`}
         style={{ borderRight: '1px solid var(--border-subtle)', backgroundColor: 'var(--surface-panel)' }}
       >
         <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
@@ -541,13 +575,17 @@ export default function Notebook() {
       </div>
 
       {/* Editor */}
-      <div className="hidden min-w-0 flex-1 md:block" style={{ backgroundColor: 'var(--surface-panel)' }}>
+      <div
+        className={`${noteId ? 'block' : 'hidden'} min-w-0 flex-1 md:block`}
+        style={{ backgroundColor: 'var(--surface-panel)' }}
+      >
         {active ? (
           <NoteEditor
             key={active.id}
             note={active}
             onChange={handleUpdateNote}
             onDelete={handleDeleteNote}
+            onBack={() => navigate('/notebook')}
             saving={saving}
           />
         ) : (

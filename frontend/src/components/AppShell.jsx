@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import Logo from './Logo'
 import {
   AskAiIcon,
@@ -8,6 +8,7 @@ import {
   MembersIcon,
   MoonIcon,
   NotebookIcon,
+  RobotIcon,
   SearchIcon,
   SettingsIcon,
   SidebarIcon,
@@ -22,8 +23,22 @@ const PRIMARY_NAV = [
 ]
 
 const SECONDARY_NAV = [
+  { to: '/agent', label: 'Agent', Icon: RobotIcon },
   { to: '/members', label: 'Members', Icon: MembersIcon },
   { to: '/settings', label: 'Settings', Icon: SettingsIcon },
+]
+
+/**
+ * What the header search does on each route.
+ *
+ * A single "Search your notes" box sitting above Meetings, Members and
+ * Settings was misleading - it offered to search something the page had
+ * nothing to do with. The field now matches the page, and is hidden where
+ * there is nothing to search.
+ */
+const SEARCH_SCOPES = [
+  { match: (path) => path.startsWith('/notebook'), placeholder: 'Search your notes…', to: '/notebook' },
+  { match: (path) => path.startsWith('/meetings'), placeholder: 'Search meetings…', to: '/meetings' },
 ]
 
 const THEME_KEY = 'meet-companion:theme'
@@ -98,7 +113,9 @@ function Avatar({ user, size = 34 }) {
 export default function AppShell({ user, onSignOut, children }) {
   const [theme, toggleTheme] = useTheme()
   const navigate = useNavigate()
+  const { pathname } = useLocation()
   const [query, setQuery] = useState('')
+  const searchScope = SEARCH_SCOPES.find((scope) => scope.match(pathname)) || null
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return window.localStorage.getItem(COLLAPSE_KEY) === 'true'
@@ -117,8 +134,8 @@ export default function AppShell({ user, onSignOut, children }) {
 
   function submitSearch(event) {
     event.preventDefault()
-    if (!query.trim()) return
-    navigate(`/notebook?q=${encodeURIComponent(query.trim())}`)
+    if (!query.trim() || !searchScope) return
+    navigate(`${searchScope.to}?q=${encodeURIComponent(query.trim())}`)
   }
 
   return (
@@ -185,15 +202,21 @@ export default function AppShell({ user, onSignOut, children }) {
             <Logo variant="icon" size={30} />
           </div>
 
-          <form className="mc-search hidden max-w-md flex-1 sm:flex" onSubmit={submitSearch}>
-            <SearchIcon size={17} />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search your notes…"
-              aria-label="Search your notes"
-            />
-          </form>
+          {searchScope && (
+            <form className="mc-search hidden max-w-md flex-1 sm:flex" onSubmit={submitSearch}>
+              {/* A real submit button rather than relying on implicit submission,
+                  which needs no button but is easy to break by adding a field. */}
+              <button type="submit" aria-label="Search" className="flex shrink-0 items-center">
+                <SearchIcon size={17} />
+              </button>
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={searchScope.placeholder}
+                aria-label={searchScope.placeholder}
+              />
+            </form>
+          )}
 
           <div className="ml-auto flex items-center gap-2">
             <button
@@ -230,20 +253,22 @@ export default function AppShell({ user, onSignOut, children }) {
         <main className="min-w-0 flex-1 pb-24 md:pb-0">{children}</main>
       </div>
 
-      {/* Small screens swap the sidebar for a bottom bar */}
+      {/* Small screens swap the sidebar for a bottom bar. It scrolls rather
+          than truncating, because dropping the overflow made Agent and Members
+          unreachable on a phone entirely. */}
       <nav
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 flex justify-around py-2"
+        className="mc-scroll md:hidden fixed bottom-0 inset-x-0 z-40 flex gap-1 overflow-x-auto px-2 py-2"
         style={{
           backgroundColor: 'var(--surface-nav)',
           borderTop: '1px solid var(--border-subtle)',
         }}
       >
-        {PRIMARY_NAV.concat(SECONDARY_NAV.slice(-1)).map(({ to, label, Icon, end }) => (
+        {PRIMARY_NAV.concat(SECONDARY_NAV).map(({ to, label, Icon, end }) => (
           <NavLink
             key={to}
             to={to}
             end={end}
-            className="mc-nav-item flex-col gap-0.5 px-3 py-1.5 text-[0.65rem]"
+            className="mc-nav-item shrink-0 flex-col gap-0.5 px-3 py-1.5 text-[0.65rem]"
             aria-label={label}
           >
             <Icon size={19} />

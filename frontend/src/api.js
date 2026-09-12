@@ -3,15 +3,58 @@
 // the real backend origin baked in at build time via VITE_API_BASE_URL.
 const BASE = `${import.meta.env.VITE_API_BASE_URL || ''}/api`
 
+/**
+ * Pull a readable message out of an error response.
+ *
+ * FastAPI returns {"detail": "..."} and sometimes nests another JSON payload
+ * inside it. Showing the raw body meant users saw the HTTP envelope and
+ * escaped JSON rather than the sentence the server actually wrote.
+ */
+function extractMessage(body, status, statusText) {
+  if (!body) return `${status} ${statusText}`
+
+  let detail
+  try {
+    const parsed = JSON.parse(body)
+    detail = typeof parsed === 'string' ? parsed : parsed.detail
+  } catch {
+    return body.length > 300 ? `${body.slice(0, 300)}…` : body
+  }
+
+  if (Array.isArray(detail)) {
+    // Pydantic validation errors arrive as a list of field problems.
+    const first = detail[0]
+    return first?.msg ? `${(first.loc || []).slice(-1)[0] || 'Input'}: ${first.msg}` : JSON.stringify(detail)
+  }
+  if (typeof detail !== 'string') return `${status} ${statusText}`
+
+  // A provider's own error body is often embedded as JSON inside detail.
+  const nested = detail.match(/\{.*\}/s)
+  if (nested) {
+    try {
+      const inner = JSON.parse(nested[0])
+      const innerMessage = inner.error?.message || inner.error || inner.detail || inner.message
+      if (typeof innerMessage === 'string') {
+        return `${detail.slice(0, nested.index).trim()} ${innerMessage}`.trim()
+      }
+    } catch {
+      // Not JSON after all - fall through to the detail as written.
+    }
+  }
+  return detail
+}
+
 async function req(path, options) {
   const res = await fetch(`${BASE}${path}`, { credentials: 'include', ...options })
   if (res.status === 401) {
     window.dispatchEvent(new Event('hub:unauthorized'))
-    throw new Error('401 Unauthorized: sign-in required')
+    throw new Error('Your session has expired. Please sign in again.')
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '')
-    throw new Error(`${res.status} ${res.statusText}: ${body}`)
+    const error = new Error(extractMessage(body, res.status, res.statusText))
+    error.status = res.status
+    throw error
   }
   return res.json()
 }
@@ -303,4 +346,13 @@ export function askNotebook(payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   })
+}
+
+export function listActionItems(params = {}) {
+  const query = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') query.set(key, value)
+  })
+  const suffix = query.toString()
+  return req(`/action-items${suffix ? `?${suffix}` : ''}`)
 }

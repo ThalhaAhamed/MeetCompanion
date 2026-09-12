@@ -9,6 +9,7 @@ import Notebook from './pages/Notebook'
 import AskAi from './pages/AskAi'
 import Meetings from './pages/Meetings'
 import Members from './pages/Members'
+import Agent from './pages/Agent'
 import Settings from './pages/Settings'
 import { checkAuth, getSetupStatus, logout } from './api'
 
@@ -89,6 +90,7 @@ export default function App() {
         <Route path="/notebook" element={<Notebook />} />
         <Route path="/notebook/:noteId" element={<Notebook />} />
         <Route path="/ask" element={<AskAi />} />
+        <Route path="/agent" element={<Agent />} />
         <Route path="/members" element={<Members />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
