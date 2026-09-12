@@ -1,17 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Page, PageHeader } from '../components/AppShell'
-import { SearchIcon } from '../components/Icons'
+import { ChevronDownIcon, ChevronRightIcon, CloseIcon, SearchIcon, SettingsIcon } from '../components/Icons'
 import { Badge, Card, EmptyState, ErrorMessage, Spinner } from '../components/ui'
 import { getKnowledgeGraph } from '../api'
 
 /**
  * Knowledge graph.
  *
- * A dependency-free force simulation: pairwise repulsion, spring edges, and
- * explicit collision separation so hub nodes do not overlap. Kept hand-written
- * rather than pulling in a graph library, which would be a large dependency
- * for one screen.
+ * A dependency-free force simulation - pairwise repulsion, spring edges and
+ * explicit collision separation - with the forces exposed as settings rather
+ * than baked in, so the layout can be tuned for a dense or sparse graph.
  */
 
 const NODE_COLOURS = {
@@ -23,38 +22,62 @@ const NODE_COLOURS = {
   customer: 'var(--color-brand-300)',
 }
 
+const NODE_TYPES = Object.keys(NODE_COLOURS)
 const BASE_RADIUS = { meeting: 15, person: 11, customer: 11, project: 11, memory: 7, action_item: 7 }
 
 /** Children sit close to their meeting; looser links keep clusters apart. */
-const EDGE_DISTANCE = {
-  produced: 55,
-  said: 45,
-  owns: 45,
-  participated_in: 100,
-  for_customer: 110,
-  for_project: 110,
+const EDGE_DISTANCE_SCALE = {
+  produced: 0.61,
+  said: 0.5,
+  owns: 0.5,
+  participated_in: 1.11,
+  for_customer: 1.22,
+  for_project: 1.22,
 }
 
 const WIDTH = 1000
 const HEIGHT = 580
 const SETTLE_SPEED = 0.12
 const MAX_RUNTIME_MS = 6000
+const SETTINGS_KEY = 'meet-companion:graph-settings'
 
-function radiusFor(type, degree) {
-  return (BASE_RADIUS[type] || 7) + Math.min(Math.sqrt(degree) * 3, 14)
+const DEFAULTS = {
+  // Filters
+  types: Object.fromEntries(NODE_TYPES.map((type) => [type, true])),
+  showOrphans: true,
+  // Display
+  nodeSize: 1,
+  linkThickness: 1,
+  labelThreshold: 0.75,
+  showArrows: false,
+  // Forces
+  repel: 3200,
+  linkDistance: 90,
+  linkForce: 0.03,
+  centerForce: 1,
 }
 
-function useForceLayout(nodes, edges) {
+function loadSettings() {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(SETTINGS_KEY) || '{}')
+    return { ...DEFAULTS, ...stored, types: { ...DEFAULTS.types, ...(stored.types || {}) } }
+  } catch {
+    return DEFAULTS
+  }
+}
+
+function radiusFor(type, degree, scale) {
+  return ((BASE_RADIUS[type] || 7) + Math.min(Math.sqrt(degree) * 3, 14)) * scale
+}
+
+function useForceLayout(nodes, edges, forces) {
   const positions = useRef(new Map())
   const draggingId = useRef(null)
-  const settledRef = useRef(false)
+  const settledOnce = useRef(false)
   const [, setTick] = useState(0)
-  const [settled, setSettled] = useState(false)
+  const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    settledRef.current = false
-    setSettled(false)
-
     const pos = positions.current
     for (const node of nodes) {
       if (!pos.has(node.id)) {
@@ -75,7 +98,9 @@ function useForceLayout(nodes, edges) {
       degree.set(edge.source, (degree.get(edge.source) || 0) + 1)
       degree.set(edge.target, (degree.get(edge.target) || 0) + 1)
     }
-    const radius = new Map(nodes.map((n) => [n.id, radiusFor(n.type, degree.get(n.id) || 0)]))
+    const radius = new Map(
+      nodes.map((n) => [n.id, radiusFor(n.type, degree.get(n.id) || 0, forces.nodeSize)]),
+    )
     const ids = nodes.map((node) => node.id)
     const deadline = performance.now() + MAX_RUNTIME_MS
 
@@ -91,8 +116,8 @@ function useForceLayout(nodes, edges) {
           const distSq = Math.max(dx * dx + dy * dy, 1)
           const dist = Math.sqrt(distSq)
 
-          let fx = (dx / dist) * (3200 / distSq)
-          let fy = (dy / dist) * (3200 / distSq)
+          let fx = (dx / dist) * (forces.repel / distSq)
+          let fy = (dy / dist) * (forces.repel / distSq)
 
           // Without explicit separation, dense clusters render as blobs no
           // matter how the rest of the layout settles.
@@ -114,7 +139,8 @@ function useForceLayout(nodes, edges) {
         const dx = b.x - a.x
         const dy = b.y - a.y
         const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1)
-        const force = (dist - (EDGE_DISTANCE[edge.type] || 90)) * 0.03
+        const target = forces.linkDistance * (EDGE_DISTANCE_SCALE[edge.type] ?? 1)
+        const force = (dist - target) * forces.linkForce
         const fx = (dx / dist) * force
         const fy = (dy / dist) * force
         a.vx += fx; a.vy += fy
@@ -123,7 +149,7 @@ function useForceLayout(nodes, edges) {
 
       // Gravity eases off as the graph grows, or it fights the repulsion that
       // separates clusters.
-      const gravity = 0.001 / Math.max(1, Math.sqrt(ids.length / 20))
+      const gravity = (0.001 * forces.centerForce) / Math.max(1, Math.sqrt(ids.length / 20))
       let totalSpeed = 0
       for (const id of ids) {
         if (id === draggingId.current) continue
@@ -139,11 +165,10 @@ function useForceLayout(nodes, edges) {
 
       const calm = ids.length > 0 && totalSpeed / ids.length < SETTLE_SPEED
       if (calm || performance.now() > deadline) {
-        if (!settledRef.current) {
-          settledRef.current = true
-          setSettled(true)
-        }
-        // Keep running a little after settling so a drag stays responsive.
+        // The "arranging" overlay is only for the very first layout. Adjusting
+        // a force afterwards re-settles in place rather than hiding the graph.
+        settledOnce.current = true
+        setReady(true)
         if (performance.now() > deadline) return
       }
       frame = requestAnimationFrame(step)
@@ -151,14 +176,69 @@ function useForceLayout(nodes, edges) {
 
     frame = requestAnimationFrame(step)
     return () => cancelAnimationFrame(frame)
-  }, [nodes, edges])
+  }, [nodes, edges, forces])
 
   return {
     positions: positions.current,
     draggingId,
-    settled,
+    ready: ready || settledOnce.current,
     bump: () => setTick((t) => t + 1),
   }
+}
+
+function Slider({ label, value, min, max, step, onChange, format }) {
+  return (
+    <label className="mb-3 block">
+      <div className="mb-1 flex items-center justify-between text-xs">
+        <span style={{ color: 'var(--text-muted)' }}>{label}</span>
+        <span className="font-mono" style={{ color: 'var(--text-faint)' }}>
+          {format ? format(value) : value}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="w-full"
+        style={{ accentColor: 'var(--brand-solid)' }}
+      />
+    </label>
+  )
+}
+
+function Toggle({ label, checked, onChange }) {
+  return (
+    <label className="mb-2 flex cursor-pointer items-center gap-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        style={{ accentColor: 'var(--brand-solid)' }}
+      />
+      {label}
+    </label>
+  )
+}
+
+function Section({ title, children, defaultOpen = true }) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+      <button
+        type="button"
+        className="flex w-full items-center gap-1.5 px-4 py-2.5 text-[0.65rem] font-semibold uppercase tracking-[0.12em]"
+        style={{ color: 'var(--text-faint)' }}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {open ? <ChevronDownIcon size={13} /> : <ChevronRightIcon size={13} />}
+        {title}
+      </button>
+      {open && <div className="px-4 pb-4">{children}</div>}
+    </div>
+  )
 }
 
 function NodeDetail({ node, nodes, edges }) {
@@ -174,12 +254,7 @@ function NodeDetail({ node, nodes, edges }) {
   }, [node, edges, byId])
 
   if (!node) {
-    return (
-      <EmptyState
-        title="Select a node"
-        description="Click anything in the graph to see what it connects to."
-      />
-    )
+    return <EmptyState title="Select a node" description="Click anything in the graph to see what it connects to." />
   }
 
   return (
@@ -215,10 +290,7 @@ function NodeDetail({ node, nodes, edges }) {
       </div>
 
       {node.meeting_id && (
-        <Link
-          to={`/meetings/${node.meeting_id}`}
-          className="mc-btn mc-btn-secondary mt-4 w-full"
-        >
+        <Link to={`/meetings/${node.meeting_id}`} className="mc-btn mc-btn-secondary mt-4 w-full">
           Open meeting
         </Link>
       )}
@@ -253,37 +325,73 @@ function NodeDetail({ node, nodes, edges }) {
 export default function Graph() {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
-  const [typeFilter, setTypeFilter] = useState('all')
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState(null)
   const [view, setView] = useState({ x: 0, y: 0, k: 1 })
+  const [showSettings, setShowSettings] = useState(false)
+  const [settings, setSettings] = useState(loadSettings)
 
   const svgRef = useRef(null)
   const panRef = useRef(null)
   const dragRef = useRef(null)
 
   useEffect(() => {
-    getKnowledgeGraph()
-      .then(setData)
-      .catch((err) => setError(err.message))
+    getKnowledgeGraph().then(setData).catch((err) => setError(err.message))
   }, [])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
+    } catch {
+      // Preferences only; the graph works fine without them persisting.
+    }
+  }, [settings])
+
+  function update(patch) {
+    setSettings((current) => ({ ...current, ...patch }))
+  }
+
+  function toggleType(type) {
+    setSettings((current) => ({ ...current, types: { ...current.types, [type]: !current.types[type] } }))
+  }
+
+  const filtersActive =
+    Boolean(query.trim()) ||
+    !settings.showOrphans ||
+    NODE_TYPES.some((type) => !settings.types[type])
+
+  function clearFilters() {
+    setQuery('')
+    update({ types: { ...DEFAULTS.types }, showOrphans: DEFAULTS.showOrphans })
+  }
 
   const allNodes = data?.nodes || []
   const allEdges = data?.edges || []
 
-  // Memoised on stable inputs: rebuilding these arrays every render restarts
-  // the simulation on every animation frame.
-  const nodes = useMemo(
-    () => (typeFilter === 'all' ? allNodes : allNodes.filter((n) => n.type === typeFilter)),
-    [allNodes, typeFilter],
-  )
+  // Memoised on stable inputs: rebuilding these arrays every render would
+  // restart the simulation on every animation frame.
+  const nodes = useMemo(() => {
+    const byType = allNodes.filter((node) => settings.types[node.type] !== false)
+    if (settings.showOrphans) return byType
+
+    const connected = new Set()
+    const visible = new Set(byType.map((node) => node.id))
+    for (const edge of allEdges) {
+      if (visible.has(edge.source) && visible.has(edge.target)) {
+        connected.add(edge.source)
+        connected.add(edge.target)
+      }
+    }
+    return byType.filter((node) => connected.has(node.id))
+  }, [allNodes, allEdges, settings.types, settings.showOrphans])
+
   const edges = useMemo(() => {
-    const ids = new Set(nodes.map((n) => n.id))
-    return allEdges.filter((e) => ids.has(e.source) && ids.has(e.target))
+    const ids = new Set(nodes.map((node) => node.id))
+    return allEdges.filter((edge) => ids.has(edge.source) && ids.has(edge.target))
   }, [allEdges, nodes])
 
   const degrees = useMemo(() => {
-    const counts = new Map(nodes.map((n) => [n.id, 0]))
+    const counts = new Map(nodes.map((node) => [node.id, 0]))
     for (const edge of edges) {
       counts.set(edge.source, (counts.get(edge.source) || 0) + 1)
       counts.set(edge.target, (counts.get(edge.target) || 0) + 1)
@@ -291,7 +399,20 @@ export default function Graph() {
     return counts
   }, [nodes, edges])
 
-  const { positions, draggingId, settled, bump } = useForceLayout(nodes, edges)
+  // Only the values the simulation reads, so tweaking a display setting does
+  // not re-run the layout.
+  const forces = useMemo(
+    () => ({
+      repel: settings.repel,
+      linkDistance: settings.linkDistance,
+      linkForce: settings.linkForce,
+      centerForce: settings.centerForce,
+      nodeSize: settings.nodeSize,
+    }),
+    [settings.repel, settings.linkDistance, settings.linkForce, settings.centerForce, settings.nodeSize],
+  )
+
+  const { positions, draggingId, ready, bump } = useForceLayout(nodes, edges, forces)
 
   /** Plain substring matching over labels - distinct from semantic search. */
   const matches = useMemo(() => {
@@ -308,7 +429,7 @@ export default function Graph() {
     return found
   }, [query, nodes])
 
-  const selected = allNodes.find((n) => n.id === selectedId) || null
+  const selected = allNodes.find((node) => node.id === selectedId) || null
   const neighbours = useMemo(() => {
     if (!selectedId) return null
     const ids = new Set([selectedId])
@@ -326,23 +447,20 @@ export default function Graph() {
     return { x: (x - view.x) / view.k, y: (y - view.y) / view.k }
   }
 
-  const handleWheel = useCallback(
-    (event) => {
-      const rect = svgRef.current.getBoundingClientRect()
-      const cx = ((event.clientX - rect.left) / rect.width) * WIDTH
-      const cy = ((event.clientY - rect.top) / rect.height) * HEIGHT
-      const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12
-      setView((current) => {
-        const k = Math.max(0.3, Math.min(3, current.k * factor))
-        return {
-          k,
-          x: cx - ((cx - current.x) / current.k) * k,
-          y: cy - ((cy - current.y) / current.k) * k,
-        }
-      })
-    },
-    [view.k],
-  )
+  const handleWheel = useCallback((event) => {
+    const rect = svgRef.current.getBoundingClientRect()
+    const cx = ((event.clientX - rect.left) / rect.width) * WIDTH
+    const cy = ((event.clientY - rect.top) / rect.height) * HEIGHT
+    const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12
+    setView((current) => {
+      const k = Math.max(0.3, Math.min(3, current.k * factor))
+      return {
+        k,
+        x: cx - ((cx - current.x) / current.k) * k,
+        y: cy - ((cy - current.y) / current.k) * k,
+      }
+    })
+  }, [])
 
   // React attaches onWheel passively, so preventDefault() inside it is ignored
   // and the page scrolls while the graph zooms. A native listener is the only
@@ -350,14 +468,13 @@ export default function Graph() {
   useEffect(() => {
     const element = svgRef.current
     if (!element) return undefined
-
     function onWheel(event) {
       event.preventDefault()
       handleWheel(event)
     }
     element.addEventListener('wheel', onWheel, { passive: false })
     return () => element.removeEventListener('wheel', onWheel)
-  }, [handleWheel, settled, nodes.length])
+  }, [handleWheel, ready, nodes.length])
 
   function onNodeMouseDown(event, node) {
     event.stopPropagation()
@@ -416,6 +533,8 @@ export default function Graph() {
     )
   }
 
+  const hiddenCount = allNodes.length - nodes.length
+
   return (
     <Page>
       <PageHeader
@@ -431,37 +550,52 @@ export default function Graph() {
                 placeholder="Find a node…"
                 aria-label="Find a node in the graph"
               />
+              {query && (
+                <button type="button" onClick={() => setQuery('')} aria-label="Clear search">
+                  <CloseIcon size={14} />
+                </button>
+              )}
             </div>
-            <select
-              className="mc-input w-auto"
-              value={typeFilter}
-              onChange={(event) => setTypeFilter(event.target.value)}
-              aria-label="Filter by node type"
+            {filtersActive && (
+              <button type="button" className="mc-btn mc-btn-secondary" onClick={clearFilters}>
+                Clear filters
+              </button>
+            )}
+            <button
+              type="button"
+              className={`mc-btn ${showSettings ? 'mc-btn-primary' : 'mc-btn-secondary'}`}
+              onClick={() => setShowSettings((value) => !value)}
+              aria-pressed={showSettings}
             >
-              <option value="all">All types</option>
-              <option value="meeting">Meetings</option>
-              <option value="person">People</option>
-              <option value="memory">Memories</option>
-              <option value="action_item">Action items</option>
-              <option value="project">Projects</option>
-              <option value="customer">Customers</option>
-            </select>
+              <SettingsIcon size={16} /> Settings
+            </button>
           </>
         }
       />
 
       <div className="grid gap-5 lg:grid-cols-[1fr_20rem] items-start">
-        <Card padded={false} className="overflow-hidden">
+        <Card padded={false} className="relative overflow-hidden">
           {data === null ? (
             <div className="flex h-[520px] items-center justify-center gap-3" style={{ color: 'var(--text-muted)' }}>
               <Spinner /> <span className="text-sm">Loading graph…</span>
             </div>
           ) : nodes.length === 0 ? (
             <EmptyState
-              title="Nothing to show"
-              description="Meetings need participants, memories or action items before they appear here."
+              title={filtersActive ? 'Everything is filtered out' : 'Nothing to show'}
+              description={
+                filtersActive
+                  ? 'No nodes match the current filters.'
+                  : 'Meetings need participants, memories or action items before they appear here.'
+              }
+              action={
+                filtersActive ? (
+                  <button type="button" className="mc-btn mc-btn-secondary" onClick={clearFilters}>
+                    Clear filters
+                  </button>
+                ) : null
+              }
             />
-          ) : !settled ? (
+          ) : !ready ? (
             <div className="flex h-[520px] flex-col items-center justify-center gap-3" style={{ color: 'var(--text-muted)' }}>
               <Spinner size={26} />
               <span className="text-sm">Arranging graph…</span>
@@ -479,6 +613,20 @@ export default function Graph() {
               onMouseUp={() => onMouseUp()}
               onMouseLeave={() => onMouseUp()}
             >
+              <defs>
+                <marker
+                  id="graph-arrow"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="5"
+                  markerHeight="5"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M0 0 L10 5 L0 10 z" fill="var(--border-strong)" />
+                </marker>
+              </defs>
+
               <g transform={`translate(${view.x},${view.y}) scale(${view.k})`}>
                 {edges.map((edge, index) => {
                   const a = positions.get(edge.source)
@@ -492,8 +640,9 @@ export default function Graph() {
                       key={index}
                       x1={a.x} y1={a.y} x2={b.x} y2={b.y}
                       stroke="var(--border-strong)"
-                      strokeWidth={1}
+                      strokeWidth={settings.linkThickness}
                       opacity={dimmed ? 0.08 : 0.5}
+                      markerEnd={settings.showArrows ? 'url(#graph-arrow)' : undefined}
                     />
                   )
                 })}
@@ -504,8 +653,8 @@ export default function Graph() {
                   const dimmed =
                     (neighbours && !neighbours.has(node.id)) || (matches && !matches.has(node.id))
                   const isMatch = matches?.has(node.id)
-                  const r = radiusFor(node.type, degrees.get(node.id) || 0)
-                  const showLabel = view.k > 0.75 || selectedId === node.id || isMatch
+                  const r = radiusFor(node.type, degrees.get(node.id) || 0, settings.nodeSize)
+                  const showLabel = view.k > settings.labelThreshold || selectedId === node.id || isMatch
 
                   return (
                     <g
@@ -541,18 +690,129 @@ export default function Graph() {
             </svg>
           )}
 
+          {showSettings && (
+            <div
+              className="mc-scroll absolute right-3 top-3 z-10 max-h-[calc(100%-1.5rem)] w-64 overflow-y-auto rounded-xl"
+              style={{
+                backgroundColor: 'var(--surface-panel)',
+                border: '1px solid var(--border-default)',
+                boxShadow: 'var(--elevation-raised)',
+              }}
+            >
+              <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                <span className="text-sm font-semibold">Graph settings</span>
+                <button type="button" onClick={() => setShowSettings(false)} aria-label="Close settings">
+                  <CloseIcon size={16} />
+                </button>
+              </div>
+
+              <Section title="Filters">
+                <div className="mb-3 flex flex-wrap gap-1.5">
+                  {NODE_TYPES.map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => toggleType(type)}
+                      className="mc-badge"
+                      style={{
+                        opacity: settings.types[type] ? 1 : 0.4,
+                        borderColor: settings.types[type] ? NODE_COLOURS[type] : 'var(--border-subtle)',
+                      }}
+                      aria-pressed={settings.types[type]}
+                    >
+                      <span
+                        className="inline-block h-2 w-2 rounded-full"
+                        style={{ backgroundColor: NODE_COLOURS[type] }}
+                      />
+                      {type.replace('_', ' ')}
+                    </button>
+                  ))}
+                </div>
+                <Toggle
+                  label="Show unconnected nodes"
+                  checked={settings.showOrphans}
+                  onChange={(value) => update({ showOrphans: value })}
+                />
+                <button type="button" className="mc-btn mc-btn-secondary mt-1 w-full" onClick={clearFilters}>
+                  Clear filters
+                </button>
+              </Section>
+
+              <Section title="Display">
+                <Slider
+                  label="Node size" value={settings.nodeSize} min={0.4} max={2.5} step={0.1}
+                  onChange={(value) => update({ nodeSize: value })} format={(v) => `${v.toFixed(1)}×`}
+                />
+                <Slider
+                  label="Link thickness" value={settings.linkThickness} min={0.5} max={4} step={0.5}
+                  onChange={(value) => update({ linkThickness: value })} format={(v) => `${v}px`}
+                />
+                <Slider
+                  label="Label visibility" value={settings.labelThreshold} min={0.3} max={3} step={0.05}
+                  onChange={(value) => update({ labelThreshold: value })}
+                  format={(v) => (v <= 0.3 ? 'always' : `zoom > ${v.toFixed(2)}`)}
+                />
+                <Toggle
+                  label="Show link arrows"
+                  checked={settings.showArrows}
+                  onChange={(value) => update({ showArrows: value })}
+                />
+              </Section>
+
+              <Section title="Forces" defaultOpen={false}>
+                <Slider
+                  label="Repel force" value={settings.repel} min={500} max={9000} step={100}
+                  onChange={(value) => update({ repel: value })}
+                />
+                <Slider
+                  label="Link distance" value={settings.linkDistance} min={30} max={220} step={5}
+                  onChange={(value) => update({ linkDistance: value })}
+                />
+                <Slider
+                  label="Link force" value={settings.linkForce} min={0.005} max={0.12} step={0.005}
+                  onChange={(value) => update({ linkForce: value })} format={(v) => v.toFixed(3)}
+                />
+                <Slider
+                  label="Centre force" value={settings.centerForce} min={0} max={4} step={0.1}
+                  onChange={(value) => update({ centerForce: value })} format={(v) => `${v.toFixed(1)}×`}
+                />
+              </Section>
+
+              <div className="p-4">
+                <button
+                  type="button"
+                  className="mc-btn mc-btn-secondary w-full"
+                  onClick={() => {
+                    setQuery('')
+                    setSettings({ ...DEFAULTS, types: { ...DEFAULTS.types } })
+                  }}
+                >
+                  Restore defaults
+                </button>
+              </div>
+            </div>
+          )}
+
           <div
             className="flex flex-wrap items-center gap-3 px-5 py-3 text-xs"
             style={{ borderTop: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}
           >
-            {Object.entries(NODE_COLOURS).map(([type, colour]) => (
-              <span key={type} className="flex items-center gap-1.5">
-                <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colour }} />
+            {NODE_TYPES.map((type) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => toggleType(type)}
+                className="flex items-center gap-1.5"
+                style={{ opacity: settings.types[type] ? 1 : 0.35 }}
+                title={settings.types[type] ? `Hide ${type}` : `Show ${type}`}
+              >
+                <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: NODE_COLOURS[type] }} />
                 {type.replace('_', ' ')}
-              </span>
+              </button>
             ))}
             <span className="ml-auto" style={{ color: 'var(--text-faint)' }}>
-              {nodes.length} nodes · {edges.length} links · scroll to zoom, drag to move
+              {nodes.length} nodes · {edges.length} links
+              {hiddenCount > 0 ? ` · ${hiddenCount} hidden` : ''}
             </span>
           </div>
         </Card>
