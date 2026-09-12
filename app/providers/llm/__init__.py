@@ -62,6 +62,10 @@ class ProviderField:
     placeholder: str = ""
     help: str = ""
     default: Any = None
+    # Hidden behind an "Advanced" disclosure in the forms: most people only
+    # need an API key and a model, and a stray host from another provider is
+    # the most common way to end up with a confusing 404.
+    advanced: bool = False
 
 
 @dataclass(slots=True)
@@ -105,6 +109,7 @@ def _base_url_field(placeholder: str, required: bool = False) -> ProviderField:
         help="Override only if you route through a proxy or gateway."
         if not required
         else "",
+        advanced=not required,
     )
 
 
@@ -114,6 +119,7 @@ _TEMPERATURE_FIELD = ProviderField(
     type="number",
     default=0.2,
     help="Lower values produce more consistent extraction results.",
+    advanced=True,
 )
 
 
@@ -128,7 +134,7 @@ DESCRIPTORS: Dict[str, ProviderDescriptor] = {
             _base_url_field("https://api.openai.com/v1"),
             _TEMPERATURE_FIELD,
         ],
-        suggested_models=["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"],
+        suggested_models=["gpt-4.1-mini", "gpt-4.1", "gpt-4.1-nano", "gpt-4o-mini", "gpt-4o"],
     ),
     "anthropic": ProviderDescriptor(
         name="anthropic",
@@ -140,7 +146,7 @@ DESCRIPTORS: Dict[str, ProviderDescriptor] = {
             _base_url_field("https://api.anthropic.com"),
             _TEMPERATURE_FIELD,
         ],
-        suggested_models=["claude-sonnet-4-5", "claude-haiku-4-5"],
+        suggested_models=["claude-sonnet-4-5", "claude-haiku-4-5", "claude-opus-4-1"],
     ),
     "gemini": ProviderDescriptor(
         name="gemini",
@@ -152,7 +158,7 @@ DESCRIPTORS: Dict[str, ProviderDescriptor] = {
             _base_url_field("https://generativelanguage.googleapis.com"),
             _TEMPERATURE_FIELD,
         ],
-        suggested_models=["gemini-2.5-flash", "gemini-2.5-pro"],
+        suggested_models=["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"],
     ),
     "ollama": ProviderDescriptor(
         name="ollama",
@@ -171,7 +177,7 @@ DESCRIPTORS: Dict[str, ProviderDescriptor] = {
             _model_field("llama3.1", "llama3.1"),
             _TEMPERATURE_FIELD,
         ],
-        suggested_models=["llama3.1", "qwen2.5", "mistral"],
+        suggested_models=["llama3.1", "llama3.2", "qwen2.5", "mistral", "gemma3"],
     ),
     "groq": ProviderDescriptor(
         name="groq",
@@ -183,7 +189,7 @@ DESCRIPTORS: Dict[str, ProviderDescriptor] = {
             _base_url_field("https://api.groq.com/openai/v1"),
             _TEMPERATURE_FIELD,
         ],
-        suggested_models=["llama-3.3-70b-versatile", "openai/gpt-oss-120b"],
+        suggested_models=["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3-32b"],
     ),
     "openai_compatible": ProviderDescriptor(
         name="openai_compatible",

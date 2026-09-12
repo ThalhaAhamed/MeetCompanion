@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import Logo from '../components/Logo'
 import { CheckIcon, ChevronRightIcon } from '../components/Icons'
-import { Card, ErrorMessage, Field, Loading, Spinner } from '../components/ui'
+import { Card, ErrorMessage, Loading, Spinner } from '../components/ui'
 import { completeSetup, getProviderCatalog, testLlmProvider } from '../api'
 import DatabasePicker, { isDatabaseFormComplete } from '../components/DatabasePicker'
+import ProviderFields from '../components/ProviderFields'
 
 const STEPS = ['Welcome', 'AI provider', 'Storage', 'Review']
 
@@ -65,33 +66,6 @@ function ProviderOption({ descriptor, selected, onSelect }) {
         {descriptor.summary}
       </p>
     </button>
-  )
-}
-
-/** Renders exactly the fields a provider declares, and nothing else. */
-function DynamicFields({ fields, values, onChange }) {
-  return (
-    <>
-      {fields.map((field) => (
-        <Field
-          key={field.key}
-          label={field.label}
-          hint={field.help}
-          htmlFor={`field-${field.key}`}
-        >
-          <input
-            id={`field-${field.key}`}
-            className="mc-input"
-            type={field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text'}
-            step={field.type === 'number' ? '0.1' : undefined}
-            placeholder={field.placeholder || ''}
-            value={values[field.key] ?? ''}
-            onChange={(event) => onChange(field.key, event.target.value)}
-            autoComplete={field.type === 'password' ? 'off' : undefined}
-          />
-        </Field>
-      ))}
-    </>
   )
 }
 
@@ -255,22 +229,12 @@ export default function Onboarding({ onComplete }) {
 
             {descriptor && (
               <div className="mt-6 border-t pt-5" style={{ borderColor: 'var(--border-subtle)' }}>
-                <DynamicFields fields={descriptor.fields} values={values} onChange={updateValue} />
-
-                {descriptor.suggested_models?.length > 0 && (
-                  <div className="-mt-2 mb-4 flex flex-wrap gap-1.5">
-                    {descriptor.suggested_models.map((model) => (
-                      <button
-                        key={model}
-                        type="button"
-                        className="mc-badge"
-                        onClick={() => updateValue('model', model)}
-                      >
-                        {model}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <ProviderFields
+                  descriptor={descriptor}
+                  values={values}
+                  onChange={updateValue}
+                  discoveredModels={llmTest?.models || []}
+                />
 
                 <div className="flex items-center gap-3">
                   <button

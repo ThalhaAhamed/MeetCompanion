@@ -12,6 +12,7 @@ import {
   testLlmProvider,
 } from '../api'
 import DatabasePicker, { isDatabaseFormComplete } from '../components/DatabasePicker'
+import ProviderFields from '../components/ProviderFields'
 
 const SECTIONS = [
   { id: 'ai', label: 'AI provider' },
@@ -186,8 +187,17 @@ export default function Settings() {
                   className="mc-input"
                   value={provider}
                   onChange={(event) => {
+                    const next = catalog.llm.find((item) => item.name === event.target.value)
                     setProvider(event.target.value)
                     setTestResult(null)
+                    setSaved(false)
+                    // Start from the new provider's defaults - keeping the old
+                    // one's host or key would send Groq requests to Ollama.
+                    const defaults = {}
+                    next?.fields.forEach((field) => {
+                      if (field.default !== null && field.default !== undefined) defaults[field.key] = field.default
+                    })
+                    setValues({ model: '', base_url: '', api_key: '', ...defaults })
                   }}
                   disabled={envManaged['llm.provider']}
                 >
@@ -197,33 +207,22 @@ export default function Settings() {
                 </select>
               </Field>
 
-              {descriptor?.fields
-                .filter((field) => field.key !== 'temperature')
-                .map((field) => (
-                  <Field
-                    key={field.key}
-                    label={field.label}
-                    hint={
-                      field.key === 'api_key' && status.llm?.api_key
-                        ? `Currently set (${status.llm.api_key}). Leave blank to keep it.`
-                        : field.help
-                    }
-                    htmlFor={`set-${field.key}`}
-                  >
-                    <input
-                      id={`set-${field.key}`}
-                      className="mc-input"
-                      type={field.type === 'password' ? 'password' : 'text'}
-                      placeholder={field.placeholder}
-                      value={values[field.key] ?? ''}
-                      onChange={(event) =>
-                        setValues((current) => ({ ...current, [field.key]: event.target.value }))
-                      }
-                      disabled={envManaged[`llm.${field.key}`]}
-                      autoComplete="off"
-                    />
-                  </Field>
-                ))}
+              {descriptor && (
+                <ProviderFields
+                  descriptor={descriptor}
+                  values={values}
+                  onChange={(key, value) => {
+                    setValues((current) => ({ ...current, [key]: value }))
+                    setSaved(false)
+                  }}
+                  discoveredModels={testResult?.models || []}
+                  keyHint={
+                    status.llm?.api_key && status.llm?.provider === provider
+                      ? `Currently set (${status.llm.api_key}). Leave blank to keep it.`
+                      : undefined
+                  }
+                />
+              )}
 
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" className="mc-btn mc-btn-primary" onClick={save} disabled={busy}>
