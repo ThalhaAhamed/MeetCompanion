@@ -186,3 +186,12 @@ export const RobotIcon = (p) => (
     <path d="M2 13v2M22 13v2" />
   </Icon>
 )
+
+export const GraphIcon = (p) => (
+  <Icon {...p}>
+    <circle cx="6" cy="7" r="2.5" />
+    <circle cx="18" cy="6" r="2.5" />
+    <circle cx="12" cy="17.5" r="2.5" />
+    <path d="M8.2 8.4l2.6 6.9M16.2 8.2l-2.7 7.1M8.4 6.6l7.2-.4" />
+  </Icon>
+)

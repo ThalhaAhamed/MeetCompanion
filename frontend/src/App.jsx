@@ -7,6 +7,7 @@ import SignIn from './pages/SignIn'
 import Dashboard from './pages/Dashboard'
 import Notebook from './pages/Notebook'
 import AskAi from './pages/AskAi'
+import Graph from './pages/Graph'
 import Meetings from './pages/Meetings'
 import Members from './pages/Members'
 import Agent from './pages/Agent'
@@ -90,6 +91,7 @@ export default function App() {
         <Route path="/notebook" element={<Notebook />} />
         <Route path="/notebook/:noteId" element={<Notebook />} />
         <Route path="/ask" element={<AskAi />} />
+        <Route path="/graph" element={<Graph />} />
         <Route path="/agent" element={<Agent />} />
         <Route path="/members" element={<Members />} />
         <Route path="/settings" element={<Settings />} />

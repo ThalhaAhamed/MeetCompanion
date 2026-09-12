@@ -7,6 +7,7 @@ import {
   MeetingsIcon,
   MembersIcon,
   MoonIcon,
+  GraphIcon,
   NotebookIcon,
   RobotIcon,
   SearchIcon,
@@ -19,6 +20,7 @@ const PRIMARY_NAV = [
   { to: '/', label: 'Dashboard', Icon: DashboardIcon, end: true },
   { to: '/meetings', label: 'Meetings', Icon: MeetingsIcon },
   { to: '/notebook', label: 'Notebook', Icon: NotebookIcon },
+  { to: '/graph', label: 'Knowledge graph', Icon: GraphIcon },
   { to: '/ask', label: 'Ask AI', Icon: AskAiIcon },
 ]
 
