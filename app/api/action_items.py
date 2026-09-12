@@ -43,6 +43,16 @@ async def list_action_items(
             if meeting:
                 meeting_titles[meeting_id_value] = meeting.title
 
+    note_titles = {}
+    note_ids = {item.note_id for item in items if item.note_id}
+    if note_ids:
+        from sqlalchemy import select
+
+        from app.models.database import Note
+
+        rows = await db.execute(select(Note.id, Note.title).where(Note.id.in_(note_ids)))
+        note_titles = {row.id: row.title for row in rows}
+
     return {
         "action_items": [
             {
@@ -54,6 +64,8 @@ async def list_action_items(
                 "due_date": item.due_date.isoformat() if item.due_date else None,
                 "meeting_id": str(item.meeting_id) if item.meeting_id else None,
                 "meeting_title": meeting_titles.get(item.meeting_id),
+                "note_id": str(item.note_id) if item.note_id else None,
+                "note_title": note_titles.get(item.note_id),
             }
             for item in items
         ],

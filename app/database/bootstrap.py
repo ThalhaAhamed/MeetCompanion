@@ -47,6 +47,45 @@ async def ensure_schema(engine: AsyncEngine) -> None:
         if dialect == POSTGRESQL:
             await _create_postgres_vector_indexes(conn)
             await _patch_legacy_postgres_schema(conn)
+        await _patch_action_items(conn, dialect)
+
+
+async def _patch_action_items(conn, dialect: str) -> None:
+    """
+    Action items used to require a meeting; hand-written tasks in notes
+    do not have one. Adds note_id and relaxes meeting_id on databases created
+    before that change. create_all above already did this for new ones.
+    """
+    if dialect == POSTGRESQL:
+        await conn.execute(text(
+            "ALTER TABLE action_items ADD COLUMN IF NOT EXISTS note_id UUID REFERENCES notes(id) ON DELETE SET NULL"
+        ))
+        await conn.execute(text("ALTER TABLE action_items ALTER COLUMN meeting_id DROP NOT NULL"))
+        return
+
+    if dialect != "sqlite":
+        return
+
+    columns = {row[1]: row for row in (await conn.execute(text("PRAGMA table_info(action_items)"))).all()}
+    if "note_id" not in columns:
+        await conn.execute(text("ALTER TABLE action_items ADD COLUMN note_id CHAR(32) REFERENCES notes(id) ON DELETE SET NULL"))
+        columns = {row[1]: row for row in (await conn.execute(text("PRAGMA table_info(action_items)"))).all()}
+    # PRAGMA table_info: (cid, name, type, notnull, dflt_value, pk)
+    if columns["meeting_id"][3]:
+        # SQLite cannot drop NOT NULL in place: rebuild the table from the
+        # current model and copy the rows across.
+        table = Base.metadata.tables["action_items"]
+        names = ", ".join(column.name for column in table.columns)
+        await conn.execute(text("PRAGMA foreign_keys=OFF"))
+        await conn.execute(text("ALTER TABLE action_items RENAME TO action_items__old"))
+        # Indexes follow the renamed table and would collide with the ones
+        # table.create() declares.
+        for index in table.indexes:
+            await conn.execute(text(f"DROP INDEX IF EXISTS {index.name}"))
+        await conn.run_sync(lambda sync_conn: table.create(sync_conn))
+        await conn.execute(text(f"INSERT INTO action_items ({names}) SELECT {names} FROM action_items__old"))
+        await conn.execute(text("DROP TABLE action_items__old"))
+        await conn.execute(text("PRAGMA foreign_keys=ON"))
 
 
 async def _create_postgres_vector_indexes(conn):

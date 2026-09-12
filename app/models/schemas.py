@@ -126,7 +126,8 @@ class ActionItemUpdate(BaseModel):
 class ActionItemResponse(SchemaBase, ActionItemBase):
     id: uuid.UUID
     organization_id: uuid.UUID
-    meeting_id: uuid.UUID
+    meeting_id: Optional[uuid.UUID] = None
+    note_id: Optional[uuid.UUID] = None
     memory_id: Optional[uuid.UUID] = None
     completed_at: Optional[datetime] = None
     created_at: datetime

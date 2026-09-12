@@ -104,14 +104,21 @@ function NoteEditor({ note, onChange, onDelete, onBack, saving }) {
   const timer = useRef(null)
   // Preview by default for notes that already have content (the generated
   // meeting notes in particular); an empty note opens ready to type.
-  const [mode, setMode] = useState(() => {
+  const preferredMode = () => {
     try {
       return window.localStorage.getItem(VIEW_KEY) || 'preview'
     } catch {
       return 'preview'
     }
-  })
-  const effectiveMode = draft.content ? mode : 'edit'
+  }
+  const [mode, setMode] = useState(() => (note.content ? preferredMode() : 'edit'))
+  // Decided when a note is opened, not on every keystroke - otherwise the
+  // first character typed into an empty note would flip it to preview.
+  useEffect(() => {
+    setMode(note.content ? preferredMode() : 'edit')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note.id])
+  const effectiveMode = mode
 
   function switchMode(next) {
     setMode(next)
@@ -130,17 +137,29 @@ function NoteEditor({ note, onChange, onDelete, onBack, saving }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.id])
 
-  // The save timestamp is the one field that should follow the server.
+  // After a save, follow the server for the timestamp - and for the content
+  // when the server rewrote it (hand-written tasks get an action-item marker
+  // appended) and the user has not typed anything since that save went out.
+  const lastSent = useRef(null)
   useEffect(() => {
-    setDraft((current) => (current.updated_at === note.updated_at ? current : { ...current, updated_at: note.updated_at }))
-  }, [note.updated_at])
+    setDraft((current) => {
+      const next = { ...current, updated_at: note.updated_at }
+      if (note.content !== current.content && current.content === lastSent.current) {
+        next.content = note.content
+      }
+      return next.updated_at === current.updated_at && next.content === current.content ? current : next
+    })
+  }, [note.updated_at, note.content])
 
   // Debounced autosave: typing should not fire a request per keystroke, but
   // the user should never have to remember to press save.
   const queueSave = useCallback(
     (patch) => {
       if (timer.current) clearTimeout(timer.current)
-      timer.current = setTimeout(() => onChange(patch), SAVE_DEBOUNCE_MS)
+      timer.current = setTimeout(() => {
+        if ('content' in patch) lastSent.current = patch.content
+        onChange(patch)
+      }, SAVE_DEBOUNCE_MS)
     },
     [onChange],
   )

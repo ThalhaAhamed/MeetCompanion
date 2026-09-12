@@ -435,3 +435,31 @@ async def test_completing_an_action_item_ticks_the_note(authed_client):
     assert "- [x] **Sara** — Write the release notes" in note["content"]
     # Not a person's edit: the note still regenerates on a later sync.
     assert note["updated_at"] == note["created_at"]
+
+
+@pytest.mark.asyncio
+async def test_handwritten_tasks_become_action_items(authed_client):
+    created = (await authed_client.post("/api/notebook/notes", json={"title": "Plan", "content": ""})).json()
+    content = "Todo:\n- [ ] Call the vendor\n- [x] **Sara** — Book the room\n```\n- [ ] not a task\n```\n"
+    saved = (await authed_client.patch(f"/api/notebook/notes/{created['id']}", json={"content": content})).json()
+
+    items = (await authed_client.get("/api/action-items", params={"limit": 50})).json()["action_items"]
+    by_task = {i["task"]: i for i in items}
+    assert by_task["Call the vendor"]["status"] == "open"
+    assert by_task["Call the vendor"]["note_id"] == created["id"]
+    assert by_task["Call the vendor"]["note_title"] == "Plan"
+    assert by_task["Call the vendor"]["meeting_id"] is None
+    assert by_task["Book the room"]["owner"] == "Sara"
+    assert by_task["Book the room"]["status"] == "completed"
+    assert "not a task" not in by_task
+
+    # The response carries the markers, and re-saving that text adopts nothing new.
+    assert saved["content"].count("<!-- action:") == 2
+    await authed_client.patch(f"/api/notebook/notes/{created['id']}", json={"content": saved["content"]})
+    items = (await authed_client.get("/api/action-items", params={"limit": 50})).json()["action_items"]
+    assert len(items) == 2
+
+    # And the link works: tick from the dashboard side, see it in the note.
+    await authed_client.patch(f"/api/action-items/{by_task['Call the vendor']['id']}", json={"status": "completed"})
+    body = (await authed_client.get(f"/api/notebook/notes/{created['id']}")).json()["content"]
+    assert "- [x] Call the vendor" in body

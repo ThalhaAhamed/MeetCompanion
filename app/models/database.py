@@ -202,7 +202,10 @@ class ActionItem(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
-    meeting_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=False)
+    # Either extracted from a meeting or written by hand in a note - or both,
+    # when the note is a meeting's note. Neither is required.
+    meeting_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID(), ForeignKey("meetings.id", ondelete="CASCADE"), nullable=True)
+    note_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID(), ForeignKey("notes.id", ondelete="SET NULL"), nullable=True)
     memory_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID(), ForeignKey("memories.id", ondelete="SET NULL"), nullable=True)
     owner: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     task: Mapped[str] = mapped_column(Text, nullable=False)
@@ -215,7 +218,8 @@ class ActionItem(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     organization: Mapped["Organization"] = relationship("Organization", back_populates="action_items")
-    meeting: Mapped["Meeting"] = relationship("Meeting", back_populates="action_items")
+    meeting: Mapped[Optional["Meeting"]] = relationship("Meeting", back_populates="action_items")
+    note: Mapped[Optional["Note"]] = relationship("Note", foreign_keys=[note_id])
     memory: Mapped[Optional["Memory"]] = relationship("Memory", back_populates="action_items")
 
 

@@ -6,6 +6,7 @@ step, so only relevant notes reach the model rather than the entire notebook.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -102,7 +103,8 @@ def _serialize_note(note: Note, *, include_content: bool = True) -> Dict[str, An
     if include_content:
         data["content"] = note.content
     else:
-        data["excerpt"] = (note.content or "")[:240]
+        # Markers and other comments are plumbing, not something to preview.
+        data["excerpt"] = re.sub(r"<!--.*?-->", "", note.content or "", flags=re.S)[:240]
     return data
 
 
@@ -339,11 +341,17 @@ async def update_note(
     previous_content = note.content
     note = await repo.update(note, **fields)
 
-    if body.content is not None and note.meeting_id:
-        from app.services.meeting_notes import apply_note_tasks_to_action_items
+    if body.content is not None:
+        from app.services.meeting_notes import adopt_handwritten_tasks, apply_note_tasks_to_action_items
 
-        if await apply_note_tasks_to_action_items(db, note, previous_content):
+        # Ticks first (they refer to existing items), then adopt any new
+        # hand-written tasks. The response carries the rewritten text so the
+        # editor can pick up the markers without a reload.
+        touched = await apply_note_tasks_to_action_items(db, note, previous_content)
+        adopted = await adopt_handwritten_tasks(db, note)
+        if touched or adopted:
             await db.commit()
+            await db.refresh(note)
 
     if body.move_to_root:
         note.folder_id = None

@@ -333,3 +333,69 @@ async def apply_action_item_to_notes(session: AsyncSession, item: ActionItem) ->
         touched += 1
     await session.flush()
     return touched
+
+
+# ---------------------------------------------------------------------------
+# Hand-written tasks become action items
+# ---------------------------------------------------------------------------
+
+PLAIN_TASK_LINE = re.compile(r"^(\s*(?:[-*+]|\d+[.)])\s+)\[( |x|X)\]\s+(.+?)\s*$")
+OWNER_PREFIX = re.compile(r"^\*\*(.+?)\*\*\s*[—:-]\s*(.+)$")
+
+
+def _task_text(raw: str) -> tuple[Optional[str], str]:
+    """'**Sara** — do X' -> ('Sara', 'do X'); anything else -> (None, text)."""
+    match = OWNER_PREFIX.match(raw.strip())
+    if match:
+        return match.group(1).strip(), match.group(2).strip()
+    return None, raw.strip()
+
+
+async def adopt_handwritten_tasks(session: AsyncSession, note: Note) -> Optional[str]:
+    """
+    Every '- [ ] …' line without a marker becomes an action item, and the
+    line gets its marker so the two stay linked from then on.
+
+    Returns the rewritten note text, or None when nothing needed adopting.
+    Lines inside fenced code blocks are left alone.
+    """
+    lines = (note.content or "").split("\n")
+    out: List[str] = []
+    in_code = False
+    changed = False
+
+    for line in lines:
+        if line.strip().startswith("```"):
+            in_code = not in_code
+        if in_code or TASK_LINE.match(line):
+            out.append(line)
+            continue
+        match = PLAIN_TASK_LINE.match(line)
+        if not match:
+            out.append(line)
+            continue
+
+        owner, task = _task_text(match.group(3))
+        if not task:
+            out.append(line)
+            continue
+        done = match.group(2).lower() == "x"
+        item = ActionItem(
+            organization_id=note.organization_id,
+            meeting_id=note.meeting_id,
+            note_id=note.id,
+            owner=owner,
+            task=task,
+            status="completed" if done else "open",
+            completed_at=datetime.now(timezone.utc) if done else None,
+        )
+        session.add(item)
+        await session.flush()
+        out.append(f"{match.group(1)}[{match.group(2)}] {match.group(3).strip()} {TASK_MARKER.format(id=item.id)}")
+        changed = True
+
+    if not changed:
+        return None
+    note.content = "\n".join(out)
+    await session.flush()
+    return note.content

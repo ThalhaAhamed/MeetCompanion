@@ -200,7 +200,7 @@ export default function Dashboard() {
                           <Badge tone={PRIORITY_TONE[item.priority] || 'neutral'}>{item.priority}</Badge>
                         )}
                         {due && <Badge tone={due.tone}>{due.text}</Badge>}
-                        {item.meeting_id && (
+                        {item.meeting_id ? (
                           <Link
                             to={`/meetings/${item.meeting_id}`}
                             className="text-[0.7rem] hover:underline"
@@ -208,7 +208,15 @@ export default function Dashboard() {
                           >
                             {item.meeting_title || 'View meeting'}
                           </Link>
-                        )}
+                        ) : item.note_id ? (
+                          <Link
+                            to={`/notebook/${item.note_id}`}
+                            className="text-[0.7rem] hover:underline"
+                            style={{ color: 'var(--text-faint)' }}
+                          >
+                            {item.note_title || 'View note'}
+                          </Link>
+                        ) : null}
                       </div>
                     </div>
                   </li>
