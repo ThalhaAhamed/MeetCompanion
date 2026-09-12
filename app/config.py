@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     # ---- Embeddings ----
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
     EMBEDDING_DIMENSION: int = 384
+    # Where downloaded model weights live; defaults next to the database.
+    EMBEDDING_CACHE_DIR: str = "data/models"
     CHUNK_SIZE: int = 500
     CHUNK_OVERLAP: int = 100
 

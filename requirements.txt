@@ -18,7 +18,9 @@ pgvector==0.3.6
 alembic==1.16.1
 
 # ---- Embeddings & RAG ----
-sentence-transformers==4.1.0
+# ONNX build of all-MiniLM-L6-v2: identical vectors to the PyTorch model,
+# without the multi-gigabyte torch dependency (see app/services/embedding.py).
+fastembed==0.7.1
 langchain-text-splitters==0.3.8
 numpy>=1.26.0
 

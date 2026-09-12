@@ -1,13 +1,29 @@
 """
 Embedding generation service.
-Provides vector embeddings for meeting transcripts, structured memories, and company documents.
-Supports local SentenceTransformers with fallback to API or fast hash/onnx embedding.
+
+Vectors for transcripts, memories, notes and documents come from a local
+all-MiniLM-L6-v2 model run through ONNX (fastembed). The ONNX build produces
+the same 384-dimensional vectors as the PyTorch original, so databases
+embedded with sentence-transformers keep working, while the dependency is
+tens of megabytes instead of the two gigabytes PyTorch needs - which is what
+makes a downloadable desktop build possible.
+
+The model weights (~90 MB) are fetched on first use into EMBEDDING_CACHE_DIR
+and reused from then on. Without them the service falls back to a
+deterministic hash embedding so the application still runs.
 """
 import asyncio
 import threading
 import numpy as np
 from typing import List, Union
 from app.config import settings
+
+
+def _fastembed_name(model_name: str) -> str:
+    """Accept the short sentence-transformers name people already have in .env."""
+    if "/" in model_name:
+        return model_name
+    return f"sentence-transformers/{model_name}"
 
 
 class EmbeddingService:
@@ -28,19 +44,20 @@ class EmbeddingService:
             if self._initialized:
                 return
             try:
-                # On a constrained/shared-vCPU container (e.g. Railway's default
-                # plan), PyTorch's default of spawning one thread per visible CPU
-                # causes severe contention rather than speedup - each encode()
-                # call was taking 14+ seconds instead of the expected tens of
-                # milliseconds. Pinning to a single thread removes that overhead.
-                import torch
-                torch.set_num_threads(1)
-                from sentence_transformers import SentenceTransformer
-                self._model = SentenceTransformer(self.model_name)
+                from fastembed import TextEmbedding
+
+                self._model = TextEmbedding(
+                    model_name=_fastembed_name(self.model_name),
+                    cache_dir=str(settings.EMBEDDING_CACHE_DIR) if settings.EMBEDDING_CACHE_DIR else None,
+                    # One thread: on shared-vCPU hosts more threads contend
+                    # rather than speed up, and the desktop app should not
+                    # peg every core while a meeting is being indexed.
+                    threads=1,
+                )
                 self._initialized = True
-                print(f"[INFO] Loaded SentenceTransformer model: {self.model_name}")
+                print(f"[INFO] Loaded embedding model: {self.model_name} (ONNX)")
             except Exception as e:
-                print(f"[WARN] SentenceTransformers unavailable ({e}). Using deterministic fallback embedding.")
+                print(f"[WARN] Embedding model unavailable ({e}). Using deterministic fallback embedding.")
                 self._initialized = True
 
     async def embed_text_async(self, text: str) -> List[float]:
@@ -75,8 +92,7 @@ class EmbeddingService:
         ]
 
         if self._model is not None:
-            embeddings = self._model.encode(clean_texts, show_progress_bar=False)
-            return [vec.tolist() for vec in embeddings]
+            return [np.asarray(vec, dtype=np.float32).tolist() for vec in self._model.embed(clean_texts)]
 
         # Deterministic lightweight fallback (e.g. if PyTorch cannot load on low disk space)
         # Generates a normalized 384-dimensional vector based on token hashing
