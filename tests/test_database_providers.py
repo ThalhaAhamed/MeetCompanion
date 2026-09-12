@@ -322,3 +322,27 @@ def test_hosted_string_is_normalized_to_async_driver():
 def test_unavailable_provider_is_refused():
     with _pytest.raises(ValueError, match="not supported"):
         build_database_url("mysql", {"url": "mysql://x"})
+
+
+# ---------------------------------------------------------------------------
+# Whichever database the suite is running on, the live backend must match
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_live_backend_matches_live_dialect():
+    """On Postgres (CI) this proves pgvector search runs; on SQLite the portable one."""
+    from app.database.connection import AsyncSessionLocal, current_dialect
+    from app.providers.database import get_search_backend
+    from app.providers.database.postgres import PostgresSearchBackend
+    from app.models.database import Note
+
+    async with AsyncSessionLocal() as session:
+        backend = get_search_backend(session)
+        if current_dialect() == "postgresql":
+            assert isinstance(backend, PostgresSearchBackend)
+        else:
+            assert isinstance(backend, PortableSearchBackend)
+        # Empty result, but the query must be valid SQL for this dialect.
+        assert await backend.vector_search(Note, [Note.embedding.isnot(None)], [0.0] * 384, limit=3) == []
+        assert await backend.keyword_search(Note, [], "nothing here", limit=3) == []

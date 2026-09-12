@@ -10,16 +10,19 @@ import os
 import tempfile
 from pathlib import Path
 
+# Point TEST_DATABASE_URL at a Postgres server (pgvector installed) to run
+# the same suite against the Postgres backend - CI does this with a service
+# container. Anything else, or nothing, means the throwaway SQLite file.
 TEST_DB_PATH = Path(tempfile.gettempdir()) / "meet_companion_test.db"
 TEST_DB_PATH.unlink(missing_ok=True)
-os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{TEST_DB_PATH.as_posix()}"
+os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL") or f"sqlite+aiosqlite:///{TEST_DB_PATH.as_posix()}"
 
 import httpx  # noqa: E402
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 
 from app.database.connection import current_engine  # noqa: E402
-from app.database.bootstrap import ensure_default_workspace  # noqa: E402
+from app.database.bootstrap import bootstrap  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.database import Base  # noqa: E402
 
@@ -42,8 +45,9 @@ async def database_schema():
     """
     async with current_engine().begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
-    await ensure_default_workspace(current_engine())
+    # The same bootstrap the server runs: on Postgres that also enables
+    # pgvector and creates the vector indexes, which create_all alone cannot.
+    await bootstrap(current_engine())
     yield
 
 
