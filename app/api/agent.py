@@ -327,16 +327,27 @@ async def _claim_agent(db: AsyncSession, user_id: uuid.UUID, agent_config_id: st
 
 
 @router.get("")
-async def get_current_agent(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """Fetch this member's own currently active agent config."""
-    agent_config_id = await get_active_agent_config_id(db, user.id)
+async def get_current_agent(
+    agent_config_id: Optional[str] = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Fetch one of this member's agent configs - the active one by default,
+    or any they own (or could adopt) when agent_config_id is given, so the
+    Agent page can show a config without first switching to it.
+    """
+    if agent_config_id:
+        await _require_claimable_agent(db, user.id, agent_config_id)
+    else:
+        agent_config_id = await get_active_agent_config_id(db, user.id)
     if not agent_config_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active agent configured")
     try:
         cfg = await meetstream_client.get_mia_agent(agent_config_id, api_key=await get_meetstream_api_key(db, user.id))
         return _redact_secrets(cfg)
     except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
+        if e.response.status_code == 404 and agent_config_id == await get_active_agent_config_id(db, user.id):
             # The agent config this member had marked active no longer exists on
             # MeetStream's side (deleted there directly, or the account behind
             # the currently-saved API key never had it) - clearing the stale

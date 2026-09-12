@@ -348,7 +348,8 @@ export default function Agent() {
   const [configError, setConfigError] = useState(null)
   const [credentials, setCredentials] = useState(null)
   const [template, setTemplate] = useState(null)
-  // 'template' edits the template agent; 'active' edits the live one.
+  // 'template' edits the template agent; 'active' the live one; any other
+  // value is an agent_config_id being viewed without switching to it.
   const [selected, setSelected] = useState('active')
 
   const [form, setForm] = useState(EMPTY_FORM)
@@ -369,10 +370,11 @@ export default function Agent() {
     }
   }, [])
 
-  const loadConfig = useCallback(async () => {
+  const loadConfig = useCallback(async (agentConfigId) => {
     setConfigError(null)
+    setConfig(null)
     try {
-      const data = await getAgent()
+      const data = await getAgent(agentConfigId)
       const cfg = data.agent_config || data
       const model = cfg.Model || {}
       const agent = cfg.Agent || {}
@@ -427,8 +429,18 @@ export default function Agent() {
 
   function selectActive() {
     setSelected('active')
+    setSaved(false)
     loadConfig()
   }
+
+  function selectAgent(agent) {
+    if (agent.IsActive) return selectActive()
+    setSelected(agent.AgentConfigID)
+    setSaved(false)
+    loadConfig(agent.AgentConfigID)
+  }
+
+  const viewingId = selected === 'template' || selected === 'active' ? null : selected
 
   function update(key, value) {
     setForm((current) => ({ ...current, [key]: value }))
@@ -456,6 +468,7 @@ export default function Agent() {
         return
       }
       await updateAgent({
+        agent_config_id: viewingId || undefined,
         system_prompt: form.system_prompt,
         first_message: form.first_message,
         voice: form.voice || undefined,
@@ -466,7 +479,7 @@ export default function Agent() {
         tool_results_to_chat: form.tool_results_to_chat,
       })
       setSaved(true)
-      await loadConfig()
+      await loadConfig(viewingId || undefined)
     } catch (err) {
       setConfigError(err.message)
     } finally {
@@ -478,6 +491,7 @@ export default function Agent() {
     setActivatingId(agentConfigId)
     try {
       await activateAgent(agentConfigId)
+      setSelected('active')
       await Promise.all([loadAgents(), loadConfig()])
     } catch (err) {
       setAgentsError(err.message)
@@ -562,10 +576,18 @@ export default function Agent() {
                   key={agent.AgentConfigID}
                   className="flex items-center justify-between gap-3 px-5 py-3"
                   style={{
-                    backgroundColor: agent.IsActive && selected === 'active' ? 'var(--surface-sunken)' : 'transparent',
+                    backgroundColor:
+                      (agent.IsActive && selected === 'active') || selected === agent.AgentConfigID
+                        ? 'var(--surface-sunken)'
+                        : 'transparent',
                   }}
                 >
-                  <div className="min-w-0">
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 text-left"
+                    onClick={() => selectAgent(agent)}
+                    aria-pressed={selected === agent.AgentConfigID || (agent.IsActive && selected === 'active')}
+                  >
                     <div className="truncate text-sm font-medium" style={{ color: 'var(--text-strong)' }}>
                       {agent.AgentName || 'Untitled agent'}
                     </div>
@@ -573,11 +595,9 @@ export default function Agent() {
                       {agent.Mode && <Badge>{agent.Mode}</Badge>}
                       {agent.Model?.provider && <Badge>{agent.Model.provider}</Badge>}
                     </div>
-                  </div>
+                  </button>
                   {agent.IsActive ? (
-                    <button type="button" onClick={selectActive} className="flex items-center" aria-label="Edit active agent">
-                      <Badge tone="brand"><CheckIcon size={12} /> Active</Badge>
-                    </button>
+                    <Badge tone="brand"><CheckIcon size={12} /> Active</Badge>
                   ) : (
                     <button
                       type="button"
@@ -629,12 +649,23 @@ export default function Agent() {
           ) : (
             <Card>
               <div className="mb-5 flex flex-wrap items-center gap-2">
-                <h2 className="text-base font-semibold">{config.AgentName || 'Active agent'}</h2>
+                <h2 className="text-base font-semibold">{config.AgentName || 'Agent'}</h2>
+                {viewingId ? <Badge>Not active</Badge> : <Badge tone="brand"><CheckIcon size={12} /> Active</Badge>}
                 {config.Mode && <Badge>{config.Mode}</Badge>}
                 {config.AgentConfigID && (
                   <span className="font-mono text-[0.7rem]" style={{ color: 'var(--text-faint)' }}>
                     {config.AgentConfigID}
                   </span>
+                )}
+                {viewingId && (
+                  <button
+                    type="button"
+                    className="mc-btn mc-btn-secondary ml-auto"
+                    onClick={() => activate(viewingId)}
+                    disabled={activatingId === viewingId}
+                  >
+                    {activatingId === viewingId ? <Spinner size={13} /> : null} Use this agent
+                  </button>
                 )}
               </div>
 

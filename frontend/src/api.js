@@ -157,8 +157,8 @@ export function importBot({ bot_id, title, platform, meeting_url }) {
   })
 }
 
-export function getAgent() {
-  return req('/agent')
+export function getAgent(agentConfigId) {
+  return req(agentConfigId ? `/agent?agent_config_id=${encodeURIComponent(agentConfigId)}` : '/agent')
 }
 
 export function updateAgent(patch) {
