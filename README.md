@@ -328,7 +328,13 @@ pip install -r requirements.txt
 npm --prefix frontend install
 ```
 
-Run the backend and frontend in two terminals:
+Run both with one command:
+
+```bash
+.venv/Scripts/python scripts/dev.py       # API on :8000 (auto-reload) + UI on :3000
+```
+
+Or separately, in two terminals:
 
 ```bash
 .venv/Scripts/python -m uvicorn app.main:app --port 8000 --reload
