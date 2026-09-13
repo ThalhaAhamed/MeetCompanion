@@ -13,6 +13,7 @@ import Members from './pages/Members'
 import Agent from './pages/Agent'
 import Settings from './pages/Settings'
 import { checkAuth, getSetupStatus, logout } from './api'
+import { UserContext } from './user'
 
 /**
  * Boot sequence: decide whether the user needs setup, sign-in, or the app.
@@ -83,6 +84,7 @@ export default function App() {
   if (phase === 'signin') return <SignIn onSignedIn={boot} />
 
   return (
+    <UserContext.Provider value={user}>
     <AppShell user={user} onSignOut={handleSignOut}>
       <Routes>
         <Route path="/" element={<Dashboard />} />
@@ -98,5 +100,6 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppShell>
+    </UserContext.Provider>
   )
 }

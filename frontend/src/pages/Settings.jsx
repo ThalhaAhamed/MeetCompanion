@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { Page, PageHeader } from '../components/AppShell'
 import { useTheme } from '../components/AppShell'
 import { Badge, Card, ErrorMessage, Field, Loading, Spinner } from '../components/ui'
+import { useIsOwner } from '../user'
 import {
+  getAgentCredentials,
   clearMeetstreamApiKey,
   completeSetup,
   getProviderCatalog,
@@ -34,6 +36,7 @@ function EnvManagedNotice() {
 }
 
 export default function Settings() {
+  const isOwner = useIsOwner()
   const [section, setSection] = useState('ai')
   const [status, setStatus] = useState(null)
   const [catalog, setCatalog] = useState(null)
@@ -46,6 +49,8 @@ export default function Settings() {
   const [saved, setSaved] = useState(false)
 
   const [meetstreamKey, setMeetstreamKey] = useState('')
+  const [credentials, setCredentials] = useState(null)
+  const [webhookSecret, setWebhookSecret] = useState('')
 
   const [dbProvider, setDbProvider] = useState('')
   const [dbValues, setDbValues] = useState({})
@@ -56,9 +61,14 @@ export default function Settings() {
 
   async function load() {
     try {
-      const [statusData, catalogData] = await Promise.all([getSetupStatus(), getProviderCatalog()])
+      const [statusData, catalogData, credentialData] = await Promise.all([
+        getSetupStatus(),
+        getProviderCatalog(),
+        getAgentCredentials().catch(() => null),
+      ])
       setStatus(statusData)
       setCatalog(catalogData)
+      setCredentials(credentialData)
       setProvider(statusData.llm?.provider || 'ollama')
       setDbProvider(statusData.database?.provider || 'sqlite')
       setValues({
@@ -172,7 +182,18 @@ export default function Settings() {
             </div>
           )}
 
-          {section === 'ai' && (
+          {status.read_only && (section === 'ai' || section === 'database') && (
+            <Card>
+              <h2 className="mb-1 text-base font-semibold">Managed by a workspace owner</h2>
+              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                The AI provider ({status.llm?.provider || 'not set'}
+                {status.llm?.model ? ` · ${status.llm.model}` : ''}) and database ({status.database?.provider}) are
+                shared by everyone on this server. Ask an owner of your workspace to change them.
+              </p>
+            </Card>
+          )}
+
+          {section === 'ai' && !status.read_only && (
             <Card>
               <h2 className="mb-1 text-base font-semibold">AI provider</h2>
               <p className="mb-5 text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -244,7 +265,7 @@ export default function Settings() {
             </Card>
           )}
 
-          {section === 'database' && (
+          {section === 'database' && !status.read_only && (
             <Card>
               <h2 className="mb-1 text-base font-semibold">Database</h2>
               <p className="mb-4 text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -323,11 +344,11 @@ export default function Settings() {
               </p>
 
               <Field
-                label="MeetStream API key"
+                label="Your MeetStream API key"
                 hint={
-                  status.meetstream?.configured
-                    ? `Currently set (${status.meetstream.api_key}). Enter a new key to replace it.`
-                    : 'Paste the key from your MeetStream account.'
+                  credentials?.meetstream_api_key?.configured
+                    ? `Currently set (${credentials.meetstream_api_key.masked_value}). Bots you launch use this key. Enter a new key to replace it.`
+                    : 'Personal to you: bots you launch are created and billed under this MeetStream account.'
                 }
                 htmlFor="ms-key"
               >
@@ -350,7 +371,7 @@ export default function Settings() {
                 >
                   Save key
                 </button>
-                {status.meetstream?.configured && (
+                {credentials?.meetstream_api_key?.is_personal && (
                   <button
                     type="button"
                     className="mc-btn mc-btn-danger"
@@ -363,6 +384,49 @@ export default function Settings() {
                   </button>
                 )}
               </div>
+
+              {isOwner && (
+                <>
+                  <hr className="my-6" style={{ borderColor: 'var(--border-subtle)' }} />
+                  <h3 className="mb-1 text-sm font-semibold">Webhook signing secret</h3>
+                  <p className="mb-4 text-sm" style={{ color: 'var(--text-muted)' }}>
+                    MeetStream signs every webhook it sends with this secret, and the server rejects
+                    deliveries that do not match. Set the same value in your MeetStream webhook
+                    settings.{' '}
+                    {status.meetstream?.webhook_secret_configured ? 'A secret is currently set.' : 'No secret is set yet - unsigned deliveries are accepted only for bots this server launched.'}
+                  </p>
+                  <Field label="Webhook secret" htmlFor="ms-webhook">
+                    <input
+                      id="ms-webhook"
+                      className="mc-input"
+                      type="password"
+                      value={webhookSecret}
+                      onChange={(event) => setWebhookSecret(event.target.value)}
+                      autoComplete="off"
+                      disabled={status.environment_managed?.['meetstream.webhook_secret']}
+                    />
+                  </Field>
+                  <button
+                    type="button"
+                    className="mc-btn mc-btn-primary"
+                    disabled={busy || !webhookSecret.trim()}
+                    onClick={async () => {
+                      setBusy(true)
+                      try {
+                        await completeSetup({ meetstream: { webhook_secret: webhookSecret.trim() } })
+                        setWebhookSecret('')
+                        await load()
+                      } catch (err) {
+                        setError(err.message)
+                      } finally {
+                        setBusy(false)
+                      }
+                    }}
+                  >
+                    Save secret
+                  </button>
+                </>
+              )}
             </Card>
           )}
 
@@ -378,6 +442,7 @@ export default function Settings() {
                 </button>
               </Card>
 
+              {!status.read_only && (
               <Card>
                 <h2 className="mb-1 text-base font-semibold">Data management</h2>
                 <p className="mb-4 text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -388,6 +453,7 @@ export default function Settings() {
                   Reset configuration
                 </button>
               </Card>
+              )}
             </div>
           )}
         </div>

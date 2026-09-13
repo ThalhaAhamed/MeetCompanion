@@ -21,6 +21,21 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md", ".csv"}
 
+#: Documents are read fully into memory before extraction.
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
+
+def _docx_text(content_bytes: bytes) -> str:
+    """Paragraph text from a .docx (a zip of XML), without a Word dependency."""
+    import io
+    import re
+    import zipfile
+
+    with zipfile.ZipFile(io.BytesIO(content_bytes)) as archive:
+        xml = archive.read("word/document.xml").decode("utf-8", errors="ignore")
+    xml = re.sub(r"</w:p>", "\n", xml)
+    return re.sub(r"<[^>]+>", "", xml)
+
 
 @router.post("/upload", status_code=status.HTTP_202_ACCEPTED)
 async def upload_company_document(
@@ -41,7 +56,9 @@ async def upload_company_document(
             detail=f"Unsupported file type: {ext}. Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}",
         )
 
-    content_bytes = await file.read()
+    content_bytes = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"Documents must be under {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.")
     text_content = ""
 
     if ext in (".txt", ".md", ".csv"):
@@ -52,10 +69,13 @@ async def upload_company_document(
             import io
             reader = pypdf.PdfReader(io.BytesIO(content_bytes))
             text_content = "\n".join([page.extract_text() or "" for page in reader.pages])
-        except Exception as e:
-            text_content = content_bytes.decode("utf-8", errors="ignore")
-    else:
-        text_content = content_bytes.decode("utf-8", errors="ignore")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Could not read that PDF.")
+    elif ext == ".docx":
+        try:
+            text_content = _docx_text(content_bytes)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Could not read that .docx file.")
 
     if not text_content.strip():
         raise HTTPException(status_code=400, detail="Document contains no extractable text")

@@ -67,3 +67,7 @@ frontend/dist/
 
 # Downloaded tools (fetched, not source)
 .tools/
+
+# Local tool configuration
+.claude/
+.cloudflared*.log

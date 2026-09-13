@@ -13,3 +13,7 @@ frontend/dist/
 *.log
 tests/
 .claude/
+data/
+desktop/
+docs/
+*.db

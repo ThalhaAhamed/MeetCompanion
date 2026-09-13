@@ -58,3 +58,20 @@ jobs:
           npm ci
           npm run lint
           npm run build
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -t meet-companion:ci .
+      - name: Boot and probe /health
+        run: |
+          docker run -d --name mc -p 8000:8000 meet-companion:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/health; then exit 0; fi
+            sleep 2
+          done
+          docker logs mc
+          exit 1

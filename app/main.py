@@ -2,6 +2,7 @@
 FastAPI application entry point for Meet Companion.
 """
 from contextlib import asynccontextmanager
+import logging
 import os
 from pathlib import Path
 from typing import Optional
@@ -11,6 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
+from app.logging_config import configure_logging
 from app.api.health import router as health_router
 from app.api.webhooks import router as webhooks_router
 from app.api.meetings import router as meetings_router
@@ -25,15 +27,19 @@ from app.api.setup import router as setup_router
 from app.api.notebook import router as notebook_router
 from app.mcp.server import router as mcp_router
 from app.middleware.auth_gate import AuthGateMiddleware
+from app.middleware.limits import RequestLimitsMiddleware
 from app.services.embedding import embedding_service
 from app.database.bootstrap import bootstrap
 from app.database.connection import current_engine
+
+configure_logging()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup and shutdown procedures."""
-    print(f"[{settings.APP_NAME}] Application starting up in {settings.APP_ENV} mode...")
+    logger.info("%s starting in %s mode", settings.APP_NAME, settings.APP_ENV)
     await bootstrap(current_engine())
     # Load the embedding model now, in a background thread, so the first real
     # search/index request isn't the one paying the multi-second model load
@@ -41,12 +47,12 @@ async def lifespan(app: FastAPI):
     import asyncio
     asyncio.create_task(embedding_service.warmup_async())
     yield
-    print(f"[{settings.APP_NAME}] Application shutting down...")
+    logger.info("%s shutting down", settings.APP_NAME)
 
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="Persistent AI Meeting Companion using MeetStream MIA and pgvector RAG.",
+    description="Self-hosted meeting memory: transcripts become searchable notes, action items and an MCP tool server.",
     version=settings.APP_VERSION,
     lifespan=lifespan,
 )
@@ -58,6 +64,8 @@ app = FastAPI(
 # CORSMiddleware to get CORS headers added, which the browser then reports
 # as an opaque "Failed to fetch" / CORS error instead of a real 401.
 app.add_middleware(AuthGateMiddleware)
+# Body-size cap and credential-endpoint rate limit (see app/middleware/limits.py).
+app.add_middleware(RequestLimitsMiddleware, max_body_bytes=settings.MAX_REQUEST_BYTES)
 
 # CORS Middleware
 app.add_middleware(

@@ -2,9 +2,12 @@ import { useEffect, useState } from 'react'
 import { Page, PageHeader } from '../components/AppShell'
 import { MembersIcon } from '../components/Icons'
 import { Badge, Card, EmptyState, ErrorMessage, Field, Loading, Modal, Spinner } from '../components/ui'
-import { addMember, getWorkspace, listMembers, removeMember, resetMemberPassword } from '../api'
+import { addMember, getWorkspace, listMembers, removeMember, resetMemberPassword, setMemberRole } from '../api'
+import { useIsOwner, useUser } from '../user'
 
 export default function Members() {
+  const me = useUser()
+  const isOwner = useIsOwner()
   const [members, setMembers] = useState(null)
   const [workspace, setWorkspace] = useState(null)
   const [error, setError] = useState(null)
@@ -119,16 +122,36 @@ export default function Members() {
                 </div>
                 <div className="flex items-center gap-2">
                   {member.role && <Badge tone={member.role === 'owner' ? 'brand' : 'neutral'}>{member.role}</Badge>}
-                  <button
-                    type="button"
-                    className="mc-btn mc-btn-secondary"
-                    onClick={() => setResetting(member)}
-                  >
-                    Reset password
-                  </button>
-                  <button type="button" className="mc-btn mc-btn-danger" onClick={() => handleRemove(member)}>
-                    Remove
-                  </button>
+                  {isOwner && (
+                    <>
+                      <button
+                        type="button"
+                        className="mc-btn mc-btn-secondary"
+                        title={member.role === 'owner' ? 'Demote to member' : 'Make owner'}
+                        onClick={async () => {
+                          setError(null)
+                          await setMemberRole(member.id, member.role === 'owner' ? 'member' : 'owner').catch((err) =>
+                            setError(err.message),
+                          )
+                          await load()
+                        }}
+                      >
+                        {member.role === 'owner' ? 'Make member' : 'Make owner'}
+                      </button>
+                      <button
+                        type="button"
+                        className="mc-btn mc-btn-secondary"
+                        onClick={() => setResetting(member)}
+                      >
+                        Reset password
+                      </button>
+                    </>
+                  )}
+                  {(isOwner || member.id === me?.id) && (
+                    <button type="button" className="mc-btn mc-btn-danger" onClick={() => handleRemove(member)}>
+                      {member.id === me?.id ? 'Leave' : 'Remove'}
+                    </button>
+                  )}
                 </div>
               </li>
             ))}

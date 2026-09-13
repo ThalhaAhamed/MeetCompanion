@@ -16,6 +16,10 @@ from pathlib import Path
 TEST_DB_PATH = Path(tempfile.gettempdir()) / "meet_companion_test.db"
 TEST_DB_PATH.unlink(missing_ok=True)
 os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL") or f"sqlite+aiosqlite:///{TEST_DB_PATH.as_posix()}"
+# Secrets are generated per install and placeholders are refused; the suite
+# supplies real-looking ones so nothing is written next to a developer's data.
+os.environ.setdefault("SESSION_SECRET", "test-session-secret-not-for-production-0123456789")
+os.environ.setdefault("MCP_AUTH_TOKEN", "test-mcp-token-not-for-production-0123456789")
 
 import httpx  # noqa: E402
 import pytest  # noqa: E402

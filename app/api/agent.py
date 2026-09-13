@@ -20,7 +20,7 @@ from app.database.connection import get_db
 from app.database.repositories import OrganizationRepository, UserRepository, MeetingRepository
 from app.models.database import User
 from app.services.meetstream import meetstream_client, _share_in_chat_function
-from app.api.deps import get_current_org_id, get_current_user
+from app.api.deps import get_current_org_id, get_current_user, require_owner
 from app.mcp.auth import resolve_org_by_mcp_token
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
@@ -207,8 +207,9 @@ async def chat_relay(body: ChatRelayRequest, authorization: Optional[str] = Head
     if not meeting or meeting.organization_id != org_id:
         raise HTTPException(status_code=403, detail="This bot does not belong to your workspace.")
 
+    owner_key = await get_meetstream_api_key(db, meeting.created_by_user_id) if meeting.created_by_user_id else None
     try:
-        await meetstream_client.send_bot_message(bot_id, message)
+        await meetstream_client.send_bot_message(bot_id, message, api_key=owner_key)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"MeetStream API error: {e}")
 
@@ -457,8 +458,8 @@ async def read_agent_template(user: User = Depends(get_current_user)):
 
 
 @router.put("/template")
-async def update_agent_template(body: AgentTemplateUpdateRequest, user: User = Depends(get_current_user)):
-    """Edit the template. Only fields present in the request change."""
+async def update_agent_template(body: AgentTemplateUpdateRequest, user: User = Depends(require_owner)):
+    """Edit the template (owners only - it is shared by every workspace). Only fields present in the request change."""
     current = load_config().agent_template
     changes = body.model_dump(exclude_unset=True)
     merged = {**asdict(current), **changes}

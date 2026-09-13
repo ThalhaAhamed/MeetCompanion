@@ -6,10 +6,10 @@
 
 ### Make meeting data smarter.
 
-[![Latest release](https://img.shields.io/github/v/release/meetstream-ai/companion?include_prereleases&label=release&color=3b4873)](https://github.com/meetstream-ai/companion/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/meetstream-ai/companion/total?color=7b87be)](https://github.com/meetstream-ai/companion/releases)
-[![Stars](https://img.shields.io/github/stars/meetstream-ai/companion?style=flat&color=a7a5cb)](https://github.com/meetstream-ai/companion/stargazers)
-[![Build](https://img.shields.io/github/actions/workflow/status/meetstream-ai/companion/release.yml?label=build)](https://github.com/meetstream-ai/companion/actions)
+[![Latest release](https://img.shields.io/github/v/release/ThalhaAhamed/MeetCompanion?include_prereleases&label=release&color=3b4873)](https://github.com/ThalhaAhamed/MeetCompanion/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/ThalhaAhamed/MeetCompanion/total?color=7b87be)](https://github.com/ThalhaAhamed/MeetCompanion/releases)
+[![Stars](https://img.shields.io/github/stars/ThalhaAhamed/MeetCompanion?style=flat&color=a7a5cb)](https://github.com/ThalhaAhamed/MeetCompanion/stargazers)
+[![Build](https://img.shields.io/github/actions/workflow/status/ThalhaAhamed/MeetCompanion/ci.yml?label=CI)](https://github.com/ThalhaAhamed/MeetCompanion/actions)
 [![License: MIT](https://img.shields.io/badge/license-MIT-e3b1bc)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-3b4873)
 
@@ -38,6 +38,10 @@ Ask AI — all with a model, database and machine that you choose.
 - [Features in action](#-features-in-action)
 - [How it works](#%EF%B8%8F-how-it-works)
 - [Configuration](#%EF%B8%8F-configuration)
+- [Docker](#-docker)
+- [Live meetings: reaching your server](#-live-meetings-reaching-your-server)
+- [Privacy and data](#-privacy-and-data)
+- [Security model](#-security-model)
 - [For developers](#%EF%B8%8F-for-developers)
 - [Contributing](#-contributing)
 - [Roadmap](#%EF%B8%8F-roadmap)
@@ -96,7 +100,7 @@ web app. Both are the same code.
 
 ## 📥 Installation
 
-Download from the [latest release](https://github.com/meetstream-ai/companion/releases/latest).
+Download from the [latest release](https://github.com/ThalhaAhamed/MeetCompanion/releases/latest).
 
 ### 🪟 Windows
 
@@ -131,8 +135,9 @@ use. All data lives under your user data directory:
 | macOS | `~/Library/Application Support/meet-companion/workspace` |
 | Linux | `~/.config/meet-companion/workspace` |
 
-> **Self-hosting instead?** See [For developers](#%EF%B8%8F-for-developers) — the
-> web app runs from source with two commands, or with Docker Compose.
+> **Self-hosting instead?** `docker compose up -d` gives you the whole
+> application on <http://localhost:8000> — see [Docker](#-docker). Or run it
+> from source: [For developers](#%EF%B8%8F-for-developers).
 
 ## 🎯 Features in action
 
@@ -231,19 +236,88 @@ Everything is configurable from **Settings** in the app. Precedence is:
 | `LLM_MODEL` | per provider | Model name |
 | `LLM_API_KEY` | — | Hosted providers only |
 | `LLM_BASE_URL` | per provider | Proxies, gateways, self-hosted endpoints |
-| `MEETSTREAM_API_KEY` | — | Only needed to send bots into live meetings |
-| `MCP_AUTH_TOKEN` | — | Change before exposing the server beyond your machine |
+| `MEETSTREAM_API_KEY` | — | Deployment-wide key; each member can also add their own in Settings |
+| `MEETSTREAM_WEBHOOK_SECRET` | — | Signature check for webhook deliveries (also settable in Settings) |
+| `MCP_SERVER_URL` | `http://localhost:8000/mcp` | Public URL MeetStream uses to reach this server |
+| `APP_HOST` | `127.0.0.1` | Bind address; `0.0.0.0` to accept connections from other machines |
+| `CORS_ORIGINS` | `[]` | Extra origins allowed to call the API with a session cookie |
+| `SESSION_SECRET` | generated | Cookie signing key; generated into `data/session.key` on first run |
 
 Configuration saved from the UI lives in `data/config.json` next to the SQLite
-database. Both are gitignored — `config.json` holds API keys.
+database, alongside `session.key`. All of `data/` is gitignored — it holds API
+keys.
+
+## 🐳 Docker
+
+```bash
+docker compose up -d                       # app + SQLite, http://localhost:8000
+docker compose --profile postgres up -d    # app + a pgvector Postgres to pick in Settings
+```
+
+One image contains the API and the built UI; everything it writes goes to the
+`data` volume. Set `LLM_PROVIDER`/`LLM_API_KEY` (and friends) in
+`docker-compose.yml` to skip onboarding entirely.
+
+## 🔗 Live meetings: reaching your server
+
+Notes, search, Ask AI and transcript upload work entirely on your machine.
+**Sending a bot into a live call needs MeetStream to reach your server** for two
+things: webhook deliveries (`/api/webhooks/meetstream`) and the voice agent's
+tool calls (`/mcp`).
+
+1. Expose the server on a public URL — a real domain behind HTTPS, or during
+   development a tunnel such as `cloudflared tunnel --url http://localhost:8000`
+   or `ngrok http 8000`.
+2. Set `MCP_SERVER_URL` to `https://<that-host>/mcp` (in `.env` or the
+   environment) and restart. The webhook callback URL is derived from it.
+3. Add your MeetStream API key in **Settings → Meetings** and a webhook
+   signing secret (the same value on both sides).
+4. Create or activate an agent in **Agent**; Meet Companion wires the MCP
+   server URL and your workspace's token into it.
+
+## 🔒 Privacy and data
+
+Everything is stored in the database you choose (SQLite file by default):
+account emails and password hashes, meeting metadata, full transcripts with
+speaker names, extracted memories and action items, notes, and uploaded
+documents. Embeddings are computed locally and never leave the machine.
+
+What leaves the machine, and only when you enable it:
+
+- **Your LLM provider** receives the full transcript of each processed meeting
+  and excerpts of your notes when you use Ask AI. With Ollama, nothing leaves.
+- **MeetStream** hosts the bot, the audio and the transcription, and stores the
+  agent configuration including this server's MCP token.
+- **Hugging Face** serves a one-time download of the embedding model.
+
+API keys are stored in plaintext in `data/config.json` (server-wide) and in the
+database (per-member MeetStream keys). Protect the `data` directory the way you
+would protect a `.env` file. There is no telemetry.
+
+## 🛡️ Security model
+
+- Every meeting, note and action item belongs to a **workspace**; members of a
+  workspace share all of it and never see other workspaces.
+- The person who creates a workspace is its **owner**. Owners can change the
+  server-wide settings (AI provider, database, MeetStream, agent template),
+  reset teammates' passwords, promote other owners and remove members. Members
+  can use everything else.
+- **Sign-up is open** to anyone who can reach the server (new workspace or
+  join by code). Put the server behind your own auth proxy if that is not
+  what you want.
+- The in-call agent's MCP tools are authenticated with a per-workspace bearer
+  token generated on creation; it has write tools (notes, action items) driven
+  by what people say in the meeting.
+
+Details and a hardening checklist: [SECURITY.md](SECURITY.md).
 
 ## 🛠️ For developers
 
-Requires Python 3.12+ and Node 20+.
+Requires **Python 3.12** (3.13+ is not yet supported by every dependency) and **Node 22**.
 
 ```bash
-git clone https://github.com/meetstream-ai/companion.git
-cd companion
+git clone https://github.com/ThalhaAhamed/MeetCompanion.git
+cd MeetCompanion
 
 python -m venv .venv
 .venv/Scripts/activate        # Windows
@@ -268,9 +342,9 @@ through setup.
 **Fully offline:** install [Ollama](https://ollama.com), `ollama pull llama3.1`,
 and pick *Ollama (local)* during setup.
 
-**PostgreSQL:** `docker compose up -d`, then point `DATABASE_URL` at it (or pick
-it in Settings). Schema, indexes and the pgvector extension are created
-automatically.
+**PostgreSQL:** `docker compose --profile postgres up -d postgres`, then pick it
+in Settings (or set `DATABASE_URL`). Schema, indexes and the pgvector extension
+are created automatically.
 
 **Tests and lint:**
 
@@ -296,7 +370,9 @@ Releases for all three platforms are built by
 
 ## 🤝 Contributing
 
-Contributions are welcome — issues, pull requests, providers, docs.
+Contributions are welcome — issues, pull requests, providers, docs. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md); security reports go through
+[SECURITY.md](SECURITY.md).
 
 - **New LLM provider:** one file in `app/providers/llm/` plus a registry entry.
   `ollama.py` is the smallest example.

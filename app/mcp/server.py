@@ -34,9 +34,14 @@ async def handle_mcp_jsonrpc(
             detail=f"Invalid JSON in request: {str(e)}"
         )
 
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="JSON-RPC request must be an object")
+
     jsonrpc_id = body.get("id")
     method = body.get("method")
-    params = body.get("params", {})
+    params = body.get("params") or {}
+    if not isinstance(params, dict):
+        params = {}
 
     # 1. Initialize
     if method == "initialize":

@@ -1,8 +1,8 @@
 """
 Per-member session gate.
 
-Signs a "<expires_at>.<user_id>.<hmac>" cookie value using API_KEY_SALT as the
-HMAC key - the signature only proves the token was issued by us and hasn't
+Signs a "<expires_at>.<user_id>.<hmac>" cookie value using the per-install
+session secret (app/secrets.py) as the HMAC key - the signature only proves the token was issued by us and hasn't
 expired; membership itself (has this user_id been removed?) is re-checked
 against the database on every request, so removing a member in the Members
 page revokes their live session immediately rather than waiting for the
@@ -21,7 +21,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from sqlalchemy import select
-from app.config import settings
+from app.secrets import session_secret
 
 COOKIE_NAME = "hub_session"
 SESSION_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
@@ -35,7 +35,7 @@ FIRST_RUN_PREFIXES = ("/api/setup",)
 
 
 def _key() -> bytes:
-    return settings.API_KEY_SALT.encode("utf-8")
+    return session_secret().encode("utf-8")
 
 
 def sign_session(user_id: str, expires_at: int) -> str:

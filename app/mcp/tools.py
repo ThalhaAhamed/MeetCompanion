@@ -12,6 +12,9 @@ from app.database.repositories import MeetingRepository, MemoryRepository, Actio
 from app.rag.meeting_memory import meeting_memory_rag
 from app.models.database import MemoryType
 from app.models.schemas import ActionItemUpdate
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # Tool Schemas for MCP Tool Discovery
@@ -627,7 +630,7 @@ async def _tool_add_meeting_memory(
     )
     await db.commit()
 
-    print(f"[AUDIT] add_meeting_memory org={org_id} meeting={meeting_id} type={memory_type.value} memory_id={memory.id}")
+    logger.info(f"add_meeting_memory org={org_id} meeting={meeting_id} type={memory_type.value} memory_id={memory.id}")
 
     return {
         "id": str(memory.id),
@@ -695,7 +698,7 @@ async def _tool_create_action_item(
     )
     await db.commit()
 
-    print(f"[AUDIT] create_action_item org={org_id} meeting={meeting_id} action_item_id={action.id} owner={action.owner}")
+    logger.info(f"create_action_item org={org_id} meeting={meeting_id} action_item_id={action.id} owner={action.owner}")
 
     return {
         "id": str(action.id),
@@ -746,7 +749,7 @@ async def _tool_update_action_item(
 
     await db.commit()
 
-    print(f"[AUDIT] update_action_item org={org_id} action_item_id={action_id} fields={list(update_fields.keys())}")
+    logger.info(f"update_action_item org={org_id} action_item_id={action_id} fields={list(update_fields.keys())}")
 
     return {
         "id": str(action.id),

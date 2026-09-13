@@ -1,17 +1,34 @@
-# Optional PostgreSQL for Meet Companion.
+# Meet Companion with Docker.
 #
-# Meet Companion runs on a local SQLite file by default and needs nothing from
-# this file. Start this only if you want Postgres - for a shared deployment, or
-# a corpus large enough to want pgvector's indexed similarity search:
+#   docker compose up -d            # app on http://localhost:8000, SQLite in a volume
+#   docker compose --profile postgres up -d
+#                                   # same, plus a pgvector Postgres the app is pointed at
 #
-#   docker compose up -d
-#   DATABASE_URL=postgresql+asyncpg://meet:meet_dev_password@localhost:5432/meet_companion
-#
-# The schema is created by the application from its own models, so no init
-# scripts are mounted here - there is exactly one source of truth for it.
+# The first visit walks through onboarding. Configuration saved there lives
+# in the `data` volume together with the database and the embedding model.
 
 services:
+  app:
+    build: .
+    container_name: meet_companion
+    ports:
+      - "8000:8000"
+    volumes:
+      - data:/data
+    environment:
+      # Set these to skip onboarding and run fully declaratively:
+      # LLM_PROVIDER: openai
+      # LLM_API_KEY: ${LLM_API_KEY}
+      # MEETSTREAM_API_KEY: ${MEETSTREAM_API_KEY}
+      # MEETSTREAM_WEBHOOK_SECRET: ${MEETSTREAM_WEBHOOK_SECRET}
+      # SESSION_SECRET: ${SESSION_SECRET}
+      # Public URL MeetStream can reach for webhooks and MCP (see README):
+      # MCP_SERVER_URL: https://companion.example.com/mcp
+      CORS_ORIGINS: '["http://localhost:8000"]'
+    restart: unless-stopped
+
   postgres:
+    profiles: ["postgres"]
     image: pgvector/pgvector:pg17
     container_name: meet_companion_db
     environment:
@@ -30,5 +47,5 @@ services:
     restart: unless-stopped
 
 volumes:
+  data:
   pgdata:
-    driver: local

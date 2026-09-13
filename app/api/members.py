@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.connection import get_db
 from app.models.database import User, Organization
 from app.middleware.auth_gate import COOKIE_NAME, decode_session
-from app.api.deps import get_current_org_id, get_current_user
+from app.api.deps import OWNER, get_current_org_id, get_current_user, is_owner, require_owner
 from app.security import hash_password, verify_password
 
 router = APIRouter(prefix="/api/members", tags=["members"])
@@ -58,6 +58,7 @@ class MemberOut(BaseModel):
     id: str
     name: str | None
     email: str
+    role: str = "member"
 
 
 class CreateMemberRequest(BaseModel):
@@ -89,7 +90,7 @@ async def list_members(org_id: uuid.UUID = Depends(get_current_org_id), db: Asyn
     result = await db.execute(
         select(User).where(User.organization_id == org_id, User.is_active.is_(True)).order_by(User.created_at)
     )
-    return {"members": [MemberOut(id=str(u.id), name=u.name, email=u.email) for u in result.scalars().all()]}
+    return {"members": [MemberOut(id=str(u.id), name=u.name, email=u.email, role=u.role) for u in result.scalars().all()]}
 
 
 @router.post("")
@@ -104,6 +105,7 @@ async def add_member(body: CreateMemberRequest, request: Request, db: AsyncSessi
     if len(body.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
 
+    role = "member"
     current_user_id = await _current_user_id(request, db)
     if current_user_id:
         # Already signed in - adding a teammate straight into your own workspace.
@@ -119,6 +121,8 @@ async def add_member(body: CreateMemberRequest, request: Request, db: AsyncSessi
         if body.workspace_name:
             org = await _create_workspace(db, body.workspace_name)
             org_id = org.id
+            # Whoever creates a workspace owns it.
+            role = OWNER
         else:
             result = await db.execute(select(Organization.id).where(Organization.join_code == body.join_code.strip()))
             org_id = result.scalar_one_or_none()
@@ -130,11 +134,12 @@ async def add_member(body: CreateMemberRequest, request: Request, db: AsyncSessi
         email=email,
         name=body.name.strip(),
         password_hash=hash_password(body.password),
+        role=role,
         is_active=True,
     )
     db.add(user)
     await db.commit()
-    return MemberOut(id=str(user.id), name=user.name, email=user.email)
+    return MemberOut(id=str(user.id), name=user.name, email=user.email, role=user.role)
 
 
 @router.patch("/me")
@@ -157,7 +162,7 @@ async def update_self(body: UpdateSelfRequest, user: User = Depends(get_current_
         user.password_hash = hash_password(body.password)
 
     await db.commit()
-    return MemberOut(id=str(user.id), name=user.name, email=user.email)
+    return MemberOut(id=str(user.id), name=user.name, email=user.email, role=user.role)
 
 
 class ResetPasswordRequest(BaseModel):
@@ -168,14 +173,15 @@ class ResetPasswordRequest(BaseModel):
 async def reset_member_password(
     member_id: str,
     body: ResetPasswordRequest,
-    org_id: uuid.UUID = Depends(get_current_org_id),
+    owner: User = Depends(require_owner),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    "Forgot password" without an email service: any signed-in member can set
-    a new password for a teammate in the same workspace. Not self-service,
-    but works today with no email-sending integration to wire up.
+    "Forgot password" without an email service: a workspace owner can set a
+    new password for a teammate. Not self-service, but works with no
+    email-sending integration to wire up.
     """
+    org_id = owner.organization_id
     if len(body.new_password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
 
@@ -196,18 +202,56 @@ async def reset_member_password(
     return {"reset": True}
 
 
-@router.delete("/{member_id}")
-async def remove_member(member_id: str, org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
+class RoleRequest(BaseModel):
+    role: str
+
+
+@router.post("/{member_id}/role")
+async def set_member_role(
+    member_id: str,
+    body: RoleRequest,
+    owner: User = Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Promote a teammate to owner or demote them to member. A workspace always keeps at least one owner."""
+    if body.role not in (OWNER, "member"):
+        raise HTTPException(status_code=400, detail="Role must be 'owner' or 'member'.")
     try:
         target_id = uuid.UUID(member_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid member id")
-
-    count_result = await db.execute(
-        select(func.count()).select_from(User).where(User.organization_id == org_id, User.is_active.is_(True))
+    result = await db.execute(
+        select(User).where(User.id == target_id, User.organization_id == owner.organization_id, User.is_active.is_(True))
     )
-    if count_result.scalar_one() <= 1:
-        raise HTTPException(status_code=400, detail="Can't remove the last remaining member.")
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Member not found.")
+    if body.role != OWNER and user.role == OWNER and await _owner_count(db, owner.organization_id) <= 1:
+        raise HTTPException(status_code=400, detail="A workspace needs at least one owner.")
+    user.role = body.role
+    await db.commit()
+    return MemberOut(id=str(user.id), name=user.name, email=user.email, role=user.role)
+
+
+async def _owner_count(db: AsyncSession, org_id: uuid.UUID) -> int:
+    result = await db.execute(
+        select(func.count()).select_from(User).where(
+            User.organization_id == org_id, User.role == OWNER, User.is_active.is_(True)
+        )
+    )
+    return result.scalar_one()
+
+
+@router.delete("/{member_id}")
+async def remove_member(member_id: str, current: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Owners can remove anyone; a member can only remove themselves."""
+    org_id = current.organization_id
+    try:
+        target_id = uuid.UUID(member_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid member id")
+    if not is_owner(current) and target_id != current.id:
+        raise HTTPException(status_code=403, detail="Only a workspace owner can remove other members.")
 
     result = await db.execute(
         select(User).where(User.id == target_id, User.organization_id == org_id, User.is_active.is_(True))
@@ -215,6 +259,14 @@ async def remove_member(member_id: str, org_id: uuid.UUID = Depends(get_current_
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Member not found.")
+
+    count_result = await db.execute(
+        select(func.count()).select_from(User).where(User.organization_id == org_id, User.is_active.is_(True))
+    )
+    if count_result.scalar_one() <= 1:
+        raise HTTPException(status_code=400, detail="Can't remove the last remaining member.")
+    if user.role == OWNER and await _owner_count(db, org_id) <= 1:
+        raise HTTPException(status_code=400, detail="Promote another member to owner before removing the last one.")
 
     # Hard delete, not a soft is_active=False flag: the (organization_id, email)
     # DB constraint means a deactivated-but-still-present row permanently blocks

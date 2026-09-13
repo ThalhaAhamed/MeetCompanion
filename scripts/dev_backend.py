@@ -6,7 +6,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT)
 sys.path.insert(0, str(ROOT))
-os.environ.setdefault("MCP_AUTH_TOKEN", "local-dev-token")
 os.environ["MEET_COMPANION_CONFIG"] = "data/config.json"
 
 import uvicorn  # noqa: E402

@@ -21,10 +21,14 @@ class Settings(BaseSettings):
     APP_NAME: str = "Meet Companion"
     APP_VERSION: str = "1.0.0"
     APP_ENV: str = "development"
-    APP_HOST: str = "0.0.0.0"
+    # Loopback by default: a fresh server must not be configurable by whoever
+    # on the network reaches it first. Containers set APP_HOST=0.0.0.0.
+    APP_HOST: str = "127.0.0.1"
     APP_PORT: int = 8000
     LOG_LEVEL: str = "INFO"
-    CORS_ORIGINS: List[str] = ["*"]
+    # Same-origin only unless told otherwise. A wildcard here combined with
+    # credentialed requests would let any website act as a signed-in user.
+    CORS_ORIGINS: List[str] = []
 
     # ---- Database ----
     # Local SQLite by default so the application runs with no external
@@ -40,7 +44,8 @@ class Settings(BaseSettings):
     MEETSTREAM_AGENT_CONFIG_ID: Optional[str] = None
 
     # ---- MCP Server ----
-    MCP_AUTH_TOKEN: str = "dev-mcp-token-meetstream-2026"
+    # Optional. Only honoured when set to a real value; see app/secrets.py.
+    MCP_AUTH_TOKEN: Optional[str] = None
     MCP_SERVER_URL: str = "http://localhost:8000/mcp"
 
     # ---- LLM ----
@@ -74,7 +79,13 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 100
 
     # ---- Security ----
-    API_KEY_SALT: str = "meet_companion_secure_salt_2026"
+    # Session signing key. Generated per install when unset; see app/secrets.py.
+    # API_KEY_SALT is the legacy name and is still honoured.
+    SESSION_SECRET: Optional[str] = None
+    API_KEY_SALT: Optional[str] = None
+    # Maximum accepted request body, in bytes. Transcripts are text; 8 MB is
+    # several hours of speech.
+    MAX_REQUEST_BYTES: int = 8 * 1024 * 1024
 
 
 settings = Settings()

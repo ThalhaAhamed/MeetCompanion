@@ -6,7 +6,7 @@ import uuid
 from datetime import date, datetime
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database.connection import get_db
@@ -19,6 +19,9 @@ from app.services.meetstream import meetstream_client
 from app.api.agent import get_active_agent_config_id, _DEFAULT_FIRST_MESSAGE, _require_claimable_agent, get_meetstream_api_key, require_meetstream_api_key
 from app.api.deps import get_current_org_id, get_current_user
 from app.models.database import User
+import logging
+
+logger = logging.getLogger(__name__)
 
 _PLATFORM_MAP = {"gmeet": "google_meet", "zoom": "zoom", "teams": "teams"}
 
@@ -140,7 +143,7 @@ async def create_meeting(
                 await db.refresh(meeting)
         except Exception as e:
             # We don't fail meeting creation if external API fails, but mark status
-            print(f"[WARN] MeetStream bot creation failed: {e}")
+            logger.warning(f"MeetStream bot creation failed: {e}")
             await meeting_repo.update_status(
                 meeting.id,
                 processing_error=f"Failed to launch bot: {str(e)}"
@@ -322,6 +325,10 @@ async def import_bot(
     return meeting
 
 
+#: Roughly six hours of speech. Longer than that is not a meeting.
+MAX_TRANSCRIPT_CHARS = 2_000_000
+
+
 class TranscriptUploadRequest(BaseModel):
     """
     A transcript from anywhere - pasted notes, another recorder, a file.
@@ -330,8 +337,8 @@ class TranscriptUploadRequest(BaseModel):
     with the speaker: "Sara: We should ship on Friday." Lines without a
     speaker are attributed to "Speaker".
     """
-    title: str
-    transcript: str
+    title: str = Field(max_length=500)
+    transcript: str = Field(min_length=1, max_length=MAX_TRANSCRIPT_CHARS)
     started_at: Optional[datetime] = None
     platform: Optional[str] = None
     customer_name: Optional[str] = None

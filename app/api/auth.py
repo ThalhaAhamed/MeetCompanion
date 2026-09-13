@@ -1,6 +1,6 @@
 """
-Per-member login. There's no self-serve signup - members are added by an
-already-logged-in member from the Members page (see app/api/members.py).
+Per-member login. Accounts are created through app/api/members.py - either
+self-signup into a new or joined workspace, or added by an existing member.
 """
 import time
 import uuid
@@ -40,7 +40,7 @@ async def login(body: LoginRequest, response: Response, db: AsyncSession = Depen
         samesite="none",
         secure=True,
     )
-    return {"authenticated": True, "member": {"id": str(user.id), "name": user.name, "email": user.email}}
+    return {"authenticated": True, "member": {"id": str(user.id), "name": user.name, "email": user.email, "role": user.role}}
 
 
 @router.post("/logout")
@@ -63,4 +63,4 @@ async def check(request: Request, db: AsyncSession = Depends(get_db)):
     user = result.scalar_one_or_none()
     if not user:
         return {"authenticated": False}
-    return {"authenticated": True, "member": {"id": str(user.id), "name": user.name, "email": user.email}}
+    return {"authenticated": True, "member": {"id": str(user.id), "name": user.name, "email": user.email, "role": user.role}}

@@ -105,6 +105,14 @@ export function resetMemberPassword(id, new_password) {
   })
 }
 
+export function setMemberRole(id, role) {
+  return req(`/members/${id}/role`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role }),
+  })
+}
+
 export function updateSelf(patch) {
   return req('/members/me', {
     method: 'PATCH',

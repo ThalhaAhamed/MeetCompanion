@@ -46,13 +46,29 @@ class MeetStreamClient:
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
     ):
-        self.api_key = api_key or settings.MEETSTREAM_API_KEY
-        self.base_url = (base_url or settings.MEETSTREAM_API_BASE_URL).rstrip("/")
-        self.headers = {
-            "Content-Type": "application/json",
-        }
-        if self.api_key:
-            self.headers["Authorization"] = f"Token {self.api_key}"
+        self._api_key = api_key
+        self._base_url = base_url
+
+    @property
+    def api_key(self) -> Optional[str]:
+        """Constructor value, else whatever the deployment currently has saved."""
+        if self._api_key:
+            return self._api_key
+        from app.runtime_config import effective_meetstream_api_key
+
+        return effective_meetstream_api_key()
+
+    @property
+    def base_url(self) -> str:
+        if self._base_url:
+            return self._base_url.rstrip("/")
+        from app.runtime_config import effective_meetstream_base_url
+
+        return (effective_meetstream_base_url() or settings.MEETSTREAM_API_BASE_URL).rstrip("/")
+
+    @property
+    def headers(self) -> Dict[str, str]:
+        return self._headers()
 
     def _headers(self, api_key: Optional[str] = None) -> Dict[str, str]:
         """Per-call header set - lets a caller supply their own MeetStream API

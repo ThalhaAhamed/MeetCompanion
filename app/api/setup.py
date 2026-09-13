@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from app.config import settings
@@ -26,6 +26,8 @@ from app.runtime_config import (
     LLMSettings,
     MeetStreamSettings,
     describe_environment_managed,
+    effective_meetstream_api_key,
+    effective_webhook_secret,
     is_configured,
     is_env_managed,
     load_config,
@@ -34,6 +36,35 @@ from app.runtime_config import (
     update_config,
 )
 from app.services.llm import build_llm_config
+from app.api.deps import OWNER
+from app.middleware.auth_gate import COOKIE_NAME, decode_session
+
+
+async def require_setup_access(request: Request) -> None:
+    """
+    First-run setup is open (no account exists yet); afterwards only a
+    workspace owner may read secrets' previews or change configuration.
+    Enforced here rather than in the middleware so the rule is visible next
+    to the endpoints it protects.
+    """
+    if not is_configured():
+        return
+    from app.database.connection import get_db_context
+    from app.models.database import User
+    from sqlalchemy import select
+
+    token = request.cookies.get(COOKIE_NAME)
+    user_id = decode_session(token) if token else None
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sign in required.")
+    async with get_db_context() as db:
+        role = (
+            await db.execute(select(User.role).where(User.id == user_id, User.is_active.is_(True)))
+        ).scalar_one_or_none()
+    if role is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sign in required.")
+    if role != OWNER:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only a workspace owner can change server settings.")
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
 
@@ -56,17 +87,45 @@ class DatabaseConfigPayload(BaseModel):
     def resolve_url(self) -> Optional[str]:
         if self.provider:
             try:
-                return build_database_url(self.provider, self.values)
+                url = build_database_url(self.provider, self.values)
             except ValueError as exc:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-        if self.url:
-            return normalize_database_url(self.url)
-        return None
+        elif self.url:
+            url = normalize_database_url(self.url)
+        else:
+            return None
+        _reject_escaping_sqlite_path(url)
+        return url
+
+
+def _reject_escaping_sqlite_path(url: str) -> None:
+    """
+    A SQLite URL names a file the server process will create and write. A
+    user-supplied path must stay inside the data directory; otherwise the
+    Settings form doubles as "create a file anywhere on this machine".
+    """
+    if dialect_of(url) != "sqlite":
+        return
+    from pathlib import Path
+    from app.runtime_config import config_path
+
+    raw = url.split("///", 1)[1] if "///" in url else ""
+    if not raw or raw == ":memory:":
+        return
+    data_dir = config_path().parent.resolve()
+    target = Path(raw).expanduser()
+    target = (target if target.is_absolute() else Path.cwd() / target).resolve()
+    if data_dir != target and data_dir not in target.parents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"SQLite files must live inside {data_dir}.",
+        )
 
 
 class MeetStreamConfigPayload(BaseModel):
     api_key: Optional[str] = None
     base_url: Optional[str] = None
+    webhook_secret: Optional[str] = None
 
 
 class CompleteSetupPayload(BaseModel):
@@ -76,8 +135,32 @@ class CompleteSetupPayload(BaseModel):
 
 
 @router.get("/status")
-async def setup_status() -> Dict[str, Any]:
-    """Whether onboarding is needed, and what the effective configuration is."""
+async def setup_status(request: Request) -> Dict[str, Any]:
+    """
+    Whether onboarding is needed, and what the effective configuration is.
+
+    Readable by any signed-in member (the UI needs it to boot), but masked
+    key previews, hosts and the database URL are only included for owners.
+    """
+    full = await _full_status()
+    try:
+        await require_setup_access(request)
+        return full
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_403_FORBIDDEN:
+            raise
+    return {
+        "onboarding_completed": full["onboarding_completed"],
+        "needs_setup": full["needs_setup"],
+        "environment_managed": full["environment_managed"],
+        "llm": {"provider": full["llm"].get("provider"), "model": full["llm"].get("model"), "configured": full["llm"].get("configured", False)},
+        "database": {"dialect": full["database"]["dialect"], "provider": full["database"]["provider"]},
+        "meetstream": {"configured": full["meetstream"]["configured"]},
+        "read_only": True,
+    }
+
+
+async def _full_status() -> Dict[str, Any]:
     config = load_config()
 
     try:
@@ -103,19 +186,20 @@ async def setup_status() -> Dict[str, Any]:
             "url": mask_secret(current_url()),
         },
         "meetstream": {
-            "configured": bool(config.meetstream.api_key or settings.MEETSTREAM_API_KEY),
-            "api_key": mask_secret(config.meetstream.api_key or settings.MEETSTREAM_API_KEY),
+            "configured": bool(effective_meetstream_api_key()),
+            "api_key": mask_secret(effective_meetstream_api_key()),
+            "webhook_secret_configured": bool(effective_webhook_secret()),
         },
     }
 
 
 @router.get("/providers")
 async def list_providers() -> Dict[str, Any]:
-    """Everything the onboarding and settings forms need to render themselves."""
+    """Everything the onboarding and settings forms need to render themselves. Catalog only - no secrets."""
     return {"llm": describe_providers(), "databases": describe_databases()}
 
 
-@router.post("/test-llm")
+@router.post("/test-llm", dependencies=[Depends(require_setup_access)])
 async def test_llm(payload: LLMConfigPayload) -> Dict[str, Any]:
     """
     Verify a provider configuration without saving it.
@@ -155,7 +239,7 @@ async def test_llm(payload: LLMConfigPayload) -> Dict[str, Any]:
     return {"ok": result.ok, "detail": result.detail, "models": result.models}
 
 
-@router.post("/test-database")
+@router.post("/test-database", dependencies=[Depends(require_setup_access)])
 async def test_database(payload: DatabaseConfigPayload) -> Dict[str, Any]:
     """Verify a database is reachable before it is saved."""
     url = payload.resolve_url()
@@ -182,7 +266,7 @@ async def test_database(payload: DatabaseConfigPayload) -> Dict[str, Any]:
             await engine.dispose()
 
 
-@router.post("/complete")
+@router.post("/complete", dependencies=[Depends(require_setup_access)])
 async def complete_setup(payload: CompleteSetupPayload) -> Dict[str, Any]:
     """Persist the chosen configuration and leave first-run onboarding."""
     current = load_config()
@@ -232,6 +316,9 @@ async def complete_setup(payload: CompleteSetupPayload) -> Dict[str, Any]:
             if payload.meetstream.api_key is not None
             else current.meetstream.api_key,
             base_url=payload.meetstream.base_url or current.meetstream.base_url,
+            webhook_secret=payload.meetstream.webhook_secret
+            if payload.meetstream.webhook_secret is not None
+            else current.meetstream.webhook_secret,
         )
 
     update_config(
@@ -240,11 +327,11 @@ async def complete_setup(payload: CompleteSetupPayload) -> Dict[str, Any]:
         database=database,
         meetstream=meetstream,
     )
-    return await setup_status()
+    return await _full_status()
 
 
-@router.post("/reset")
+@router.post("/reset", dependencies=[Depends(require_setup_access)])
 async def reset_setup() -> Dict[str, Any]:
     """Forget stored configuration and return to first-run onboarding."""
     reset_config()
-    return await setup_status()
+    return await _full_status()

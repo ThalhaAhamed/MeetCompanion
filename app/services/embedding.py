@@ -17,6 +17,9 @@ import threading
 import numpy as np
 from typing import List, Union
 from app.config import settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _fastembed_name(model_name: str) -> str:
@@ -55,9 +58,9 @@ class EmbeddingService:
                     threads=1,
                 )
                 self._initialized = True
-                print(f"[INFO] Loaded embedding model: {self.model_name} (ONNX)")
+                logger.info(f"Loaded embedding model: {self.model_name} (ONNX)")
             except Exception as e:
-                print(f"[WARN] Embedding model unavailable ({e}). Using deterministic fallback embedding.")
+                logger.warning(f"Embedding model unavailable ({e}). Using deterministic fallback embedding.")
                 self._initialized = True
 
     async def embed_text_async(self, text: str) -> List[float]:

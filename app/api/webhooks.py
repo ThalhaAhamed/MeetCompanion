@@ -15,11 +15,15 @@ from fastapi import APIRouter, Request, Header, HTTPException, BackgroundTasks, 
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
+from app.runtime_config import effective_webhook_secret
 from app.database.connection import get_db, get_db_context
 from app.database.repositories import (
     WebhookEventRepository, MeetingRepository, ProcessingJobRepository
 )
 from app.models.schemas import MeetStreamWebhookPayload
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
@@ -75,9 +79,10 @@ async def handle_meetstream_webhook(
     raw_body = await request.body()
 
     # 1. Verify Signature
-    if settings.MEETSTREAM_WEBHOOK_SECRET:
+    secret = effective_webhook_secret()
+    if secret:
         is_valid = verify_meetstream_signature(
-            secret=settings.MEETSTREAM_WEBHOOK_SECRET,
+            secret=secret,
             raw_body=raw_body,
             signature_header=x_meetstream_signature,
             timestamp_header=x_meetstream_timestamp,
@@ -97,8 +102,17 @@ async def handle_meetstream_webhook(
             detail=f"Malformed JSON payload: {str(e)}",
         )
 
-    bot_id = payload_dict.get("bot_id") or payload_dict.get("id") or "unknown_bot"
-    event_type = payload_dict.get("event") or payload_dict.get("bot_event") or "unknown_event"
+    if not isinstance(payload_dict, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Webhook payload must be a JSON object")
+
+    bot_id = str(payload_dict.get("bot_id") or payload_dict.get("id") or "unknown_bot")[:255]
+    event_type = str(payload_dict.get("event") or payload_dict.get("bot_event") or "unknown_event")[:100]
+
+    # Without a signature the only thing tying a delivery to this install is
+    # the bot id, so events for bots we never launched are dropped rather
+    # than stored - otherwise anyone could fill the events table.
+    if not secret and not await MeetingRepository(db).get_by_bot_id(bot_id):
+        return JSONResponse(status_code=status.HTTP_200_OK, content={"status": "ignored", "reason": "unknown_bot"})
     event_timestamp = payload_dict.get("timestamp") or x_meetstream_timestamp or datetime.now(timezone.utc).isoformat()
 
     # 3. Idempotency Check
@@ -207,7 +221,7 @@ async def process_webhook_event_async(
                         # including transcript_id - it is not a top-level field.
                         transcript_id = bot_resp.get("bot_details", {}).get("transcript_id")
                     except Exception as e:
-                        print(f"[WARN] Failed to fetch bot details for transcript_id lookup: {e}")
+                        logger.warning(f"Failed to fetch bot details for transcript_id lookup: {e}")
 
                 if meeting and transcript_id:
                     await meeting_repo.update_status(
@@ -244,4 +258,4 @@ async def process_webhook_event_async(
         except Exception as e:
             await webhook_repo.mark_processed(event_id, error=str(e))
             await db.commit()
-            print(f"[ERROR] Error processing webhook event {event_id}: {e}")
+            logger.error(f"Error processing webhook event {event_id}: {e}")

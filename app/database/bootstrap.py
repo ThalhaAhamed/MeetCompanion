@@ -15,14 +15,19 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.config import settings
 from app.models.database import Base
+from app.secrets import configured_mcp_token
 
 POSTGRESQL = "postgresql"
+
+#: MCP tokens that were ever shipped as defaults. See app/secrets.py.
+PLACEHOLDER_TOKENS = frozenset({"dev-mcp-token-meetstream-2026", "local-dev-token", "change-me-to-a-random-string"})
 
 
 async def bootstrap(engine: AsyncEngine) -> None:
     """Schema first, then the rows every request depends on."""
     await ensure_schema(engine)
     await ensure_default_workspace(engine)
+    await ensure_workspace_owners(engine)
 
 
 async def ensure_schema(engine: AsyncEngine) -> None:
@@ -118,13 +123,14 @@ async def _patch_legacy_postgres_schema(conn):
     # wired with the single global MCP_AUTH_TOKEN from before per-workspace
     # tokens existed - backfill it as that org's own mcp_token so its agent
     # keeps working without needing to be re-wired.
-    if settings.MCP_AUTH_TOKEN:
+    explicit_token = configured_mcp_token()
+    if explicit_token:
         await conn.execute(
             text(
                 "UPDATE organizations SET mcp_token = :token "
                 "WHERE id = :org_id AND mcp_token IS NULL"
             ),
-            {"token": settings.MCP_AUTH_TOKEN, "org_id": settings.DEFAULT_ORG_ID},
+            {"token": explicit_token, "org_id": settings.DEFAULT_ORG_ID},
         )
     await conn.execute(
         text(
@@ -199,16 +205,57 @@ async def ensure_default_workspace(engine: AsyncEngine) -> None:
                     name="My Workspace",
                     slug="default",
                     settings={},
-                    mcp_token=settings.MCP_AUTH_TOKEN or secrets.token_urlsafe(32),
+                    mcp_token=configured_mcp_token() or secrets.token_urlsafe(32),
                     join_code=secrets.token_hex(4),
                 )
             )
         else:
             # Older databases may predate these columns having values.
-            if not existing.mcp_token and settings.MCP_AUTH_TOKEN:
-                existing.mcp_token = settings.MCP_AUTH_TOKEN
+            if not existing.mcp_token:
+                existing.mcp_token = configured_mcp_token() or secrets.token_urlsafe(32)
+            elif existing.mcp_token in PLACEHOLDER_TOKENS:
+                # Installs created before tokens were generated shipped with a
+                # token that is public in this repository. Replace it; the
+                # agent, if any, is re-wired on next activation.
+                existing.mcp_token = secrets.token_urlsafe(32)
             if not existing.join_code:
                 existing.join_code = secrets.token_hex(4)
         await session.commit()
 
 
+
+
+async def ensure_workspace_owners(engine: AsyncEngine) -> None:
+    """
+    Every workspace has at least one owner.
+
+    Roles predate this code: existing members are all "member". The earliest
+    active member of each workspace without an owner becomes its owner, which
+    is who created it in every realistic history.
+    """
+    from app.models.database import User
+
+    factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        owned = {
+            row[0]
+            for row in (
+                await session.execute(
+                    select(User.organization_id).where(User.role == "owner", User.is_active.is_(True)).distinct()
+                )
+            ).all()
+        }
+        candidates = (
+            await session.execute(
+                select(User).where(User.is_active.is_(True)).order_by(User.organization_id, User.created_at)
+            )
+        ).scalars().all()
+        changed = False
+        for user in candidates:
+            if user.organization_id in owned:
+                continue
+            user.role = "owner"
+            owned.add(user.organization_id)
+            changed = True
+        if changed:
+            await session.commit()

@@ -14,6 +14,9 @@ from app.database.repositories import (
 from app.services.meetstream import meetstream_client
 from app.services.memory import memory_extractor
 from app.rag.meeting_memory import meeting_memory_rag
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_due_date(value):
@@ -137,7 +140,10 @@ class MeetingProcessingPipeline:
                     for s in raw_segments
                 ])
 
-                # 5. Extract structured memories and action items
+                # 5. Extract structured memories and action items. The
+                # transaction is closed first: this call can take minutes and
+                # must not hold the SQLite write lock / a Postgres row lock.
+                await db.commit()
                 extraction_result = await self.memory_extractor.extract_memories(
                     transcript_text=transcript_text,
                     meeting_title=meeting.title,
@@ -201,7 +207,7 @@ class MeetingProcessingPipeline:
                     note = await MeetingNoteService(db).sync(fresh, embed=_embed_note)
                     note_written = note is not None
                 except Exception as note_exc:
-                    print(f"[WARN] Could not write notebook entry for meeting {meeting.id}: {note_exc}")
+                    logger.warning(f"Could not write notebook entry for meeting {meeting.id}: {note_exc}")
 
                 result_payload = {
                     "note_written": note_written,
@@ -222,7 +228,7 @@ class MeetingProcessingPipeline:
                     processing_error=str(e),
                 )
                 await db.commit()
-                print(f"[ERROR] Pipeline execution failed for meeting {meeting_id}: {e}")
+                logger.error(f"Pipeline execution failed for meeting {meeting_id}: {e}")
                 raise
 
 

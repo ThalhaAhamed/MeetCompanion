@@ -27,3 +27,23 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
 
 async def get_current_org_id(user: User = Depends(get_current_user)) -> uuid.UUID:
     return user.organization_id
+
+
+OWNER = "owner"
+
+
+def is_owner(user: User) -> bool:
+    return user.role == OWNER
+
+
+async def require_owner(user: User = Depends(get_current_user)) -> User:
+    """
+    The signed-in member must own their workspace.
+
+    Server-wide configuration (AI provider, database, MeetStream, the agent
+    template) and destructive member actions are owner-only. Without this,
+    anyone who could sign up could reconfigure the whole install.
+    """
+    if not is_owner(user):
+        raise HTTPException(status_code=403, detail="Only a workspace owner can do this.")
+    return user

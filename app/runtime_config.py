@@ -20,6 +20,9 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from app.config import settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 CONFIG_PATH_ENV = "MEET_COMPANION_CONFIG"
 DEFAULT_CONFIG_PATH = Path("data/config.json")
@@ -47,6 +50,8 @@ class DatabaseSettings:
 class MeetStreamSettings:
     api_key: Optional[str] = None
     base_url: Optional[str] = None
+    # Shared secret MeetStream signs webhook deliveries with.
+    webhook_secret: Optional[str] = None
 
 
 @dataclass
@@ -120,7 +125,7 @@ def load_config(*, refresh: bool = False) -> RuntimeConfig:
     except (OSError, ValueError) as exc:
         # A corrupt config must not make the application unbootable; defaults
         # put the user back into onboarding instead.
-        print(f"[WARN] Could not read {path} ({exc}). Falling back to defaults.")
+        logger.warning(f"Could not read {path} ({exc}). Falling back to defaults.")
         _cache = RuntimeConfig()
     return _cache
 
@@ -216,6 +221,7 @@ def describe_environment_managed() -> Dict[str, bool]:
         "llm.base_url": is_env_managed("LLM_BASE_URL"),
         "database.url": is_env_managed("DATABASE_URL"),
         "meetstream.api_key": is_env_managed("MEETSTREAM_API_KEY"),
+        "meetstream.webhook_secret": is_env_managed("MEETSTREAM_WEBHOOK_SECRET"),
     }
 
 
@@ -233,3 +239,16 @@ def is_configured() -> bool:
         is_env_managed("LLM_API_KEY")
         or (os.environ.get("LLM_PROVIDER") or settings.LLM_PROVIDER) == "ollama"
     )
+
+
+def effective_meetstream_api_key() -> Optional[str]:
+    """The deployment-wide MeetStream key: environment, then saved config, then .env."""
+    return resolve("MEETSTREAM_API_KEY", load_config().meetstream.api_key, settings.MEETSTREAM_API_KEY)
+
+
+def effective_meetstream_base_url() -> str:
+    return resolve("MEETSTREAM_API_BASE_URL", load_config().meetstream.base_url, settings.MEETSTREAM_API_BASE_URL)
+
+
+def effective_webhook_secret() -> Optional[str]:
+    return resolve("MEETSTREAM_WEBHOOK_SECRET", load_config().meetstream.webhook_secret, settings.MEETSTREAM_WEBHOOK_SECRET)
