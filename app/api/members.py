@@ -13,6 +13,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.connection import get_db
 from app.models.database import User, Organization
@@ -138,7 +139,12 @@ async def add_member(body: CreateMemberRequest, request: Request, db: AsyncSessi
         is_active=True,
     )
     db.add(user)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Two sign-ups for the same address raced; the database kept one.
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="A member with that email already exists.")
     return MemberOut(id=str(user.id), name=user.name, email=user.email, role=user.role)
 
 

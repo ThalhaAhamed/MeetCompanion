@@ -28,6 +28,7 @@ async def bootstrap(engine: AsyncEngine) -> None:
     await ensure_schema(engine)
     await ensure_default_workspace(engine)
     await ensure_workspace_owners(engine)
+    await prune_operational_tables(engine)
 
 
 async def ensure_schema(engine: AsyncEngine) -> None:
@@ -53,6 +54,10 @@ async def ensure_schema(engine: AsyncEngine) -> None:
             await _create_postgres_vector_indexes(conn)
             await _patch_legacy_postgres_schema(conn)
         await _patch_action_items(conn, dialect)
+        # Uniqueness used to be enforced only by the API (a check-then-insert
+        # race). A unique index closes it on databases created before the
+        # column carried the constraint; create_all already did it for new ones.
+        await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_users_email ON users (email)"))
 
 
 async def _patch_action_items(conn, dialect: str) -> None:
@@ -95,16 +100,31 @@ async def _patch_action_items(conn, dialect: str) -> None:
 
 async def _create_postgres_vector_indexes(conn):
     """
-    Create the ivfflat indexes that back similarity search on Postgres.
+    Create the HNSW indexes that back similarity search on Postgres.
 
     These cannot be declared on the ORM models because the index type only
     exists in pgvector; the portable backend needs no index at all.
+
+    HNSW rather than ivfflat: ivfflat builds its centroids from whatever
+    rows exist at CREATE INDEX time, so an index created on an empty table
+    (every fresh install) has meaningless lists and poor recall until
+    someone reindexes by hand. HNSW builds incrementally and needs no
+    training data. Databases that already have the old ivfflat index keep
+    working; the ivfflat one is dropped and replaced the first time a new
+    version starts.
     """
-    for table in ("meeting_memory_embeddings", "company_knowledge_embeddings"):
+    for table in ("meeting_memory_embeddings", "company_knowledge_embeddings", "notes"):
+        await conn.execute(text(f"DROP INDEX IF EXISTS idx_{table}_embedding_ivfflat"))
+        legacy = await conn.execute(
+            text("SELECT indexdef FROM pg_indexes WHERE indexname = :name"), {"name": f"idx_{table}_embedding"}
+        )
+        definition = legacy.scalar_one_or_none() or ""
+        if "ivfflat" in definition:
+            await conn.execute(text(f"DROP INDEX IF EXISTS idx_{table}_embedding"))
         await conn.execute(
             text(
                 f"CREATE INDEX IF NOT EXISTS idx_{table}_embedding "
-                f"ON {table} USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"
+                f"ON {table} USING hnsw (embedding vector_cosine_ops)"
             )
         )
 
@@ -259,3 +279,24 @@ async def ensure_workspace_owners(engine: AsyncEngine) -> None:
             changed = True
         if changed:
             await session.commit()
+
+
+#: Webhook deliveries and processing-job records are diagnostics, not data.
+#: Older rows than this are deleted at startup so the tables cannot grow
+#: without bound on a long-running install.
+OPERATIONAL_RETENTION_DAYS = 30
+
+
+async def prune_operational_tables(engine: AsyncEngine) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import delete
+
+    from app.models.database import ProcessingJob, WebhookEvent
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=OPERATIONAL_RETENTION_DAYS)
+    factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        await session.execute(delete(WebhookEvent).where(WebhookEvent.received_at < cutoff, WebhookEvent.processed.is_(True)))
+        await session.execute(delete(ProcessingJob).where(ProcessingJob.created_at < cutoff, ProcessingJob.status != "running"))
+        await session.commit()

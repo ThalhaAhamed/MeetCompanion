@@ -345,3 +345,17 @@ def test_api_docs_are_off_outside_development(monkeypatch):
     finally:
         monkeypatch.setattr(settings, "APP_ENV", "development")
         importlib.reload(main_module)
+
+
+@pytest.mark.asyncio
+async def test_duplicate_email_is_refused_by_the_database_not_just_the_api():
+    from sqlalchemy.exc import IntegrityError
+
+    email = f"dup-{uuid.uuid4().hex[:6]}@example.com"
+    async with _client() as a:
+        await _signup(a, email, workspace="Lambda")
+    async with AsyncSessionLocal() as session:
+        org_id = (await session.execute(select(User.organization_id).where(User.email == email))).scalar_one()
+        session.add(User(organization_id=org_id, email=email, name="Twin", is_active=True, settings={}))
+        with pytest.raises(IntegrityError):
+            await session.commit()

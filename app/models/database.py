@@ -64,7 +64,8 @@ class User(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
-    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Globally unique: sign-in is by email alone, with no workspace picker.
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     role: Mapped[str] = mapped_column(String(50), default="member")
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

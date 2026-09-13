@@ -13,12 +13,10 @@ from sqlalchemy import and_, func, select, text
 
 from app.providers.database.base import ScoredRow, SearchBackend
 
-# The ivfflat index defaults to probes=1, scanning roughly 1% of the index's
-# clusters per query. At realistic per-workspace data volumes that skips true
-# nearest neighbours outright rather than merely ranking them lower, so recall
-# suffers badly. Raising probes trades a little query time for dramatically
-# better recall.
-IVFFLAT_PROBES = 10
+# HNSW's default ef_search of 40 is tuned for large corpora; for a meeting
+# history (thousands of chunks, not millions) a wider candidate list costs
+# microseconds and noticeably improves recall for the top-10.
+HNSW_EF_SEARCH = 100
 
 
 class PostgresSearchBackend(SearchBackend):
@@ -33,7 +31,7 @@ class PostgresSearchBackend(SearchBackend):
         limit: int,
         min_similarity: float = 0.0,
     ) -> List[ScoredRow]:
-        await self.session.execute(text(f"SET LOCAL ivfflat.probes = {IVFFLAT_PROBES}"))
+        await self.session.execute(text(f"SET LOCAL hnsw.ef_search = {HNSW_EF_SEARCH}"))
 
         distance = model.embedding.cosine_distance(query_embedding).label("distance")
         stmt = (
