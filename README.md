@@ -242,6 +242,8 @@ Everything is configurable from **Settings** in the app. Precedence is:
 | `APP_HOST` | `127.0.0.1` | Bind address; `0.0.0.0` to accept connections from other machines |
 | `CORS_ORIGINS` | `[]` | Extra origins allowed to call the API with a session cookie |
 | `SESSION_SECRET` | generated | Cookie signing key; generated into `data/session.key` on first run |
+| `TRUST_PROXY` | `false` | Read client address/scheme from `X-Forwarded-*` — only behind your own reverse proxy |
+| `API_DOCS` | dev only | Interactive API docs at `/docs` |
 
 Configuration saved from the UI lives in `data/config.json` next to the SQLite
 database, alongside `session.key`. All of `data/` is gitignored — it holds API
@@ -290,8 +292,8 @@ What leaves the machine, and only when you enable it:
   agent configuration including this server's MCP token.
 - **Hugging Face** serves a one-time download of the embedding model.
 
-API keys are stored in plaintext in `data/config.json` (server-wide) and in the
-database (per-member MeetStream keys). Protect the `data` directory the way you
+API keys are stored in plaintext: server-wide ones in `data/config.json`,
+per-member MeetStream keys in the `users.settings` column of the database. Protect the `data` directory the way you
 would protect a `.env` file. There is no telemetry.
 
 ## 🛡️ Security model

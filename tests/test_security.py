@@ -31,10 +31,6 @@ async def _signup(client, email, *, workspace=None, join_code=None):
     assert resp.status_code == 200, resp.text
     login = await client.post("/api/auth/login", json={"email": email, "password": "correct-horse-battery"})
     assert login.status_code == 200, login.text
-    # The cookie is marked Secure; the test transport is plain http, so the
-    # jar would withhold it. Carry it explicitly.
-    token = login.headers["set-cookie"].split(f"{COOKIE_NAME}=", 1)[1].split(";", 1)[0]
-    client.cookies.set(COOKIE_NAME, token)
     return resp.json()
 
 
@@ -207,6 +203,8 @@ def test_placeholder_secrets_are_never_accepted(monkeypatch, tmp_path):
     monkeypatch.setenv("MEET_COMPANION_CONFIG", str(tmp_path / "config.json"))
     monkeypatch.setenv("SESSION_SECRET", "change-me-to-a-random-string")
     monkeypatch.setenv("MCP_AUTH_TOKEN", "dev-mcp-token-meetstream-2026")
+    for name in ("SESSION_SECRET", "API_KEY_SALT", "MCP_AUTH_TOKEN"):
+        monkeypatch.setattr(settings, name, "change-me")  # a placeholder in .env too
     app_secrets.reset_for_tests()
     try:
         generated = app_secrets.session_secret()
@@ -270,3 +268,75 @@ def test_action_item_update_schema_validation():
     update_valid = ActionItemUpdate(status="completed", notes="Sent by Sarah")
     assert update_valid.status == "completed"
     assert update_valid.notes == "Sent by Sarah"
+
+
+# ---------------------------------------------------------------------------
+# Cookie flags, proxy trust, .env secrets, API docs
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_cookie_is_usable_over_plain_http_and_strict_over_https():
+    email = f"c-{uuid.uuid4().hex[:6]}@example.com"
+    async with _client() as c:
+        await _signup(c, email, workspace="Kappa")
+    creds = {"email": email, "password": "correct-horse-battery"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://lan-box:8000") as http:
+        header = (await http.post("/api/auth/login", json=creds)).headers["set-cookie"].lower()
+        assert "secure" not in header and "samesite=lax" in header
+        # The jar keeps a non-Secure cookie over http, so the session just works.
+        assert (await http.get("/api/auth/check")).json()["authenticated"] is True
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://hosted.example") as https:
+        header = (await https.post("/api/auth/login", json=creds)).headers["set-cookie"].lower()
+        assert "secure" in header and "samesite=none" in header
+
+
+@pytest.mark.asyncio
+async def test_forwarded_for_is_ignored_unless_proxy_is_trusted(monkeypatch):
+    async def attempts(n):
+        codes = []
+        async with _client() as c:
+            for i in range(n):
+                resp = await c.post(
+                    "/api/auth/login",
+                    json={"email": "nobody@example.com", "password": "wrong"},
+                    headers={"X-Forwarded-For": f"10.0.0.{i}"},
+                )
+                codes.append(resp.status_code)
+        return codes
+
+    monkeypatch.setattr(settings, "TRUST_PROXY", False)
+    assert (await attempts(12))[-1] == 429  # spoofed addresses do not reset the bucket
+    rate_limiter.reset()
+    monkeypatch.setattr(settings, "TRUST_PROXY", True)
+    assert 429 not in await attempts(12)  # behind a real proxy each address is its own client
+
+
+def test_dotenv_session_secret_is_honoured(monkeypatch, tmp_path):
+    from app import secrets as app_secrets
+
+    monkeypatch.setenv("MEET_COMPANION_CONFIG", str(tmp_path / "config.json"))
+    monkeypatch.delenv("SESSION_SECRET", raising=False)
+    monkeypatch.delenv("API_KEY_SALT", raising=False)
+    # What pydantic would have read from a .env file:
+    monkeypatch.setattr(settings, "SESSION_SECRET", "from-the-dotenv-file-0123456789abcdef")
+    app_secrets.reset_for_tests()
+    try:
+        assert app_secrets.session_secret() == "from-the-dotenv-file-0123456789abcdef"
+        assert not (tmp_path / "session.key").exists()
+    finally:
+        app_secrets.reset_for_tests()
+
+
+def test_api_docs_are_off_outside_development(monkeypatch):
+    import importlib
+
+    from app import main as main_module
+
+    monkeypatch.setattr(settings, "APP_ENV", "production")
+    monkeypatch.setattr(settings, "API_DOCS", None)
+    reloaded = importlib.reload(main_module)
+    try:
+        assert reloaded.app.docs_url is None and reloaded.app.openapi_url is None
+    finally:
+        monkeypatch.setattr(settings, "APP_ENV", "development")
+        importlib.reload(main_module)

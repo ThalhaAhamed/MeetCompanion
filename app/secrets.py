@@ -84,14 +84,28 @@ def session_secret() -> str:
     """
     global _session_secret
     if _session_secret is None:
-        for name in ("SESSION_SECRET", "API_KEY_SALT"):
-            value = os.environ.get(name)
+        for value in _configured("SESSION_SECRET", "API_KEY_SALT"):
             if not is_placeholder(value):
                 _session_secret = value.strip()
                 break
         else:
             _session_secret = _file_secret("session.key")
     return _session_secret
+
+
+def _configured(*names: str):
+    """
+    Candidate values for a setting: the process environment first, then the
+    .env file. pydantic reads .env into `settings` without exporting it, so
+    looking at os.environ alone would silently ignore a value a user put
+    exactly where .env.example told them to.
+    """
+    from app.config import settings
+
+    for name in names:
+        yield os.environ.get(name)
+    for name in names:
+        yield getattr(settings, name, None)
 
 
 def configured_mcp_token() -> Optional[str]:
@@ -101,8 +115,10 @@ def configured_mcp_token() -> Optional[str]:
     Used only to keep an existing default workspace's already-wired agent
     working. New workspaces always get a random token.
     """
-    value = os.environ.get("MCP_AUTH_TOKEN")
-    return None if is_placeholder(value) else value.strip()
+    for value in _configured("MCP_AUTH_TOKEN"):
+        if not is_placeholder(value):
+            return value.strip()
+    return None
 
 
 def reset_for_tests() -> None:

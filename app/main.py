@@ -50,8 +50,15 @@ async def lifespan(app: FastAPI):
     logger.info("%s shutting down", settings.APP_NAME)
 
 
+# Interactive API docs are a development convenience; on a reachable server
+# they only tell a stranger what to poke at.
+_docs_enabled = settings.API_DOCS if settings.API_DOCS is not None else settings.APP_ENV == "development"
+
 app = FastAPI(
     title=settings.APP_NAME,
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
     description="Self-hosted meeting memory: transcripts become searchable notes, action items and an MCP tool server.",
     version=settings.APP_VERSION,
     lifespan=lifespan,
@@ -118,7 +125,7 @@ if STATIC_DIR is None:
             "app": settings.APP_NAME,
             "version": settings.APP_VERSION,
             "status": "online",
-            "docs_url": "/docs",
+            "docs_url": "/docs" if _docs_enabled else None,
             "mcp_endpoint": "/mcp",
         }
 

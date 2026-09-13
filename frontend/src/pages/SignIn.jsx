@@ -161,7 +161,7 @@ export default function SignIn({ onSignedIn }) {
         </Card>
 
         <p className="mt-5 text-center text-xs" style={{ color: 'var(--text-faint)' }}>
-          Forgot your password? Any teammate can reset it from the Members page.
+          Forgot your password? A workspace owner can reset it from the Members page.
         </p>
       </div>
     </div>

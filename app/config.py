@@ -85,6 +85,13 @@ class Settings(BaseSettings):
     # API_KEY_SALT is the legacy name and is still honoured.
     SESSION_SECRET: Optional[str] = None
     API_KEY_SALT: Optional[str] = None
+    # Trust X-Forwarded-For / X-Forwarded-Proto from the immediate client.
+    # Only turn on behind a reverse proxy you control; otherwise anyone can
+    # spoof their address (and so the rate limit) with a header.
+    TRUST_PROXY: bool = False
+    # Serve the interactive API docs (/docs, /redoc, /openapi.json). On by
+    # default in development, off elsewhere.
+    API_DOCS: Optional[bool] = None
     # Maximum accepted request body, in bytes. Transcripts are text; 8 MB is
     # several hours of speech.
     MAX_REQUEST_BYTES: int = 8 * 1024 * 1024

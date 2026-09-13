@@ -31,11 +31,18 @@ RATE_LIMITED: Dict[Tuple[str, str], Tuple[int, int]] = {
 
 
 def _client_key(request: Request) -> str:
-    # Behind a reverse proxy the real client is in X-Forwarded-For; the
-    # last hop is what actually connected to us and is the honest fallback.
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """
+    Who to rate-limit. X-Forwarded-For is only believed when the deployment
+    says it sits behind a proxy (TRUST_PROXY) - otherwise a client can put
+    a fresh made-up address in the header on every request and never be
+    limited at all.
+    """
+    from app.config import settings
+
+    if settings.TRUST_PROXY:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
 
 
