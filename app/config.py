@@ -19,7 +19,9 @@ class Settings(BaseSettings):
 
     # ---- Application ----
     APP_NAME: str = "Meet Companion"
-    APP_VERSION: str = "1.0.0"
+    # Single source of truth for the version is the git tag; the release
+    # workflow stamps it here and into desktop/package.json before building.
+    APP_VERSION: str = "0.1.0"
     APP_ENV: str = "development"
     # Loopback by default: a fresh server must not be configurable by whoever
     # on the network reaches it first. Containers set APP_HOST=0.0.0.0.

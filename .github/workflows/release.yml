@@ -46,6 +46,14 @@ jobs:
             frontend/package-lock.json
             desktop/package-lock.json
 
+      - name: Stamp version from the tag
+        # The tag is the single source of truth: a v1.2.3 tag produces
+        # installers, an app and an API that all report 1.2.3. Manual runs
+        # keep whatever is committed.
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: python scripts/stamp_version.py "${GITHUB_REF_NAME#v}"
+
       - name: Build web UI
         working-directory: frontend
         run: |
