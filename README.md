@@ -119,8 +119,8 @@ Download from the [latest release](https://github.com/ThalhaAhamed/MeetCompanion
 ### 🐧 Linux
 
 ```bash
-chmod +x MeetCompanion-Linux-x64.AppImage
-./MeetCompanion-Linux-x64.AppImage
+chmod +x MeetCompanion-Linux-x86_64.AppImage
+./MeetCompanion-Linux-x86_64.AppImage
 ```
 
 ### What happens on first launch
