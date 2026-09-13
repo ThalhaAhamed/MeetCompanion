@@ -45,6 +45,7 @@ any provider key you have; SQLite is the default database.
 ```bash
 python -m pytest              # runs on a throwaway SQLite file, no network
 npm --prefix frontend run lint
+npm --prefix frontend test
 npm --prefix frontend run build
 ```
 

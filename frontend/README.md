@@ -7,6 +7,7 @@ which the Vite dev server proxies to `http://localhost:8000`.
 npm install
 npm run dev      # http://localhost:3000
 npm run lint     # oxlint
+npm test         # vitest + testing-library
 npm run build    # -> dist/, which the API server serves when present
 ```
 

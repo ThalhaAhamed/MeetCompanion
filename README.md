@@ -353,6 +353,7 @@ are created automatically.
 ```bash
 .venv/Scripts/python -m pytest          # hermetic: throwaway SQLite, no network
 npm --prefix frontend run lint
+npm --prefix frontend test
 ```
 
 ### Building the desktop app
