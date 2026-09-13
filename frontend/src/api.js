@@ -46,7 +46,9 @@ function extractMessage(body, status, statusText) {
 
 async function req(path, options) {
   const res = await fetch(`${BASE}${path}`, { credentials: 'include', ...options })
-  if (res.status === 401) {
+  // A 401 from the login endpoint is a wrong password, not a lost session -
+  // let its own message through instead of kicking the user to sign-in.
+  if (res.status === 401 && path !== '/auth/login') {
     window.dispatchEvent(new Event('hub:unauthorized'))
     throw new Error('Your session has expired. Please sign in again.')
   }
