@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Page, PageHeader } from '../components/AppShell'
 import { AskAiIcon } from '../components/Icons'
 import { Badge, Card, EmptyState, ErrorMessage, Spinner } from '../components/ui'
 import Markdown from '../components/Markdown'
-import { askNotebook, listFolders } from '../api'
+import { askNotebook, deleteDocument, listDocuments, listFolders, uploadDocument } from '../api'
 
 const SUGGESTIONS = [
   'What were the action items from my recent meetings?',
@@ -12,6 +12,97 @@ const SUGGESTIONS = [
   'Summarise everything I have on Project Alpha.',
   'What questions are still unresolved?',
 ]
+
+/**
+ * Uploaded reference material - specs, contracts, handbooks - that Ask AI
+ * reads alongside notes and meetings. Chunked and embedded on upload.
+ */
+function DocumentsPanel() {
+  const [documents, setDocuments] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const input = useRef(null)
+
+  async function load() {
+    try {
+      setDocuments(await listDocuments())
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  useEffect(() => {
+    load()
+  }, [])
+
+  async function upload(event) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    setBusy(true)
+    setError(null)
+    try {
+      await uploadDocument(file)
+      await load()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+      if (input.current) input.current.value = ''
+    }
+  }
+
+  async function remove(doc) {
+    if (!window.confirm(`Remove "${doc.filename}" from Ask AI?`)) return
+    setError(null)
+    try {
+      await deleteDocument(doc.document_id)
+      await load()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  return (
+    <Card className="mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">Documents</h2>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            Reference material Ask AI can quote: PDF, Word, Markdown, text or CSV, up to 25 MB.
+          </p>
+        </div>
+        <label className="mc-btn mc-btn-secondary cursor-pointer">
+          {busy ? <Spinner size={13} /> : null} {busy ? 'Indexing…' : 'Upload document'}
+          <input ref={input} type="file" accept=".pdf,.docx,.txt,.md,.csv" className="hidden" onChange={upload} disabled={busy} />
+        </label>
+      </div>
+      {error && <div className="mt-3"><ErrorMessage title="Document problem" detail={error} /></div>}
+      {documents && documents.length > 0 && (
+        <ul className="mt-3 flex flex-wrap gap-2">
+          {documents.map((doc) => (
+            <li key={doc.document_id || doc.filename} className="flex items-center gap-1">
+              <Badge tone="neutral">
+                {doc.filename} · {doc.chunks_count} chunk{doc.chunks_count === 1 ? '' : 's'}
+              </Badge>
+              {doc.document_id && (
+                <button
+                  type="button"
+                  className="text-xs"
+                  style={{ color: 'var(--text-faint)' }}
+                  onClick={() => remove(doc)}
+                  aria-label={`Remove ${doc.filename}`}
+                  title="Remove"
+                >
+                  ✕
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  )
+}
 
 function flatten(nodes, depth = 0, acc = []) {
   for (const node of nodes || []) {
@@ -52,7 +143,7 @@ export default function AskAi() {
       const result = await askNotebook(payload)
       setThread((current) => [
         ...current,
-        { role: 'assistant', text: result.answer, sources: result.sources, model: result.model },
+        { role: 'assistant', text: result.answer, sources: result.sources, documents: result.documents, model: result.model },
       ])
     } catch (err) {
       setError(err.message)
@@ -67,7 +158,7 @@ export default function AskAi() {
     <Page>
       <PageHeader
         title="Ask AI"
-        description="Questions answered from your own notes and meetings, using the provider you configured."
+        description="Questions answered from your notes, meetings and uploaded documents, using the provider you configured."
         actions={
           <select
             className="mc-input w-auto"
@@ -89,6 +180,8 @@ export default function AskAi() {
           <ErrorMessage title="Could not answer that" detail={error} />
         </div>
       )}
+
+      <DocumentsPanel />
 
       <Card padded={false} className="flex min-h-[60vh] flex-col">
         <div className="mc-scroll flex-1 overflow-y-auto p-5">
@@ -130,15 +223,20 @@ export default function AskAi() {
                     {entry.role === 'user' ? entry.text : <Markdown source={entry.text} className="text-sm" />}
                   </div>
 
-                  {entry.sources?.length > 0 && (
+                  {(entry.sources?.length > 0 || entry.documents?.length > 0) && (
                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
                       <span className="text-[0.7rem]" style={{ color: 'var(--text-faint)' }}>
                         Sources:
                       </span>
-                      {entry.sources.map((source) => (
+                      {entry.sources?.map((source) => (
                         <Link key={source.id} to={`/notebook/${source.id}`}>
                           <Badge tone="brand">{source.title}</Badge>
                         </Link>
+                      ))}
+                      {entry.documents?.map((doc) => (
+                        <Badge key={doc.id || doc.title} tone="neutral" title="Uploaded document">
+                          📄 {doc.title}
+                        </Badge>
                       ))}
                     </div>
                   )}

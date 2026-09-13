@@ -239,6 +239,10 @@ export function activateAgent(agent_config_id) {
   })
 }
 
+export function deleteDocument(id) {
+  return req(`/documents/${id}`, { method: 'DELETE' })
+}
+
 export function uploadDocument(file) {
   const form = new FormData()
   form.append('file', file)

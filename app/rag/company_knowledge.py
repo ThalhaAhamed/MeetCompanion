@@ -8,9 +8,9 @@ import os
 from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.embedding import embedding_service
-from app.database.repositories import VectorRepository
 from app.models.database import CompanyKnowledgeEmbedding
-from app.models.schemas import SearchResultItem
+from app.providers.database import get_search_backend
+from app.rag.retrieval import reciprocal_rank_fusion
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
@@ -71,6 +71,51 @@ class CompanyKnowledgeRAG:
 
         await db.flush()
         return len(chunks)
+
+    async def search(
+        self,
+        db: AsyncSession,
+        org_id: uuid.UUID,
+        query: str,
+        *,
+        limit: int = 6,
+        min_similarity: float = 0.3,
+    ) -> List[Dict[str, Any]]:
+        """
+        Passages from uploaded documents relevant to the query, hybrid-ranked
+        the same way meeting memory is (vector + keyword, fused by rank), on
+        whichever database backend is live.
+        """
+        backend = get_search_backend(db)
+        conditions = [CompanyKnowledgeEmbedding.organization_id == org_id]
+        pool = max(limit * 3, 12)
+
+        vector_hits: List = []
+        try:
+            embedded = await self.embedding_service.embed_text_async(query)
+            vector_hits = await backend.vector_search(
+                CompanyKnowledgeEmbedding, conditions, embedded, limit=pool, min_similarity=min_similarity
+            )
+        except Exception:
+            vector_hits = []
+        keyword_hits = await backend.keyword_search(CompanyKnowledgeEmbedding, conditions, query, limit=pool)
+
+        def as_dicts(hits):
+            return [
+                {
+                    "id": str(row.id),
+                    "document_id": str(row.document_id) if row.document_id else None,
+                    "source_name": row.source_name,
+                    "content": row.content,
+                }
+                for row, _score in hits
+            ]
+
+        fused = reciprocal_rank_fusion([as_dicts(vector_hits), as_dicts(keyword_hits)])
+        return [
+            {k: v for k, v in item.items() if k != "id"}
+            for item in fused[:limit]
+        ]
 
 
 company_knowledge_rag = CompanyKnowledgeRAG()

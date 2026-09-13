@@ -9,7 +9,7 @@ from datetime import date, datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status, Query
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database.connection import get_db
@@ -141,3 +141,21 @@ async def list_documents(
         }
         for row in result.all()
     ]
+
+
+@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_document(
+    document_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_org_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a document and every chunk indexed from it."""
+    result = await db.execute(
+        delete(CompanyKnowledgeEmbedding).where(
+            CompanyKnowledgeEmbedding.organization_id == org_id,
+            CompanyKnowledgeEmbedding.document_id == document_id,
+        )
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Document not found")
+    await db.commit()
