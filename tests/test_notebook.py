@@ -477,3 +477,33 @@ async def test_transcript_upload_parses_speakers_and_rejects_empty(authed_client
     ]
     response = await authed_client.post("/api/meetings/upload", json={"title": "x", "transcript": "  \n "})
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_upload_processes_in_the_background_and_reprocess_refuses_while_running(authed_client):
+    import uuid as _uuid
+
+    from app.services.processing import processing_pipeline
+
+    response = await authed_client.post(
+        "/api/meetings/upload",
+        json={"title": "Background", "transcript": "Ana: We decided to launch in May.\nBen: I will draft the plan."},
+    )
+    assert response.status_code == 202
+    meeting = response.json()
+    meeting_id = _uuid.UUID(meeting["id"])
+    assert meeting["processing_status"] == "queued_for_processing"
+    assert processing_pipeline.is_running(meeting_id)
+
+    # A second reprocess while the first run is live is refused, not duplicated.
+    assert (await authed_client.post(f"/api/meetings/{meeting_id}/reprocess")).status_code == 409
+
+    await processing_pipeline.wait_for(meeting_id)
+    done = (await authed_client.get(f"/api/meetings/{meeting_id}")).json()
+    assert done["processing_status"] == "completed"
+    assert done["summary"]
+
+    again = await authed_client.post(f"/api/meetings/{meeting_id}/reprocess")
+    assert again.status_code == 202 and again.json()["processing_status"] == "queued_for_processing"
+    await processing_pipeline.wait_for(meeting_id)
+    assert (await authed_client.get(f"/api/meetings/{meeting_id}")).json()["processing_status"] == "completed"

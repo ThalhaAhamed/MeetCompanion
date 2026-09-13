@@ -253,7 +253,7 @@ function UploadTranscriptModal({ open, onClose, onUploaded }) {
         </Field>
         {error && <div className="mb-4"><ErrorMessage title="Upload failed" detail={error} /></div>}
         <button type="submit" className="mc-btn mc-btn-primary w-full" disabled={busy || !form.transcript.trim()}>
-          {busy ? <Spinner size={14} /> : null} {busy ? 'Extracting…' : 'Upload and extract'}
+          {busy ? <Spinner size={14} /> : null} {busy ? 'Uploading…' : 'Upload and extract'}
         </button>
       </form>
     </Modal>
@@ -273,6 +273,26 @@ function MeetingDetail({ meetingId, onChanged }) {
     setTab('summary')
     getMeeting(meetingId).then(setMeeting).catch((err) => setError(err.message))
   }, [meetingId])
+
+  // Extraction runs in the background after upload/reprocess; keep the
+  // page current until it settles, then tell the list to refresh too.
+  const inFlight = meeting && ['queued_for_processing', 'processing'].includes(meeting.processing_status)
+  useEffect(() => {
+    if (!inFlight) return undefined
+    const timer = setInterval(async () => {
+      try {
+        const fresh = await getMeeting(meetingId)
+        setMeeting(fresh)
+        if (!['queued_for_processing', 'processing'].includes(fresh.processing_status)) {
+          setTranscript(null)
+          onChanged?.()
+        }
+      } catch {
+        // Transient; the next tick retries.
+      }
+    }, 2500)
+    return () => clearInterval(timer)
+  }, [inFlight, meetingId, onChanged])
 
   useEffect(() => {
     if (tab !== 'transcript' || transcript !== null) return
@@ -296,10 +316,7 @@ function MeetingDetail({ meetingId, onChanged }) {
     setReprocessing(true)
     setError(null)
     try {
-      await reprocessMeeting(meetingId)
-      setMeeting(await getMeeting(meetingId))
-      setTranscript(null)
-      onChanged?.()
+      setMeeting(await reprocessMeeting(meetingId))
     } catch (err) {
       setError(err.message)
     } finally {
@@ -339,10 +356,10 @@ function MeetingDetail({ meetingId, onChanged }) {
                 type="button"
                 className="mc-btn mc-btn-secondary"
                 onClick={reprocess}
-                disabled={reprocessing}
+                disabled={reprocessing || inFlight}
                 title="Run extraction again with the current AI provider"
               >
-                {reprocessing ? <Spinner size={13} /> : null} {reprocessing ? 'Extracting…' : 'Reprocess'}
+                {reprocessing || inFlight ? <Spinner size={13} /> : null} {inFlight ? 'Extracting…' : 'Reprocess'}
               </button>
             )}
             {isLive && (

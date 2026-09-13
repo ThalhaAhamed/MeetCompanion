@@ -57,12 +57,17 @@ async def test_other_workspace_cannot_read_or_change_my_data():
 
         note = (await a.post("/api/notebook/notes", json={"title": "Alpha secret", "content": "- [ ] ship it"})).json()
         folder = (await a.post("/api/notebook/folders", json={"name": "Alpha folder"})).json()
-        meeting = (
-            await a.post(
-                "/api/meetings/upload",
-                json={"title": "Alpha call", "transcript": "Sam: I will send the SOC2 report tomorrow."},
-            )
-        ).json()
+        upload = await a.post(
+            "/api/meetings/upload",
+            json={"title": "Alpha call", "transcript": "Sam: I will send the SOC2 report tomorrow."},
+        )
+        assert upload.status_code == 202
+        meeting = upload.json()
+        assert meeting["processing_status"] == "queued_for_processing"
+        from app.services.processing import processing_pipeline
+
+        await processing_pipeline.wait_for(uuid.UUID(meeting["id"]))
+        assert (await a.get(f"/api/meetings/{meeting['id']}")).json()["processing_status"] == "completed"
         items = (await a.get("/api/action-items")).json()
         item_id = items["action_items"][0]["id"]
 

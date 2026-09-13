@@ -232,4 +232,48 @@ class MeetingProcessingPipeline:
                 raise
 
 
+    # ------------------------------------------------------------------
+    # Background execution
+    #
+    # Extraction can take minutes on a long meeting; an HTTP request must
+    # not sit on it (proxies time out, the UI hangs). Work is launched as an
+    # asyncio task and tracked per meeting so a second request for the same
+    # meeting joins the running one instead of starting a duplicate.
+    # ------------------------------------------------------------------
+
+    _running: Dict[uuid.UUID, "asyncio.Task"] = {}
+
+    def start_in_background(self, meeting_id: uuid.UUID, **kwargs) -> "asyncio.Task":
+        import asyncio
+
+        existing = self._running.get(meeting_id)
+        if existing and not existing.done():
+            return existing
+
+        async def run():
+            try:
+                await self.process_meeting_transcript(meeting_id=meeting_id, **kwargs)
+            except Exception as exc:
+                # process_meeting_transcript already recorded the failure on
+                # the meeting row; this only keeps the task from being an
+                # "unretrieved exception" warning.
+                logger.error("Background processing failed for meeting %s: %s", meeting_id, exc)
+            finally:
+                self._running.pop(meeting_id, None)
+
+        task = asyncio.create_task(run())
+        self._running[meeting_id] = task
+        return task
+
+    def is_running(self, meeting_id: uuid.UUID) -> bool:
+        task = self._running.get(meeting_id)
+        return bool(task and not task.done())
+
+    async def wait_for(self, meeting_id: uuid.UUID) -> None:
+        """Block until the meeting's background run finishes (tests, scripts)."""
+        task = self._running.get(meeting_id)
+        if task:
+            await task
+
+
 processing_pipeline = MeetingProcessingPipeline()

@@ -362,7 +362,7 @@ def parse_transcript_text(text: str) -> List[dict]:
     return segments
 
 
-@router.post("/upload", response_model=MeetingResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/upload", response_model=MeetingResponse, status_code=status.HTTP_202_ACCEPTED)
 async def upload_transcript(
     body: TranscriptUploadRequest,
     user: User = Depends(get_current_user),
@@ -396,20 +396,17 @@ async def upload_transcript(
         processing_status="queued_for_processing",
     )
     await db.commit()
-
-    from app.services.processing import processing_pipeline
-    try:
-        await processing_pipeline.process_meeting_transcript(
-            meeting_id=meeting.id, transcript_segments_input=segments
-        )
-    except Exception as e:
-        await meeting_repo.update_status(meeting.id, processing_status="failed", processing_error=str(e))
-        await db.commit()
     await db.refresh(meeting)
+
+    # Extraction runs after this response; the client polls the meeting
+    # until processing_status leaves "queued_for_processing"/"processing".
+    from app.services.processing import processing_pipeline
+
+    processing_pipeline.start_in_background(meeting.id, transcript_segments_input=segments)
     return meeting
 
 
-@router.post("/{meeting_id}/reprocess", response_model=MeetingResponse)
+@router.post("/{meeting_id}/reprocess", response_model=MeetingResponse, status_code=status.HTTP_202_ACCEPTED)
 async def reprocess_meeting(
     meeting_id: uuid.UUID,
     org_id: uuid.UUID = Depends(get_current_org_id),
@@ -426,23 +423,23 @@ async def reprocess_meeting(
     if not meeting:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
 
+    from app.services.processing import processing_pipeline
+
+    if processing_pipeline.is_running(meeting.id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This meeting is already being processed.")
+
     segments = await TranscriptRepository(db).get_segments_by_meeting(meeting.id)
     if not segments and not meeting.meetstream_transcript_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This meeting has no transcript to process.")
 
     await meeting_repo.clear_extraction(meeting.id)
+    await meeting_repo.update_status(meeting.id, processing_status="queued_for_processing", processing_error=None)
     await db.commit()
-
-    from app.services.processing import processing_pipeline
-    try:
-        await processing_pipeline.process_meeting_transcript(
-            meeting_id=meeting.id,
-            transcript_id=None if segments else meeting.meetstream_transcript_id,
-        )
-    except Exception as e:
-        await meeting_repo.update_status(meeting.id, processing_status="failed", processing_error=str(e))
-        await db.commit()
     await db.refresh(meeting)
+
+    processing_pipeline.start_in_background(
+        meeting.id, transcript_id=None if segments else meeting.meetstream_transcript_id
+    )
     return meeting
 
 
