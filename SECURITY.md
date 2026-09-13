@@ -31,7 +31,9 @@ boundaries before exposing an instance beyond localhost:
   never sees another workspace's data.
 - **The in-call voice agent has write tools** (add notes, create and update
   action items) scoped to its workspace, driven by what is said in the meeting.
-  Treat what participants say as untrusted input to those tools.
+  Treat what participants say as untrusted input to those tools - or switch
+  them off (Settings → Meetings → *In-call agent permissions*, owners only)
+  to keep the agent read-only.
 - **Transcripts are sent to the LLM provider you choose.** With a hosted
   provider that means the vendor receives the full text of your meetings.
 
@@ -44,3 +46,6 @@ boundaries before exposing an instance beyond localhost:
   webhook deliveries are signature-checked.
 - Keep the generated `data/session.key` private; rotating it signs everyone out.
 - Bind to `127.0.0.1` (the default) unless the server is meant to be reachable.
+- Behind a reverse proxy, set `TRUST_PROXY=true` so rate limiting sees real
+  client addresses; never set it when clients connect directly.
+- Leave `API_DOCS` off in production (the default outside development).

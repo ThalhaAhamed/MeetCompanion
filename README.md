@@ -87,8 +87,9 @@ web app. Both are the same code.
   a real action item.
 - 🔍 **Semantic search** — hybrid vector + keyword search across everything
   ever said.
-- 💬 **Ask AI** — questions answered from your own notes and meetings, grounded
-  in retrieved content and instructed never to invent details.
+- 💬 **Ask AI** — questions answered from your own notes, meetings and uploaded
+  documents (PDF, Word, Markdown, text, CSV), grounded in retrieved content and
+  instructed never to invent details.
 - 🕸️ **Knowledge graph** — meetings, people, decisions and action items as an
   explorable graph, with Obsidian-style filters and force controls.
 - 🎙️ **In-call recall** — an MCP server lets the in-meeting agent answer "what
@@ -308,8 +309,9 @@ would protect a `.env` file. There is no telemetry.
   join by code). Put the server behind your own auth proxy if that is not
   what you want.
 - The in-call agent's MCP tools are authenticated with a per-workspace bearer
-  token generated on creation; it has write tools (notes, action items) driven
-  by what people say in the meeting.
+  token generated on creation. Its write tools (notes, action items) act on
+  what people say in the meeting; owners can switch them off to keep the
+  agent read-only.
 
 Details and a hardening checklist: [SECURITY.md](SECURITY.md).
 
@@ -398,6 +400,7 @@ Contributions are welcome — issues, pull requests, providers, docs. Start with
 - [ ] Code-signed Windows and macOS builds
 - [ ] MySQL / MariaDB support (listed as *coming soon* in the picker)
 - [ ] Re-indexing task after changing embedding models
+- [ ] Alembic migrations (schema changes are applied by idempotent patches today)
 - [ ] Export (Markdown, JSON) for notes and meetings
 - [ ] Auto-update for the desktop app
 
