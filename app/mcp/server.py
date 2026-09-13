@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional
 from fastapi import APIRouter, Request, Depends, HTTPException, status
 from fastapi.responses import JSONResponse, Response
 from app.mcp.auth import verify_mcp_token
-from app.mcp.tools import MCP_TOOL_DEFINITIONS, execute_tool, format_tool_output_text
+from app.mcp.tools import MCP_TOOL_DEFINITIONS, execute_tool, format_tool_output_text, tool_definitions_for
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
 
@@ -66,7 +66,7 @@ async def handle_mcp_jsonrpc(
             "jsonrpc": "2.0",
             "id": jsonrpc_id,
             "result": {
-                "tools": MCP_TOOL_DEFINITIONS
+                "tools": await tool_definitions_for(org_id)
             }
         }
 
@@ -132,7 +132,7 @@ async def handle_mcp_jsonrpc(
 @router.get("/tools")
 async def list_tools_rest(org_id: uuid.UUID = Depends(verify_mcp_token)):
     """REST endpoint to inspect available MCP tools."""
-    return {"tools": MCP_TOOL_DEFINITIONS}
+    return {"tools": await tool_definitions_for(org_id)}
 
 
 @router.post("/tools/{tool_name}")

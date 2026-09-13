@@ -8,7 +8,7 @@ from datetime import date
 from typing import Dict, Any, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.connection import get_db_context
-from app.database.repositories import MeetingRepository, MemoryRepository, ActionItemRepository
+from app.database.repositories import OrganizationRepository, MeetingRepository, MemoryRepository, ActionItemRepository
 from app.rag.meeting_memory import meeting_memory_rag
 from app.models.database import MemoryType
 from app.models.schemas import ActionItemUpdate
@@ -339,6 +339,26 @@ def format_tool_output_text(tool_name: str, output: Dict[str, Any]) -> str:
     return json.dumps(output, indent=2)
 
 
+#: Tools that change workspace data. What participants say in a meeting
+#: drives these, so a workspace can switch them off and keep the agent
+#: read-only (Organization.settings["mcp_write_tools"], default on).
+WRITE_TOOLS = frozenset({"add_meeting_memory", "add_meeting_note", "create_action_item", "update_action_item"})
+WRITE_TOOLS_SETTING = "mcp_write_tools"
+
+
+def write_tools_enabled(org_settings: Optional[Dict[str, Any]]) -> bool:
+    return bool((org_settings or {}).get(WRITE_TOOLS_SETTING, True))
+
+
+async def tool_definitions_for(org_id: uuid.UUID) -> List[Dict[str, Any]]:
+    """The tool list this workspace's agent should see."""
+    async with get_db_context() as db:
+        org = await OrganizationRepository(db).get_by_id(org_id)
+    if org is None or write_tools_enabled(org.settings):
+        return MCP_TOOL_DEFINITIONS
+    return [tool for tool in MCP_TOOL_DEFINITIONS if tool["name"] not in WRITE_TOOLS]
+
+
 async def execute_tool(
     org_id: uuid.UUID,
     tool_name: str,
@@ -353,6 +373,11 @@ async def execute_tool(
         return _tool_get_current_datetime()
 
     async with get_db_context() as db:
+        if tool_name in WRITE_TOOLS:
+            org = await OrganizationRepository(db).get_by_id(org_id)
+            if org is not None and not write_tools_enabled(org.settings):
+                return {"error": "This workspace has switched off the agent's write tools."}
+
         if tool_name == "search_meeting_memory":
             return await _tool_search_meeting_memory(db, org_id, arguments)
         elif tool_name == "get_meeting":

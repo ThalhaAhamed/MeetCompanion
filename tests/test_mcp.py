@@ -78,3 +78,54 @@ async def test_mcp_rest_tools_list(client):
     assert "add_meeting_note" in tool_names
     assert "create_action_item" in tool_names
     assert "update_action_item" in tool_names
+
+
+@pytest.mark.asyncio
+async def test_owner_can_make_the_agent_read_only(authed_client, client):
+    """Switching write tools off hides them from tools/list and refuses calls."""
+    from tests.test_security import _client, _signup
+
+    async with _client() as owner:
+        await _signup(owner, f"w-{uuid.uuid4().hex[:6]}@example.com", workspace="Omega")
+        assert (await owner.get("/api/agent/write-tools")).json()["enabled"] is True
+
+        from app.database.connection import AsyncSessionLocal
+        from app.models.database import Organization, User
+        from sqlalchemy import select
+
+        async with AsyncSessionLocal() as session:
+            token = (
+                await session.execute(
+                    select(Organization.mcp_token).join(User, User.organization_id == Organization.id).where(User.email.like("w-%"))
+                )
+            ).scalars().first()
+        headers = {"Authorization": f"Bearer {token}"}
+
+        listed = (await client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, headers=headers)).json()
+        assert "create_action_item" in {t["name"] for t in listed["result"]["tools"]}
+
+        assert (await owner.put("/api/agent/write-tools", json={"enabled": False})).status_code == 200
+
+        listed = (await client.post("/mcp", json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, headers=headers)).json()
+        names = {t["name"] for t in listed["result"]["tools"]}
+        assert "create_action_item" not in names and "search_meeting_memory" in names
+
+        call = (
+            await client.post(
+                "/mcp",
+                json={"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "add_meeting_note", "arguments": {"title": "x", "content": "y"}}},
+                headers=headers,
+            )
+        ).json()
+        assert call["result"]["isError"] is True and "switched off" in call["result"]["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_members_cannot_change_write_tools():
+    from tests.test_security import _client, _signup
+
+    async with _client() as owner, _client() as member:
+        await _signup(owner, f"o-{uuid.uuid4().hex[:6]}@example.com", workspace="Psi")
+        code = (await owner.get("/api/members/workspace")).json()["join_code"]
+        await _signup(member, f"m-{uuid.uuid4().hex[:6]}@example.com", join_code=code)
+        assert (await member.put("/api/agent/write-tools", json={"enabled": False})).status_code == 403

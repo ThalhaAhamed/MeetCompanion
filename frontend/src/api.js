@@ -199,6 +199,18 @@ export function updateActionItem(id, patch) {
   })
 }
 
+export function getWriteTools() {
+  return req('/agent/write-tools')
+}
+
+export function setWriteTools(enabled) {
+  return req('/agent/write-tools', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  })
+}
+
 export function getAgentCredentials() {
   return req('/agent/credentials')
 }

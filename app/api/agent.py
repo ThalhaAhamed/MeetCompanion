@@ -451,6 +451,32 @@ class AgentTemplateUpdateRequest(BaseModel):
     tool_results_to_chat: Optional[bool] = None
 
 
+class WriteToolsRequest(BaseModel):
+    enabled: bool
+
+
+@router.get("/write-tools")
+async def get_write_tools(org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
+    """Whether this workspace's in-call agent may add notes and change action items."""
+    from app.mcp.tools import write_tools_enabled
+
+    org = await OrganizationRepository(db).get_by_id(org_id)
+    return {"enabled": write_tools_enabled(org.settings if org else None)}
+
+
+@router.put("/write-tools")
+async def set_write_tools(body: WriteToolsRequest, owner: User = Depends(require_owner), db: AsyncSession = Depends(get_db)):
+    """
+    Owners only. Off makes the agent read-only: what people say in a meeting
+    can no longer create action items or notes through it.
+    """
+    from app.mcp.tools import WRITE_TOOLS_SETTING
+
+    await OrganizationRepository(db).update_settings(owner.organization_id, {WRITE_TOOLS_SETTING: body.enabled})
+    await db.commit()
+    return {"enabled": body.enabled}
+
+
 @router.get("/template")
 async def read_agent_template(user: User = Depends(get_current_user)):
     """The template every new agent starts from. Cannot be deleted, only edited."""

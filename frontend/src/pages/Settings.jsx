@@ -9,8 +9,10 @@ import {
   completeSetup,
   getProviderCatalog,
   getSetupStatus,
+  getWriteTools,
   resetSetup,
   setMeetstreamApiKey,
+  setWriteTools,
   testLlmProvider,
 } from '../api'
 import DatabasePicker, { isDatabaseFormComplete } from '../components/DatabasePicker'
@@ -50,6 +52,7 @@ export default function Settings() {
 
   const [meetstreamKey, setMeetstreamKey] = useState('')
   const [credentials, setCredentials] = useState(null)
+  const [writeTools, setWriteToolsState] = useState(null)
   const [webhookSecret, setWebhookSecret] = useState('')
 
   const [dbProvider, setDbProvider] = useState('')
@@ -61,14 +64,16 @@ export default function Settings() {
 
   async function load() {
     try {
-      const [statusData, catalogData, credentialData] = await Promise.all([
+      const [statusData, catalogData, credentialData, writeToolsData] = await Promise.all([
         getSetupStatus(),
         getProviderCatalog(),
         getAgentCredentials().catch(() => null),
+        getWriteTools().catch(() => null),
       ])
       setStatus(statusData)
       setCatalog(catalogData)
       setCredentials(credentialData)
+      setWriteToolsState(writeToolsData)
       setProvider(statusData.llm?.provider || 'ollama')
       setDbProvider(statusData.database?.provider || 'sqlite')
       setValues({
@@ -384,6 +389,36 @@ export default function Settings() {
                   </button>
                 )}
               </div>
+
+              {isOwner && writeTools && (
+                <>
+                  <hr className="my-6" style={{ borderColor: 'var(--border-subtle)' }} />
+                  <h3 className="mb-1 text-sm font-semibold">In-call agent permissions</h3>
+                  <p className="mb-3 text-sm" style={{ color: 'var(--text-muted)' }}>
+                    The agent always reads meeting memory. With write tools on it can also add notes and
+                    create or update action items from what is said in a call — anyone in the meeting
+                    can trigger that. Turn it off to keep the agent read-only.
+                  </p>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={writeTools.enabled}
+                      disabled={busy}
+                      onChange={async (event) => {
+                        setBusy(true)
+                        try {
+                          setWriteToolsState(await setWriteTools(event.target.checked))
+                        } catch (err) {
+                          setError(err.message)
+                        } finally {
+                          setBusy(false)
+                        }
+                      }}
+                    />
+                    Allow the agent to write notes and action items
+                  </label>
+                </>
+              )}
 
               {isOwner && (
                 <>
