@@ -150,18 +150,61 @@ def excerpt_of(content: str, limit: int = 240) -> str:
     return joined[:limit].rstrip(" ·")
 
 
+#: Characters per piece when embedding a note. MiniLM reads about 256
+#: word-pieces (~1000 characters); anything past that in a single call is
+#: silently dropped, so a long meeting note used to be indexed by its first
+#: paragraph only.
+NOTE_EMBED_CHUNK_CHARS = 1000
+
+
+def _note_pieces(title: str, content: str) -> List[str]:
+    """Title plus the body cut on paragraph boundaries into model-sized pieces."""
+    title = (title or "").strip()
+    pieces: List[str] = []
+    current = title
+    for paragraph in (content or "").split("\n\n"):
+        paragraph = paragraph.strip()
+        if not paragraph:
+            continue
+        if len(current) + len(paragraph) + 2 > NOTE_EMBED_CHUNK_CHARS and current and current != title:
+            pieces.append(current)
+            current = f"{title}\n{paragraph}" if title else paragraph
+        else:
+            current = f"{current}\n\n{paragraph}" if current else paragraph
+        # A single huge paragraph still has to be cut somewhere.
+        while len(current) > NOTE_EMBED_CHUNK_CHARS * 2:
+            pieces.append(current[:NOTE_EMBED_CHUNK_CHARS])
+            current = (title + "\n" if title else "") + current[NOTE_EMBED_CHUNK_CHARS:]
+    if current.strip():
+        pieces.append(current)
+    return pieces
+
+
 async def _embed_note(title: str, content: str) -> Optional[List[float]]:
     """
     Embed a note for Ask AI retrieval.
 
+    The note is embedded in pieces and the unit vectors averaged, so the
+    whole note - not just what fits in one model call - shapes the result.
+    Keyword search runs alongside it, so precise wording is not lost either.
+
     Failure is non-fatal: the note still saves and stays findable by text
     search, it simply will not surface through semantic retrieval.
     """
-    text = f"{title}\n\n{content}".strip()
-    if not text:
+    pieces = _note_pieces(title, content)
+    if not pieces:
         return None
     try:
-        return await embedding_service.embed_text_async(text)
+        import numpy as np
+
+        vectors = np.asarray(await embedding_service.embed_batch_async(pieces), dtype=np.float32)
+        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+        vectors = np.divide(vectors, norms, out=np.zeros_like(vectors), where=norms > 0)
+        centroid = vectors.mean(axis=0)
+        length = float(np.linalg.norm(centroid))
+        if length == 0.0:
+            return None
+        return (centroid / length).tolist()
     except Exception as exc:
         logger.warning(f"Could not embed note: {exc}")
         return None

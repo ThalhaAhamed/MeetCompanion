@@ -507,3 +507,30 @@ async def test_upload_processes_in_the_background_and_reprocess_refuses_while_ru
     assert again.status_code == 202 and again.json()["processing_status"] == "queued_for_processing"
     await processing_pipeline.wait_for(meeting_id)
     assert (await authed_client.get(f"/api/meetings/{meeting_id}")).json()["processing_status"] == "completed"
+
+
+def test_long_notes_are_embedded_in_pieces_not_truncated():
+    from app.api.notebook import NOTE_EMBED_CHUNK_CHARS, _note_pieces
+
+    body = "\n\n".join(f"Paragraph {i}: " + ("lorem ipsum " * 30).strip() for i in range(12))
+    pieces = _note_pieces("Quarterly review", body)
+    assert len(pieces) > 1
+    assert all(len(p) <= NOTE_EMBED_CHUNK_CHARS * 2 for p in pieces)
+    assert all(p.startswith("Quarterly review") for p in pieces)  # title context on every piece
+    assert "Paragraph 11" in pieces[-1]  # the end of the note is represented
+
+
+@pytest.mark.asyncio
+async def test_question_about_the_end_of_a_long_note_still_finds_it(authed_client):
+    filler = "\n\n".join(f"Section {i}: routine status update with nothing notable." for i in range(25))
+    long_note = await _create_note(
+        authed_client, "Ops review", filler + "\n\nFinal item: the Zurich data centre migration is scheduled for 3 November."
+    )
+    await _create_note(authed_client, "Unrelated", "Team lunch is on Thursday.")
+    from app.api.notebook import _retrieve_relevant_notes
+    from app.database.connection import AsyncSessionLocal
+    from app.models.database import Note
+
+    async with AsyncSessionLocal() as db:
+        found = await _retrieve_relevant_notes(db, [Note.title.in_(["Ops review", "Unrelated"])], "When is the Zurich migration?")
+    assert found and found[0].title == "Ops review"
