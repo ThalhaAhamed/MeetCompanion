@@ -57,7 +57,9 @@ export default function Dashboard() {
 
       const meetings = Array.isArray(meetingList) ? meetingList : meetingList?.meetings || []
       setMeetingCount(meetings.length)
-      setLive(meetings.filter((m) => !['completed', 'stopped', 'failed'].includes(m.status)))
+      // A bot is only "in a call" once MeetStream has accepted it; a
+      // meeting that never got a bot (no key, bad link) is not live.
+      setLive(meetings.filter((m) => ['joining', 'recording', 'in_progress'].includes(m.status) && m.meetstream_bot_id))
       setNotes(noteList.notes || [])
       setCounts({ ...(folderData.counts || {}), notes: noteList.total || 0 })
       setActionItems(actions.action_items || [])

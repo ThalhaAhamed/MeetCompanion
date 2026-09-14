@@ -58,6 +58,18 @@ async def create_meeting(
     org_id = user.organization_id
     meeting_repo = MeetingRepository(db)
 
+    # Validate before anything is written: a bad link or a missing key used
+    # to leave a permanent "pending" meeting behind that the dashboard then
+    # counted as a live call.
+    meeting_url = normalise_meeting_url(meeting_in.meeting_url)
+    own_meetstream_key = await get_meetstream_api_key(db, user.id)
+    if deploy_bot and not own_meetstream_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Add your MeetStream API key in Settings → Meetings before launching a bot.",
+        )
+    meeting_in.meeting_url = meeting_url
+
     # 1. Create meeting record
     meeting = await meeting_repo.create(
         org_id=org_id,
@@ -76,15 +88,7 @@ async def create_meeting(
     # required here - bots deploy and bill against the launching member's own
     # MeetStream account, never silently falling back to this deployment's
     # shared key (see require_meetstream_api_key).
-    own_meetstream_key = await get_meetstream_api_key(db, user.id)
-    if deploy_bot and not own_meetstream_key:
-        await meeting_repo.update_status(
-            meeting.id,
-            processing_error="Add your own MeetStream API key in Agent settings before launching a bot.",
-        )
-        await db.commit()
-        await db.refresh(meeting)
-    elif deploy_bot and own_meetstream_key:
+    if deploy_bot:
         try:
             if meeting_in.agent_config_id:
                 # An explicit override still has to be an agent this member
@@ -142,16 +146,43 @@ async def create_meeting(
                 await db.commit()
                 await db.refresh(meeting)
         except Exception as e:
-            # We don't fail meeting creation if external API fails, but mark status
+            # The record stays so the reason is visible, but it is a failed
+            # launch - not a live call.
             logger.warning(f"MeetStream bot creation failed: {e}")
             await meeting_repo.update_status(
                 meeting.id,
-                processing_error=f"Failed to launch bot: {str(e)}"
+                status="failed",
+                processing_status="failed",
+                processing_error=f"Failed to launch bot: {str(e)}",
             )
             await db.commit()
             await db.refresh(meeting)
 
     return meeting
+
+
+#: Hosts a bot can actually be sent to. Anything else is almost certainly a
+#: pasted calendar link, a typo, or an unsupported platform.
+MEETING_HOSTS = ("meet.google.com", "zoom.us", "teams.microsoft.com", "teams.live.com")
+
+
+def normalise_meeting_url(raw: str) -> str:
+    """A well-formed https meeting link on a supported platform, or 400."""
+    from urllib.parse import urlparse
+
+    value = (raw or "").strip()
+    if value and "://" not in value:
+        value = "https://" + value
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme not in ("http", "https") or not host:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Enter the meeting link, e.g. https://meet.google.com/abc-defg-hij")
+    if not any(host == h or host.endswith("." + h) for h in MEETING_HOSTS):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only Google Meet, Zoom and Microsoft Teams links are supported.",
+        )
+    return value
 
 
 @router.get("", response_model=List[MeetingResponse])

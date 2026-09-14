@@ -58,7 +58,10 @@ async function req(path, options) {
     error.status = res.status
     throw error
   }
-  return res.json()
+  // 204 No Content (deletes) and other empty bodies have nothing to parse.
+  if (res.status === 204) return null
+  const text = await res.text()
+  return text ? JSON.parse(text) : null
 }
 
 export function checkAuth() {
@@ -177,6 +180,10 @@ export function updateAgent(patch) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
   })
+}
+
+export function deleteMeeting(id) {
+  return req(`/meetings/${id}`, { method: 'DELETE' })
 }
 
 export function stopMeetingBot(id) {

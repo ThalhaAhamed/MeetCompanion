@@ -29,6 +29,9 @@ async def search_meeting_memory(
         project_name=query_in.project_name,
         speaker=query_in.speaker,
         meeting_id=query_in.meeting_id,
+        memory_type=query_in.memory_type,
+        date_from=query_in.date_from,
+        date_to=query_in.date_to,
         min_similarity=query_in.min_similarity,
         limit=query_in.limit,
     )

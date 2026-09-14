@@ -5,6 +5,7 @@ import { MeetingsIcon, PlusIcon, SearchIcon } from '../components/Icons'
 import { Badge, Card, EmptyState, ErrorMessage, Field, Loading, Modal, Spinner } from '../components/ui'
 import {
   createMeeting,
+  deleteMeeting,
   getMeeting,
   getTranscript,
   importBot,
@@ -16,6 +17,8 @@ import {
 } from '../api'
 
 const LIVE_STATUSES = ['pending', 'joining', 'recording', 'in_progress']
+// Stop bot only makes sense once there is a bot to stop.
+const STOPPABLE_STATUSES = ['joining', 'recording', 'in_progress']
 
 /**
  * Some summaries were stored with escaped newlines rather than real ones, so
@@ -260,12 +263,13 @@ function UploadTranscriptModal({ open, onClose, onUploaded }) {
   )
 }
 
-function MeetingDetail({ meetingId, onChanged }) {
+function MeetingDetail({ meetingId, onChanged, onDeleted }) {
   const [meeting, setMeeting] = useState(null)
   const [transcript, setTranscript] = useState(null)
   const [tab, setTab] = useState('summary')
   const [error, setError] = useState(null)
   const [stopping, setStopping] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [reprocessing, setReprocessing] = useState(false)
 
   useEffect(() => {
@@ -299,6 +303,21 @@ function MeetingDetail({ meetingId, onChanged }) {
     getTranscript(meetingId).then(setTranscript).catch(() => setTranscript([]))
   }, [tab, meetingId, transcript])
 
+  async function remove() {
+    if (!window.confirm('Delete this meeting, its transcript, memories, action items and note? This cannot be undone.')) return
+    setDeleting(true)
+    setError(null)
+    try {
+      await deleteMeeting(meetingId)
+      onDeleted?.() // leave the (now gone) detail route before the list refreshes
+      onChanged?.()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   async function stop() {
     setStopping(true)
     try {
@@ -329,7 +348,7 @@ function MeetingDetail({ meetingId, onChanged }) {
 
   const memories = meeting.memories || []
   const actionItems = meeting.action_items || []
-  const isLive = LIVE_STATUSES.includes(meeting.status)
+  const isLive = STOPPABLE_STATUSES.includes(meeting.status) && Boolean(meeting.meetstream_bot_id)
 
   const tabs = [
     { id: 'summary', label: 'Summary' },
@@ -365,6 +384,17 @@ function MeetingDetail({ meetingId, onChanged }) {
             {isLive && (
               <button type="button" className="mc-btn mc-btn-danger" onClick={stop} disabled={stopping}>
                 {stopping ? <Spinner size={13} /> : null} Stop bot
+              </button>
+            )}
+            {!isLive && (
+              <button
+                type="button"
+                className="mc-btn mc-btn-secondary"
+                onClick={remove}
+                disabled={deleting}
+                title="Delete this meeting and everything extracted from it"
+              >
+                {deleting ? <Spinner size={13} /> : null} Delete
               </button>
             )}
           </div>
@@ -606,7 +636,7 @@ export default function Meetings() {
 
         <div className="min-w-0">
           {meetingId ? (
-            <MeetingDetail meetingId={meetingId} onChanged={refresh} />
+            <MeetingDetail meetingId={meetingId} onChanged={refresh} onDeleted={() => navigate('/meetings')} />
           ) : (
             <Card>
               <EmptyState

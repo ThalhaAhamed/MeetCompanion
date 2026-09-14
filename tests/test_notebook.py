@@ -634,3 +634,51 @@ def test_chunk_results_are_deduplicated():
 
     items = [{"task": "Send the invoice"}, {"task": "send  the invoice "}, {"task": "Other"}]
     assert [i["task"] for i in _dedupe(items)] == ["Send the invoice", "Other"]
+
+
+# ---------------------------------------------------------------------------
+# QA round: meeting URL validation, search filters, empty-body deletes
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_bad_meeting_urls_and_missing_key_do_not_create_ghost_meetings(authed_client):
+    before = len((await authed_client.get("/api/meetings")).json())
+    for url in ["", "not a url", "https://example.com/x"]:
+        r = await authed_client.post("/api/meetings", json={"meeting_url": url})
+        assert r.status_code in (400, 422), (url, r.status_code)
+    # deploy_bot defaults on and no MeetStream key is set in tests -> 400, no row.
+    r = await authed_client.post("/api/meetings", json={"meeting_url": "https://meet.google.com/abc-defg-hij"})
+    assert r.status_code == 400 and "MeetStream" in r.text
+    after = len((await authed_client.get("/api/meetings")).json())
+    assert after == before, "a failed launch left a meeting behind"
+
+
+@pytest.mark.asyncio
+async def test_meeting_can_be_registered_without_deploying_a_bot(authed_client):
+    r = await authed_client.post("/api/meetings?deploy_bot=false", json={"meeting_url": "https://zoom.us/j/123456789"})
+    assert r.status_code == 201, r.text
+    assert r.json()["meeting_url"].startswith("https://zoom.us/")
+
+
+@pytest.mark.asyncio
+async def test_search_date_and_type_filters_apply(authed_client):
+    from app.services.processing import processing_pipeline
+
+    m = (await authed_client.post("/api/meetings/upload", json={"title": "Filterable", "transcript": "Ana: We decided to launch in May.\nBen: Budget is fixed."})).json()
+    await processing_pipeline.wait_for(uuid.UUID(m["id"]))
+    assert (await authed_client.post("/api/search/memory", json={"query": "launch budget", "date_from": "2099-01-01"})).json()["total_results"] == 0
+    r = (await authed_client.post("/api/search/memory", json={"query": "decision", "date_from": "2000-01-01", "date_to": "2099-01-01"})).json()
+    assert r["total_results"] > 0
+    typed = (await authed_client.post("/api/search/memory", json={"query": "decision recorded", "memory_type": "decision"})).json()
+    assert typed["total_results"] >= 0 and all(x["memory_type"] == "decision" for x in typed["results"])
+
+
+@pytest.mark.asyncio
+async def test_delete_meeting_returns_no_content(authed_client):
+    from app.services.processing import processing_pipeline
+
+    m = (await authed_client.post("/api/meetings/upload", json={"title": "Deleteme", "transcript": "Ana: hi."})).json()
+    await processing_pipeline.wait_for(uuid.UUID(m["id"]))
+    r = await authed_client.delete(f"/api/meetings/{m['id']}")
+    assert r.status_code == 204 and r.content == b""
+    assert (await authed_client.get(f"/api/meetings/{m['id']}")).status_code == 404

@@ -135,6 +135,7 @@ class MeetingMemoryRAG:
                     "end_time": chunk.end_time,
                     "segment_indices": chunk.segment_indices,
                     "source": "transcript_chunk",
+                    "meeting_date": meeting_date_str,
                     "mentioned_dates": [d.isoformat() for d in mentioned_dates],
                 }
                 await vector_repo.add_meeting_embedding(
@@ -165,6 +166,7 @@ class MeetingMemoryRAG:
                     "memory_type": mem.type.value,
                     "importance": mem.importance,
                     "source": "memory",
+                    "meeting_date": meeting_date_str,
                     "mentioned_dates": [d.isoformat() for d in mentioned_dates],
                 }
                 await vector_repo.add_meeting_embedding(
@@ -231,6 +233,9 @@ class MeetingMemoryRAG:
         speaker: Optional[str] = None,
         meeting_id: Optional[uuid.UUID] = None,
         source_type: Optional[str] = None,
+        memory_type: Optional[Any] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
         min_similarity: float = 0.0,
         limit: int = 10,
     ) -> List[SearchResultItem]:
@@ -283,6 +288,31 @@ class MeetingMemoryRAG:
 
         fused = reciprocal_rank_fusion([vector_ranked, keyword_ranked], key_field="id")
 
+        # Date / type filters are applied to the fused candidate pool. The
+        # pool is a few times larger than `limit`, so filtering here keeps
+        # the vector index's approximate search unchanged.
+        if memory_type or date_from or date_to:
+            wanted_type = getattr(memory_type, "value", memory_type)
+
+            def _record_date(record):
+                stored = (record.metadata_ or {}).get("meeting_date")
+                if stored:
+                    return date.fromisoformat(stored)
+                return record.created_at.date() if record.created_at else None
+
+            def _keep(item):
+                record = records_by_id[item["id"]]
+                if wanted_type and (record.metadata_ or {}).get("memory_type") != wanted_type:
+                    return False
+                when = _record_date(record)
+                if date_from and (when is None or when < date_from):
+                    return False
+                if date_to and (when is None or when > date_to):
+                    return False
+                return True
+
+            fused = [item for item in fused if _keep(item)]
+
         # If the query names a specific day ("what happened on september 2",
         # "what did thalha say yesterday"), move results actually from that
         # day ahead of ones merely talking about it - a meeting held on the
@@ -321,7 +351,7 @@ class MeetingMemoryRAG:
                     meeting_id=record.meeting_id,
                     memory_id=record.memory_id,
                     meeting_title=meta.get("title"),
-                    meeting_date=str(record.created_at.date()) if record.created_at else None,
+                    meeting_date=meta.get("meeting_date") or (str(record.created_at.date()) if record.created_at else None),
                     customer_name=meta.get("customer_name"),
                     project_name=meta.get("project_name"),
                     speaker=meta.get("speaker"),

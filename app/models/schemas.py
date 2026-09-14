@@ -140,7 +140,7 @@ class ActionItemResponse(SchemaBase, ActionItemBase):
 
 # ---- Meeting Schemas ----
 class MeetingCreate(BaseModel):
-    meeting_url: str = Field(..., description="Link to the Google Meet, Zoom, or Teams call")
+    meeting_url: str = Field(..., min_length=1, max_length=2000, description="Link to the Google Meet, Zoom, or Teams call")
     title: Optional[str] = None
     customer_name: Optional[str] = None
     project_name: Optional[str] = None
