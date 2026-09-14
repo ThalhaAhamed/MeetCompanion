@@ -270,7 +270,10 @@ tool calls (`/mcp`).
 
 1. Expose the server on a public URL — a real domain behind HTTPS, or during
    development a tunnel such as `cloudflared tunnel --url http://localhost:8000`
-   or `ngrok http 8000`.
+   or `ngrok http 8000`. Avoid Cloudflare's free *quick* tunnels
+   (`*.trycloudflare.com`) specifically: MeetStream's agent-creation endpoint
+   returns a 500 when a `custom_functions` URL is on that domain. A named
+   Cloudflare tunnel, ngrok, or any other host works fine.
 2. Set `MCP_SERVER_URL` to `https://<that-host>/mcp` (in `.env` or the
    environment) and restart. The webhook callback URL is derived from it.
 3. Add your MeetStream API key in **Settings → Meetings** and a webhook
