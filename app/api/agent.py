@@ -171,16 +171,43 @@ class ApiKeyRequest(BaseModel):
 
 @router.put("/api-key")
 async def set_meetstream_api_key(body: ApiKeyRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """Store this member's own MeetStream API key so their bots/agents deploy
+    """
+    Store this member's own MeetStream API key so their bots/agents deploy
     and bill against their own MeetStream account instead of the deployment's
-    shared default key."""
+    shared default key.
+
+    Verified against MeetStream before saving - a typo'd or revoked key
+    would otherwise sit unnoticed until the next bot launch fails, often
+    minutes later and with a much less obvious error.
+    """
     key = body.meetstream_api_key.strip()
     if not key:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="meetstream_api_key cannot be empty")
+
+    connected = True
+    connection_error = None
+    try:
+        await meetstream_client.list_mia_agents(api_key=key)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code in (401, 403):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="MeetStream rejected this API key. Double-check it and try again.")
+        # Some other MeetStream-side error (rate limit, 5xx): the key itself
+        # may well be fine, so save it but say the check was inconclusive
+        # rather than blocking the member from saving their own key.
+        connected = False
+        connection_error = f"Could not verify the key right now ({e.response.status_code})."
+    except Exception as e:
+        connected = False
+        connection_error = f"Could not reach MeetStream to verify the key: {e}"
+
     user_repo = UserRepository(db)
     await user_repo.update_settings(user.id, {"meetstream_api_key": key})
     await db.commit()
-    return {"meetstream_api_key": {"configured": True, "masked_value": _mask_secret(key)}}
+    return {
+        "meetstream_api_key": {"configured": True, "masked_value": _mask_secret(key)},
+        "connected": connected,
+        "connection_error": connection_error,
+    }
 
 
 @router.delete("/api-key")

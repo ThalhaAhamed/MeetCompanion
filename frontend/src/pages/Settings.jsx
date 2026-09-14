@@ -51,6 +51,7 @@ export default function Settings() {
   const [saved, setSaved] = useState(false)
 
   const [meetstreamKey, setMeetstreamKey] = useState('')
+  const [meetstreamKeyStatus, setMeetstreamKeyStatus] = useState(null)
   const [credentials, setCredentials] = useState(null)
   const [writeTools, setWriteToolsState] = useState(null)
   const [webhookSecret, setWebhookSecret] = useState('')
@@ -139,12 +140,18 @@ export default function Settings() {
 
   async function saveMeetstreamKey() {
     setBusy(true)
+    setMeetstreamKeyStatus(null)
     try {
-      await setMeetstreamApiKey(meetstreamKey.trim())
+      const result = await setMeetstreamApiKey(meetstreamKey.trim())
       setMeetstreamKey('')
+      setMeetstreamKeyStatus(
+        result.connected
+          ? { ok: true, detail: 'Connected to MeetStream.' }
+          : { ok: false, detail: result.connection_error || 'Saved, but could not verify the connection.' },
+      )
       await load()
     } catch (err) {
-      setError(err.message)
+      setMeetstreamKeyStatus({ ok: false, detail: err.message })
     } finally {
       setBusy(false)
     }
@@ -362,10 +369,22 @@ export default function Settings() {
                   className="mc-input"
                   type="password"
                   value={meetstreamKey}
-                  onChange={(event) => setMeetstreamKey(event.target.value)}
+                  onChange={(event) => {
+                    setMeetstreamKey(event.target.value)
+                    setMeetstreamKeyStatus(null)
+                  }}
                   autoComplete="off"
                 />
               </Field>
+
+              {meetstreamKeyStatus && (
+                <p
+                  className="mb-3 text-sm"
+                  style={{ color: meetstreamKeyStatus.ok ? 'var(--success-text, #2f9e5b)' : 'var(--danger-text, #c0392b)' }}
+                >
+                  {meetstreamKeyStatus.ok ? '✅' : '⚠️'} {meetstreamKeyStatus.detail}
+                </p>
+              )}
 
               <div className="flex gap-2">
                 <button

@@ -534,3 +534,48 @@ async def test_question_about_the_end_of_a_long_note_still_finds_it(authed_clien
     async with AsyncSessionLocal() as db:
         found = await _retrieve_relevant_notes(db, [Note.title.in_(["Ops review", "Unrelated"])], "When is the Zurich migration?")
     assert found and found[0].title == "Ops review"
+
+
+# ---------------------------------------------------------------------------
+# Personal MeetStream API key: verified before it is saved
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_saving_a_meetstream_key_verifies_it_first(authed_client, monkeypatch):
+    import httpx as httpx_module
+
+    from app.services import meetstream as meetstream_module
+
+    async def rejects(self, api_key=None):
+        request = httpx_module.Request("GET", "https://api.meetstream.ai/api/v1/mia")
+        response = httpx_module.Response(401, request=request)
+        raise httpx_module.HTTPStatusError("unauthorized", request=request, response=response)
+
+    monkeypatch.setattr(meetstream_module.MeetStreamClient, "list_mia_agents", rejects)
+    bad = await authed_client.put("/api/agent/api-key", json={"meetstream_api_key": "ms_bad"})
+    assert bad.status_code == 400
+    assert "rejected" in bad.json()["detail"].lower()
+    # Rejected key must not be persisted.
+    creds = (await authed_client.get("/api/agent/credentials")).json()
+    assert creds["meetstream_api_key"]["is_personal"] is False
+
+    async def accepts(self, api_key=None):
+        return {"agent_configs": []}
+
+    monkeypatch.setattr(meetstream_module.MeetStreamClient, "list_mia_agents", accepts)
+    good = await authed_client.put("/api/agent/api-key", json={"meetstream_api_key": "ms_good"})
+    assert good.status_code == 200
+    body = good.json()
+    assert body["connected"] is True and body["connection_error"] is None
+    assert body["meetstream_api_key"]["configured"] is True
+
+    async def unreachable(self, api_key=None):
+        raise httpx_module.ConnectError("no route to host")
+
+    monkeypatch.setattr(meetstream_module.MeetStreamClient, "list_mia_agents", unreachable)
+    inconclusive = await authed_client.put("/api/agent/api-key", json={"meetstream_api_key": "ms_maybe"})
+    assert inconclusive.status_code == 200
+    body = inconclusive.json()
+    assert body["connected"] is False and body["connection_error"]
+    # A key that could not be verified (network blip, not a bad key) is still saved.
+    assert body["meetstream_api_key"]["configured"] is True
