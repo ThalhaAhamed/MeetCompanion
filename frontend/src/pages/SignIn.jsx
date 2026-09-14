@@ -3,8 +3,10 @@ import Logo from '../components/Logo'
 import { Card, ErrorMessage, Field, Spinner } from '../components/ui'
 import { addMember, login } from '../api'
 
-export default function SignIn({ onSignedIn }) {
-  const [mode, setMode] = useState('signin')
+export default function SignIn({ onSignedIn, hasMembers = true }) {
+  // Fresh install (no account yet): open on Create account, not a sign-in
+  // form nobody can use.
+  const [mode, setMode] = useState(hasMembers ? 'signin' : 'create')
   const [form, setForm] = useState({
     name: '',
     email: '',

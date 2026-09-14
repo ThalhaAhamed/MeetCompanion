@@ -152,12 +152,31 @@ async def setup_status(request: Request) -> Dict[str, Any]:
     return {
         "onboarding_completed": full["onboarding_completed"],
         "needs_setup": full["needs_setup"],
+        "has_members": full["has_members"],
         "environment_managed": full["environment_managed"],
         "llm": {"provider": full["llm"].get("provider"), "model": full["llm"].get("model"), "configured": full["llm"].get("configured", False)},
         "database": {"dialect": full["database"]["dialect"], "provider": full["database"]["provider"]},
         "meetstream": {"configured": full["meetstream"]["configured"]},
         "read_only": True,
     }
+
+
+async def _has_any_member() -> bool:
+    """
+    Whether an account exists yet, so the sign-in screen can open on
+    'Create account' on a brand-new install instead of a sign-in form no
+    one can use. Safe before the database is configured (returns False).
+    """
+    try:
+        from sqlalchemy import select as _select
+
+        from app.database.connection import get_db_context
+        from app.models.database import User
+
+        async with get_db_context() as db:
+            return (await db.execute(_select(User.id).limit(1))).first() is not None
+    except Exception:
+        return False
 
 
 async def _full_status() -> Dict[str, Any]:
@@ -178,6 +197,7 @@ async def _full_status() -> Dict[str, Any]:
     return {
         "onboarding_completed": config.onboarding_completed,
         "needs_setup": not is_configured(),
+        "has_members": await _has_any_member(),
         "environment_managed": describe_environment_managed(),
         "llm": llm_summary,
         "database": {

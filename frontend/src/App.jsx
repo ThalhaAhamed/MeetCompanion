@@ -24,11 +24,13 @@ import { UserContext } from './user'
 export default function App() {
   const [phase, setPhase] = useState('loading')
   const [user, setUser] = useState(null)
+  const [hasMembers, setHasMembers] = useState(true)
 
   const boot = useCallback(async () => {
     setPhase('loading')
     try {
       const status = await getSetupStatus()
+      setHasMembers(status.has_members !== false)
       if (status.needs_setup) {
         setPhase('onboarding')
         return
@@ -81,7 +83,7 @@ export default function App() {
   }
 
   if (phase === 'onboarding') return <Onboarding onComplete={boot} />
-  if (phase === 'signin') return <SignIn onSignedIn={boot} />
+  if (phase === 'signin') return <SignIn onSignedIn={boot} hasMembers={hasMembers} />
 
   return (
     <UserContext.Provider value={user}>

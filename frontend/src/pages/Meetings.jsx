@@ -614,6 +614,8 @@ export default function Meetings() {
                     type="button"
                     className="w-full px-4 py-3 text-left transition-colors hover:bg-[var(--surface-raised)]"
                     style={{ backgroundColor: meeting.id === meetingId ? 'var(--brand-soft)' : undefined }}
+                    aria-label={`Open meeting: ${meeting.title || 'Untitled meeting'}`}
+                    aria-current={meeting.id === meetingId ? 'true' : undefined}
                     onClick={() => navigate(`/meetings/${meeting.id}`)}
                   >
                     <div className="truncate text-sm font-medium" style={{ color: 'var(--text-strong)' }}>
