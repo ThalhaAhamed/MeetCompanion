@@ -102,16 +102,19 @@ async def get_agent_credentials(user: User = Depends(get_current_user), org_id: 
             "model": {
                 "openai": settings.OPENAI_MODEL,
                 "groq": settings.GROQ_MODEL,
+                "xai": settings.XAI_MODEL,
                 "anthropic": settings.ANTHROPIC_MODEL,
             }.get(settings.LLM_PROVIDER),
             "api_key_configured": bool({
                 "openai": settings.OPENAI_API_KEY,
                 "groq": settings.GROQ_API_KEY,
+                "xai": settings.XAI_API_KEY,
                 "anthropic": settings.ANTHROPIC_API_KEY,
             }.get(settings.LLM_PROVIDER)),
             "masked_api_key": _mask_secret({
                 "openai": settings.OPENAI_API_KEY,
                 "groq": settings.GROQ_API_KEY,
+                "xai": settings.XAI_API_KEY,
                 "anthropic": settings.ANTHROPIC_API_KEY,
             }.get(settings.LLM_PROVIDER)),
         },

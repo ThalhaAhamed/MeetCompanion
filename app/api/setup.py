@@ -259,6 +259,43 @@ async def test_llm(payload: LLMConfigPayload) -> Dict[str, Any]:
     return {"ok": result.ok, "detail": result.detail, "models": result.models}
 
 
+def _friendly_db_error(exc: Exception, url: str) -> str:
+    """
+    Turn a raw driver/socket error into something a person can act on.
+
+    The bare "[Errno 11001] getaddrinfo failed" that surfaces from a bad host
+    tells the user nothing; the common Supabase case (pasting the IPv6-only
+    direct connection string on a network without IPv6) needs a specific nudge
+    toward the pooler string.
+    """
+    raw = str(exc).strip()
+    text = raw.lower()
+    is_supabase = "supabase" in url.lower()
+
+    if "getaddrinfo failed" in text or "name or service not known" in text or "could not translate host name" in text:
+        msg = "Could not resolve the database host - check the hostname in the connection string."
+        if is_supabase:
+            msg += (
+                " Supabase's direct connection (db.<project>.supabase.co) is IPv6-only; on a network"
+                " without IPv6, use the connection pooler string instead"
+                " (Project Settings -> Database -> Connection pooling: aws-0-<region>.pooler.supabase.com,"
+                " user postgres.<project-ref>)."
+            )
+        return msg
+    if "password authentication failed" in text:
+        return "The database rejected the username or password. Check the credentials in the connection string."
+    if "timeout" in text or "timed out" in text:
+        return (
+            "Timed out reaching the database host - it may be unreachable, paused, or blocked by a firewall."
+            + (" A paused Supabase project must be resumed from the dashboard first." if is_supabase else "")
+        )
+    if "does not exist" in text and "database" in text:
+        return "That database name does not exist on the server."
+    if "connection refused" in text:
+        return "Connection refused - nothing is listening on that host and port."
+    return raw
+
+
 @router.post("/test-database", dependencies=[Depends(require_setup_access)])
 async def test_database(payload: DatabaseConfigPayload) -> Dict[str, Any]:
     """Verify a database is reachable before it is saved."""
@@ -280,7 +317,7 @@ async def test_database(payload: DatabaseConfigPayload) -> Dict[str, Any]:
             await conn.execute(text("SELECT 1"))
         return {"ok": True, "detail": "Connected.", "dialect": dialect_of(url)}
     except Exception as exc:
-        return {"ok": False, "detail": str(exc), "dialect": dialect_of(url)}
+        return {"ok": False, "detail": _friendly_db_error(exc, url), "dialect": dialect_of(url)}
     finally:
         if engine is not None:
             await engine.dispose()

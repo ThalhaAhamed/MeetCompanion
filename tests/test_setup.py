@@ -286,3 +286,17 @@ async def test_unreachable_database_is_refused_and_nothing_changes(client, clean
     assert response.status_code == 400
     assert "Could not switch" in response.json()["detail"]
     assert connection.current_url() == before
+
+
+def test_friendly_db_error_translates_common_failures():
+    import socket
+
+    from app.api.setup import _friendly_db_error
+
+    dns = socket.gaierror(11001, "getaddrinfo failed")
+    supa = _friendly_db_error(dns, "postgresql+asyncpg://postgres:pw@db.abc.supabase.co:5432/postgres")
+    assert "resolve the database host" in supa and "pooler" in supa  # Supabase-specific nudge
+    generic = _friendly_db_error(dns, "postgresql+asyncpg://u:p@badhost:5432/db")
+    assert "resolve the database host" in generic and "pooler" not in generic
+    assert "username or password" in _friendly_db_error(Exception("FATAL: password authentication failed for user \"x\""), "postgresql://x")
+    assert _friendly_db_error(Exception("something weird"), "postgresql://x") == "something weird"

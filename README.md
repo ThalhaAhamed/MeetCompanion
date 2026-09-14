@@ -61,7 +61,7 @@ web app. Both are the same code.
 
 ## 💡 Why Meet Companion?
 
-- **Nothing is hard-wired to a vendor.** Use OpenAI, Anthropic, Gemini, Groq, a
+- **Nothing is hard-wired to a vendor.** Use OpenAI, Anthropic, Gemini, Groq, xAI (Grok), a
   local Ollama model, or any OpenAI-compatible endpoint. Switch in Settings at
   any time.
 - **Your data stays where you put it.** A local SQLite file by default;
@@ -202,6 +202,7 @@ be viewed and edited without switching to it.
   Gemini
   Ollama
   Groq
+  xAI (Grok)
   OpenAI-compatible
 ```
 

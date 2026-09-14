@@ -110,6 +110,16 @@ class GroqProvider(OpenAICompatibleProvider):
     default_base_url = "https://api.groq.com/openai/v1"
 
 
+class XAIProvider(OpenAICompatibleProvider):
+    """xAI's Grok models. Distinct from Groq (console.groq.com) despite the
+    near-identical name: this is x.ai, and it speaks the OpenAI format."""
+
+    name = "xai"
+    label = "xAI (Grok)"
+    requires_api_key = True
+    default_base_url = "https://api.x.ai/v1"
+
+
 def _raise_for_status(response: httpx.Response, label: str) -> None:
     if response.is_success:
         return

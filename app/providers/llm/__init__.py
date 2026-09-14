@@ -26,6 +26,7 @@ from app.providers.llm.openai_compatible import (
     GroqProvider,
     OpenAICompatibleProvider,
     OpenAIProvider,
+    XAIProvider,
 )
 
 __all__ = [
@@ -48,6 +49,7 @@ PROVIDERS: Dict[str, Type[LLMProvider]] = {
         GeminiProvider,
         OllamaProvider,
         GroqProvider,
+        XAIProvider,
         OpenAICompatibleProvider,
     )
 }
@@ -190,6 +192,18 @@ DESCRIPTORS: Dict[str, ProviderDescriptor] = {
             _TEMPERATURE_FIELD,
         ],
         suggested_models=["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "groq/compound"],
+    ),
+    "xai": ProviderDescriptor(
+        name="xai",
+        label="xAI (Grok)",
+        summary="Grok models from xAI. (Different company from Groq.)",
+        fields=[
+            _api_key_field("API key", "Created at console.x.ai."),
+            _model_field("grok-3-mini", "grok-3-mini"),
+            _base_url_field("https://api.x.ai/v1"),
+            _TEMPERATURE_FIELD,
+        ],
+        suggested_models=["grok-4", "grok-3", "grok-3-mini", "grok-2-1212"],
     ),
     "openai_compatible": ProviderDescriptor(
         name="openai_compatible",

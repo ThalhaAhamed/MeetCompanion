@@ -25,12 +25,14 @@ _LEGACY_API_KEYS = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "groq": "GROQ_API_KEY",
+    "xai": "XAI_API_KEY",
     "gemini": "GEMINI_API_KEY",
 }
 _LEGACY_MODELS = {
     "openai": "OPENAI_MODEL",
     "anthropic": "ANTHROPIC_MODEL",
     "groq": "GROQ_MODEL",
+    "xai": "XAI_MODEL",
     "gemini": "GEMINI_MODEL",
 }
 

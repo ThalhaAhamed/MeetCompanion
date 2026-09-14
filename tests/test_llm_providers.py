@@ -19,7 +19,7 @@ from app.providers.llm.anthropic import AnthropicProvider
 from app.providers.llm.base import extract_json_object
 from app.providers.llm.gemini import GeminiProvider
 from app.providers.llm.ollama import OllamaProvider
-from app.providers.llm.openai_compatible import OpenAIProvider
+from app.providers.llm.openai_compatible import GroqProvider, OpenAIProvider, XAIProvider
 
 MESSAGES = [
     ChatMessage(role="system", content="You are a test."),
@@ -39,6 +39,8 @@ MESSAGES = [
         ("anthropic", AnthropicProvider),
         ("gemini", GeminiProvider),
         ("ollama", OllamaProvider),
+        ("groq", GroqProvider),
+        ("xai", XAIProvider),
     ],
 )
 def test_registry_resolves_each_provider(provider_name, expected_cls):
@@ -244,3 +246,13 @@ async def test_complete_json_raises_when_model_returns_prose(httpx_mock):
 
     with pytest.raises(LLMError, match="parseable JSON"):
         await provider.complete_json(MESSAGES)
+
+
+def test_xai_is_distinct_from_groq_with_its_own_base_url():
+    """xAI (Grok) and Groq are different vendors; each must keep its own host."""
+    xai = create_llm_provider(LLMConfig(provider="xai", model="grok-3-mini", api_key="k"))
+    groq = create_llm_provider(LLMConfig(provider="groq", model="llama-3.1-8b", api_key="k"))
+    assert isinstance(xai, XAIProvider) and xai.default_base_url == "https://api.x.ai/v1"
+    assert isinstance(groq, GroqProvider) and groq.default_base_url == "https://api.groq.com/openai/v1"
+    described = {d["name"]: d for d in describe_providers()}
+    assert "console.x.ai" in described["xai"]["fields"][0]["help"]

@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     # Provider-agnostic configuration: one set of variables works for every
     # supported provider (see app/providers/llm). Anything left unset falls
     # back to that provider's documented default.
-    LLM_PROVIDER: str = "ollama"  # openai, anthropic, gemini, ollama, groq, openai_compatible
+    LLM_PROVIDER: str = "ollama"  # openai, anthropic, gemini, ollama, groq, xai, openai_compatible
     LLM_MODEL: Optional[str] = None
     LLM_API_KEY: Optional[str] = None
     LLM_BASE_URL: Optional[str] = None
@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     OPENAI_MODEL: Optional[str] = None
     GROQ_API_KEY: Optional[str] = None
     GROQ_MODEL: Optional[str] = None
+    XAI_API_KEY: Optional[str] = None
+    XAI_MODEL: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None
     ANTHROPIC_MODEL: Optional[str] = None
     GEMINI_API_KEY: Optional[str] = None
