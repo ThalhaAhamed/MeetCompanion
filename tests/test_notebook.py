@@ -1,3 +1,4 @@
+import uuid
 """
 Tests for the notebook: folders, notes, filtering and Ask AI.
 
@@ -579,3 +580,57 @@ async def test_saving_a_meetstream_key_verifies_it_first(authed_client, monkeypa
     assert body["connected"] is False and body["connection_error"]
     # A key that could not be verified (network blip, not a bad key) is still saved.
     assert body["meetstream_api_key"]["configured"] is True
+
+
+# ---------------------------------------------------------------------------
+# QA round: action-item validation, reopen, orphans, interrupted jobs, dedupe
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_action_item_status_and_priority_are_validated(authed_client):
+    note = await _create_note(authed_client, "Tasks", "- [ ] validate me")
+    items = (await authed_client.get("/api/action-items")).json()["action_items"]
+    item = next(i for i in items if i["task"] == "validate me")
+    assert (await authed_client.patch(f"/api/action-items/{item['id']}", json={"status": "bogus"})).status_code == 422
+    assert (await authed_client.patch(f"/api/action-items/{item['id']}", json={"priority": "URGENT"})).status_code == 422
+    done = (await authed_client.patch(f"/api/action-items/{item['id']}", json={"status": "completed"})).json()
+    assert done["completed_at"]
+    reopened = (await authed_client.patch(f"/api/action-items/{item['id']}", json={"status": "open"})).json()
+    assert reopened["completed_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_note_removes_the_action_items_it_spawned(authed_client):
+    note = await _create_note(authed_client, "Chores", "- [ ] buy milk\n- [x] walk dog")
+    before = {i["task"] for i in (await authed_client.get("/api/action-items")).json()["action_items"]}
+    assert {"buy milk", "walk dog"} <= before
+    assert (await authed_client.delete(f"/api/notebook/notes/{note['id']}")).status_code == 200
+    after = {i["task"] for i in (await authed_client.get("/api/action-items")).json()["action_items"]}
+    assert not ({"buy milk", "walk dog"} & after), "ghost tasks survived the note"
+
+
+@pytest.mark.asyncio
+async def test_interrupted_processing_is_failed_at_startup(authed_client):
+    from sqlalchemy import update
+
+    from app.database.bootstrap import fail_interrupted_processing
+    from app.database.connection import AsyncSessionLocal, current_engine
+    from app.models.database import Meeting
+    from app.services.processing import processing_pipeline
+
+    meeting = (await authed_client.post("/api/meetings/upload", json={"title": "Interrupted", "transcript": "Sam: hi."})).json()
+    await processing_pipeline.wait_for(uuid.UUID(meeting["id"]))
+    async with AsyncSessionLocal() as session:  # simulate the crash mid-way
+        await session.execute(update(Meeting).where(Meeting.id == uuid.UUID(meeting["id"])).values(processing_status="processing"))
+        await session.commit()
+    await fail_interrupted_processing(current_engine())
+    m = (await authed_client.get(f"/api/meetings/{meeting['id']}")).json()
+    assert m["processing_status"] == "failed" and "restart" in m["processing_error"]
+    assert (await authed_client.post(f"/api/meetings/{meeting['id']}/reprocess")).status_code == 202
+
+
+def test_chunk_results_are_deduplicated():
+    from app.services.memory import _dedupe
+
+    items = [{"task": "Send the invoice"}, {"task": "send  the invoice "}, {"task": "Other"}]
+    assert [i["task"] for i in _dedupe(items)] == ["Send the invoice", "Other"]

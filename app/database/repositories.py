@@ -514,8 +514,12 @@ class ActionItemRepository:
 
         for field, value in update_data.model_dump(exclude_unset=True).items():
             setattr(action, field, value)
-            if field == "status" and value == "completed" and not action.completed_at:
-                action.completed_at = datetime.now(timezone.utc)
+            if field == "status":
+                if value == "completed" and not action.completed_at:
+                    action.completed_at = datetime.now(timezone.utc)
+                elif value != "completed":
+                    # Reopened / cancelled: the old completion time is no longer true.
+                    action.completed_at = None
 
         await self.session.flush()
         return action

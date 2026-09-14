@@ -3,7 +3,7 @@ Pydantic schemas for request validation, serialization, and response bodies.
 """
 import uuid
 from datetime import datetime, date
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from pydantic import BaseModel, Field, HttpUrl
 from app.models.database import MemoryType
 
@@ -113,13 +113,17 @@ class ActionItemCreate(ActionItemBase):
     memory_id: Optional[uuid.UUID] = None
 
 
+ActionItemStatus = Literal["open", "in_progress", "completed", "cancelled"]
+ActionItemPriority = Literal["low", "medium", "high", "critical"]
+
+
 class ActionItemUpdate(BaseModel):
-    task: Optional[str] = None
-    owner: Optional[str] = None
+    task: Optional[str] = Field(default=None, min_length=1, max_length=2000)
+    owner: Optional[str] = Field(default=None, max_length=255)
     due_date: Optional[date] = None
-    status: Optional[str] = None
-    priority: Optional[str] = None
-    notes: Optional[str] = None
+    status: Optional[ActionItemStatus] = None
+    priority: Optional[ActionItemPriority] = None
+    notes: Optional[str] = Field(default=None, max_length=10_000)
     completed_at: Optional[datetime] = None
 
 

@@ -7,8 +7,11 @@ deployment and a freshly pasted Supabase URL.
 """
 from __future__ import annotations
 
+import logging
 import secrets
 import uuid
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -29,6 +32,7 @@ async def bootstrap(engine: AsyncEngine) -> None:
     await ensure_default_workspace(engine)
     await ensure_workspace_owners(engine)
     await prune_operational_tables(engine)
+    await fail_interrupted_processing(engine)
 
 
 async def ensure_schema(engine: AsyncEngine) -> None:
@@ -300,3 +304,30 @@ async def prune_operational_tables(engine: AsyncEngine) -> None:
         await session.execute(delete(WebhookEvent).where(WebhookEvent.received_at < cutoff, WebhookEvent.processed.is_(True)))
         await session.execute(delete(ProcessingJob).where(ProcessingJob.created_at < cutoff, ProcessingJob.status != "running"))
         await session.commit()
+
+
+async def fail_interrupted_processing(engine: AsyncEngine) -> None:
+    """
+    Extraction runs as an in-process task, so a restart mid-way leaves the
+    meeting saying "processing" with nobody working on it - and the UI
+    spinning forever. At boot nothing can be in flight, so anything still
+    marked queued/processing was interrupted: say so, and let the user
+    reprocess.
+    """
+    from sqlalchemy import update
+
+    from app.models.database import Meeting
+
+    factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        result = await session.execute(
+            update(Meeting)
+            .where(Meeting.processing_status.in_(("queued_for_processing", "processing")))
+            .values(
+                processing_status="failed",
+                processing_error="Processing was interrupted by a server restart. Use Reprocess to run it again.",
+            )
+        )
+        await session.commit()
+        if result.rowcount:
+            logger.warning("Marked %d interrupted meeting(s) as failed after restart", result.rowcount)

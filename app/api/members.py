@@ -42,6 +42,15 @@ def _new_join_code() -> str:
 
 
 async def _create_workspace(db: AsyncSession, name: str) -> Organization:
+    """
+    Insert the workspace with a unique slug.
+
+    The check-then-insert on the slug can lose a race between two sign-ups
+    with the same workspace name; the unique index then rejects the second
+    insert. Rather than surface that as a 500, retry with the next suffix
+    a few times - and if the slug space is that contended, fall back to a
+    random one.
+    """
     slug_base = name.strip().lower().replace(" ", "-")[:80] or "workspace"
     slug = slug_base
     suffix = 1
@@ -49,10 +58,19 @@ async def _create_workspace(db: AsyncSession, name: str) -> Organization:
         suffix += 1
         slug = f"{slug_base}-{suffix}"
 
-    org = Organization(name=name.strip(), slug=slug, mcp_token=_new_token(), join_code=_new_join_code())
-    db.add(org)
-    await db.flush()
-    return org
+    # Nothing else has been written in this session yet (the workspace is
+    # the first insert of a sign-up), so a full rollback loses nothing.
+    for attempt in range(5):
+        org = Organization(name=name.strip(), slug=slug, mcp_token=_new_token(), join_code=_new_join_code())
+        db.add(org)
+        try:
+            await db.flush()
+            return org
+        except IntegrityError:
+            await db.rollback()
+            suffix += 1
+            slug = f"{slug_base}-{suffix}" if attempt < 3 else f"{slug_base}-{secrets.token_hex(3)}"
+    raise HTTPException(status_code=409, detail="Could not allocate a workspace name; please try again.")
 
 
 class MemberOut(BaseModel):

@@ -123,6 +123,23 @@ class ExtractedActionItem(BaseModel):
         return text or None
 
 
+def _dedupe(items) -> List[Dict[str, Any]]:
+    """
+    Drop repeats across chunks. Overlapping chunk boundaries, or a calendar
+    hint the model echoes back, can yield the same memory or task twice;
+    matched on the normalised text, first occurrence wins.
+    """
+    seen = set()
+    kept: List[Dict[str, Any]] = []
+    for item in items:
+        key = " ".join(str(item.get("content") or item.get("task") or "").lower().split())
+        if key and key in seen:
+            continue
+        seen.add(key)
+        kept.append(item)
+    return kept
+
+
 def sanitize_extraction(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Keep every well-formed memory and action item; drop the rest quietly."""
     memories: List[Dict[str, Any]] = []
@@ -222,8 +239,8 @@ class MemoryExtractionService:
 
         merged = {
             "summary": "",
-            "memories": [m for r in results for m in r["memories"]],
-            "action_items": [a for r in results for a in r["action_items"]],
+            "memories": _dedupe(m for r in results for m in r["memories"]),
+            "action_items": _dedupe(a for r in results for a in r["action_items"]),
         }
         summaries = [r["summary"] for r in results if r["summary"]]
         if summaries:

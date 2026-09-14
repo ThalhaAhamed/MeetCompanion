@@ -430,3 +430,19 @@ async def test_note_cannot_reference_another_workspaces_meeting():
         patched = await b.patch(f"/api/notebook/notes/{own['id']}", json={"meeting_id": meeting["id"]})
         assert patched.json()["meeting_id"] is None  # meeting_id is not updatable
         assert (await a.post("/api/notebook/notes", json={"title": "ok", "meeting_id": meeting["id"]})).status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_racing_signups_with_the_same_workspace_name_never_500():
+    import asyncio
+
+    rate_limiter.reset()
+    name = f"Race {uuid.uuid4().hex[:4]}"
+
+    async def one(i):
+        async with _client() as c:
+            return (await c.post("/api/members", json={"name": "R", "email": f"race{i}-{uuid.uuid4().hex[:4]}@example.com", "password": "correct-horse-battery", "workspace_name": name})).status_code
+
+    codes = await asyncio.gather(*(one(i) for i in range(6)))
+    assert 500 not in codes and codes.count(200) + codes.count(201) == 6, codes
+    rate_limiter.reset()

@@ -390,6 +390,14 @@ async def create_note(
         created_by_user_id=user.id,
         embedding=await _embed_note(body.title, body.content),
     )
+    if body.content:
+        # Same task adoption as an edit, so a note pasted in with checkboxes
+        # behaves like one typed in.
+        from app.services.meeting_notes import adopt_handwritten_tasks
+
+        if await adopt_handwritten_tasks(db, note):
+            await db.commit()
+            await db.refresh(note)
     return _serialize_note(note)
 
 
@@ -471,6 +479,25 @@ async def delete_note(
     if not note:
         raise HTTPException(status_code=404, detail="Note not found.")
 
+    # Action items that only exist because of this note's checkboxes go
+    # with it; ones that also belong to a meeting stay (the meeting is still
+    # their source of truth) and merely lose the link.
+    from sqlalchemy import delete as sql_delete, update as sql_update
+
+    from app.models.database import ActionItem
+
+    await db.execute(
+        sql_delete(ActionItem).where(
+            ActionItem.organization_id == org_id,
+            ActionItem.note_id == note_id,
+            ActionItem.meeting_id.is_(None),
+        )
+    )
+    await db.execute(
+        sql_update(ActionItem)
+        .where(ActionItem.organization_id == org_id, ActionItem.note_id == note_id)
+        .values(note_id=None)
+    )
     await repo.delete(note)
     return {"deleted": str(note_id)}
 
