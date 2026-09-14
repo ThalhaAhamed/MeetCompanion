@@ -396,7 +396,6 @@ Contributions are welcome — issues, pull requests, providers, docs. Start with
 
 ## 🗺️ Roadmap
 
-- [ ] Local transcription provider, so capture can run without MeetStream
 - [ ] Code-signed Windows and macOS builds
 - [ ] MySQL / MariaDB support (listed as *coming soon* in the picker)
 - [ ] Re-indexing task after changing embedding models
