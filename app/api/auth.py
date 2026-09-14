@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.connection import get_db
 from app.models.database import User
 from app.middleware.auth_gate import COOKIE_NAME, SESSION_TTL_SECONDS, sign_session, decode_session
-from app.security import hash_password, verify_password
+from app.security import hash_password, needs_rehash, verify_password
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -55,6 +55,10 @@ async def login(body: LoginRequest, request: Request, response: Response, db: As
     user = result.scalar_one_or_none()
     if not user or not user.password_hash or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Incorrect email or password.")
+    if needs_rehash(user.password_hash):
+        # Transparent upgrade from the pre-2026-09 truncating scheme.
+        user.password_hash = hash_password(body.password)
+        await db.commit()
 
     token = sign_session(str(user.id), int(time.time()) + SESSION_TTL_SECONDS)
     response.set_cookie(key=COOKIE_NAME, value=token, max_age=SESSION_TTL_SECONDS, httponly=True, **cookie_flags(request))

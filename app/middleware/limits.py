@@ -22,20 +22,23 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-#: (method, path prefix) -> (max requests, window seconds)
+#: (method, path prefix) -> (max requests, window seconds), keyed per (ip, email)
 RATE_LIMITED: Dict[Tuple[str, str], Tuple[int, int]] = {
     ("POST", "/api/auth/login"): (10, 60),
     ("POST", "/api/members"): (10, 60),
     ("POST", "/api/members/"): (20, 60),  # password reset / role changes
 }
 
+#: Coarse ceiling per address across all emails, so a single client cannot
+#: dodge the per-email limit by rotating addresses.
+PER_IP_CEILING: Tuple[int, int] = (60, 60)
 
-def _client_key(request: Request) -> str:
+
+def _client_ip(request: Request) -> str:
     """
-    Who to rate-limit. X-Forwarded-For is only believed when the deployment
-    says it sits behind a proxy (TRUST_PROXY) - otherwise a client can put
-    a fresh made-up address in the header on every request and never be
-    limited at all.
+    X-Forwarded-For is only believed when the deployment says it sits behind
+    a proxy (TRUST_PROXY) - otherwise a client can put a fresh made-up
+    address in the header on every request and never be limited at all.
     """
     from app.config import settings
 
@@ -44,6 +47,24 @@ def _client_key(request: Request) -> str:
         if forwarded:
             return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
+
+
+async def _client_key(request: Request) -> str:
+    """
+    Who to rate-limit. Login and sign-up are keyed on (address, email) so
+    one person's typos do not lock out everyone behind the same office NAT;
+    a coarse per-address ceiling still stops someone spraying many emails.
+    """
+    ip = _client_ip(request)
+    if request.url.path in ("/api/auth/login", "/api/members"):
+        try:
+            body = await request.json()
+            email = str((body or {}).get("email") or "").strip().lower()
+        except Exception:
+            email = ""
+        if email:
+            return f"{ip}|{email}"
+    return ip
 
 
 class RateLimiter:
@@ -91,7 +112,9 @@ class RequestLimitsMiddleware(BaseHTTPMiddleware):
             # latter; the most specific prefix decides.
             if prefix == "/api/members" and path != "/api/members":
                 continue
-            if not rate_limiter.allow(prefix, _client_key(request), limit, window):
+            key = await _client_key(request)
+            ip_ok = rate_limiter.allow(prefix + "#ip", key.split("|", 1)[0], *PER_IP_CEILING)
+            if not ip_ok or not rate_limiter.allow(prefix, key, limit, window):
                 return JSONResponse(
                     status_code=429,
                     content={"detail": "Too many attempts. Try again in a minute."},

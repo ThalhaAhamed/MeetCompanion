@@ -3,9 +3,10 @@
 # ============================================================
 
 # ---- Web Framework ----
-fastapi==0.115.12
+fastapi==0.141.1
+starlette==1.6.0
 uvicorn[standard]==0.34.3
-python-multipart==0.0.20
+python-multipart==0.0.32
 
 # ---- Database ----
 # SQLite is the zero-setup default; the Postgres drivers and pgvector are only
@@ -18,8 +19,10 @@ pgvector==0.3.6
 # ---- Embeddings & RAG ----
 # ONNX build of all-MiniLM-L6-v2: identical vectors to the PyTorch model,
 # without the multi-gigabyte torch dependency (see app/services/embedding.py).
-fastembed==0.7.1
-langchain-text-splitters==0.3.8
+fastembed==0.8.0
+# fastembed pulls pillow; pinned explicitly so security bumps are visible here
+pillow==12.3.0
+langchain-text-splitters==1.1.2
 numpy>=1.26.0
 
 # ---- LLM ----
@@ -29,7 +32,7 @@ numpy>=1.26.0
 # adding a provider a code change rather than a dependency change.
 
 # ---- Documents ----
-pypdf==6.1.0
+pypdf==6.18.1
 
 # ---- HTTP Client ----
 httpx==0.28.1
@@ -37,7 +40,7 @@ httpx==0.28.1
 # ---- Configuration ----
 pydantic==2.11.4
 pydantic-settings==2.9.1
-python-dotenv==1.1.0
+python-dotenv==1.2.3
 
 # ---- Security ----
 # passlib removed: unmaintained since 2020 and its bcrypt backend detection

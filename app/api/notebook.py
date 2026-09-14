@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_org_id, get_current_user
 from app.database.connection import get_db
+from app.database.repositories import MeetingRepository
 from app.database.notebook_repository import (
     NoteRepository,
     NotebookFolderRepository,
@@ -98,6 +99,16 @@ class AskRequest(BaseModel):
     note_ids: Optional[List[uuid.UUID]] = None
     folder_id: Optional[uuid.UUID] = None
     favorites_only: bool = False
+
+
+def normalise_tags(tags: Optional[List[str]]) -> List[str]:
+    """Trimmed, case-folded, de-duplicated, order preserved: 'QA', ' qa ' -> ['qa']."""
+    seen: List[str] = []
+    for tag in tags or []:
+        cleaned = (tag or "").strip().lower()
+        if cleaned and cleaned not in seen:
+            seen.append(cleaned)
+    return seen
 
 
 def _serialize_note(note: Note, *, include_content: bool = True) -> Dict[str, Any]:
@@ -364,6 +375,9 @@ async def create_note(
 ) -> Dict[str, Any]:
     if body.folder_id and not await NotebookFolderRepository(db).get(org_id, body.folder_id):
         raise HTTPException(status_code=404, detail="Folder not found.")
+    if body.meeting_id and not await MeetingRepository(db).get_by_id(org_id, body.meeting_id):
+        # A note may only reference a meeting in its own workspace.
+        raise HTTPException(status_code=404, detail="Meeting not found.")
 
     note = await NoteRepository(db).create(
         org_id,
@@ -372,7 +386,7 @@ async def create_note(
         folder_id=body.folder_id,
         meeting_id=body.meeting_id,
         note_type=body.note_type,
-        tags=body.tags,
+        tags=normalise_tags(body.tags),
         created_by_user_id=user.id,
         embedding=await _embed_note(body.title, body.content),
     )
@@ -410,7 +424,7 @@ async def update_note(
         "title": body.title,
         "content": body.content,
         "note_type": body.note_type,
-        "tags": body.tags,
+        "tags": normalise_tags(body.tags) if body.tags is not None else None,
         "is_favorite": body.is_favorite,
         "folder_id": body.folder_id,
     }

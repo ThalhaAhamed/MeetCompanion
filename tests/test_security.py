@@ -359,3 +359,74 @@ async def test_duplicate_email_is_refused_by_the_database_not_just_the_api():
         session.add(User(organization_id=org_id, email=email, name="Twin", is_active=True, settings={}))
         with pytest.raises(IntegrityError):
             await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# QA round: password pre-hash, per-email rate limit, cross-org note references
+# ---------------------------------------------------------------------------
+
+def test_long_passwords_are_not_truncated_and_legacy_hashes_still_verify():
+    import bcrypt as _bcrypt
+
+    from app.security import hash_password, needs_rehash, verify_password
+
+    long_pw = "p" * 200
+    h = hash_password(long_pw)
+    assert verify_password(long_pw, h)
+    assert not verify_password("p" * 72 + "WRONG", h), "bcrypt's 72-byte limit must not leak through"
+    assert not needs_rehash(h)
+    # A hash written by the old code (plain bcrypt over the first 72 bytes).
+    legacy = _bcrypt.hashpw(("q" * 200).encode()[:72], _bcrypt.gensalt(4)).decode()
+    assert verify_password("q" * 200, legacy) and needs_rehash(legacy)
+
+
+@pytest.mark.asyncio
+async def test_legacy_hash_is_upgraded_on_login():
+    import bcrypt as _bcrypt
+
+    from app.security import PREHASH_PREFIX
+
+    email = f"legacy-{uuid.uuid4().hex[:6]}@example.com"
+    async with _client() as c:
+        await _signup(c, email, workspace="Legacy")
+    async with AsyncSessionLocal() as session:
+        user = (await session.execute(select(User).where(User.email == email))).scalar_one()
+        user.password_hash = _bcrypt.hashpw(b"correct-horse-battery", _bcrypt.gensalt(4)).decode()
+        await session.commit()
+    async with _client() as c:
+        assert (await c.post("/api/auth/login", json={"email": email, "password": "correct-horse-battery"})).status_code == 200
+    async with AsyncSessionLocal() as session:
+        stored = (await session.execute(select(User.password_hash).where(User.email == email))).scalar_one()
+    assert stored.startswith(PREHASH_PREFIX)
+
+
+@pytest.mark.asyncio
+async def test_login_rate_limit_is_per_email_not_per_address():
+    rate_limiter.reset()
+    email = f"v-{uuid.uuid4().hex[:6]}@example.com"
+    async with _client() as c:
+        await _signup(c, email, workspace="Victim")
+    async with _client() as attacker:
+        for _ in range(12):
+            await attacker.post("/api/auth/login", json={"email": "someone-else@example.com", "password": "wrong"})
+    async with _client() as colleague:
+        # Same address (test client), different email: must still get in.
+        r = await colleague.post("/api/auth/login", json={"email": email, "password": "correct-horse-battery"})
+    assert r.status_code == 200
+    rate_limiter.reset()
+
+
+@pytest.mark.asyncio
+async def test_note_cannot_reference_another_workspaces_meeting():
+    from app.services.processing import processing_pipeline
+
+    async with _client() as a, _client() as b:
+        await _signup(a, f"na-{uuid.uuid4().hex[:6]}@example.com", workspace="NoteA")
+        await _signup(b, f"nb-{uuid.uuid4().hex[:6]}@example.com", workspace="NoteB")
+        meeting = (await a.post("/api/meetings/upload", json={"title": "A only", "transcript": "Sam: hello."})).json()
+        await processing_pipeline.wait_for(uuid.UUID(meeting["id"]))
+        assert (await b.post("/api/notebook/notes", json={"title": "x", "meeting_id": meeting["id"]})).status_code == 404
+        own = (await b.post("/api/notebook/notes", json={"title": "mine"})).json()
+        patched = await b.patch(f"/api/notebook/notes/{own['id']}", json={"meeting_id": meeting["id"]})
+        assert patched.json()["meeting_id"] is None  # meeting_id is not updatable
+        assert (await a.post("/api/notebook/notes", json={"title": "ok", "meeting_id": meeting["id"]})).status_code == 201
