@@ -129,7 +129,9 @@ async def _alembic(engine: AsyncEngine, action: str, target: str) -> None:
     def _run() -> None:
         cfg = Config(str(root / "alembic.ini"))
         cfg.set_main_option("script_location", str(root / "app" / "migrations"))
-        cfg.attributes["url"] = str(engine.url)
+        # str(engine.url) masks the password as "***"; render it in full so
+        # Alembic can actually authenticate (e.g. Postgres).
+        cfg.attributes["url"] = engine.url.render_as_string(hide_password=False)
         if action == "upgrade":
             command.upgrade(cfg, target)
         elif action == "stamp":

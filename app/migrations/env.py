@@ -28,7 +28,10 @@ target_metadata = Base.metadata
 # Let a caller (the app at startup) pass an explicit URL via
 # config.attributes["url"]; otherwise resolve it the app's way.
 _URL = config.attributes.get("url") or resolve_database_url()
-config.set_main_option("sqlalchemy.url", _URL)
+# set_main_option runs the value through ConfigParser, which treats "%" as
+# interpolation - a password containing one would raise. Escape it; the engine
+# is built from this section below.
+config.set_main_option("sqlalchemy.url", _URL.replace("%", "%%"))
 
 
 def _run_migrations(connection: Connection) -> None:
