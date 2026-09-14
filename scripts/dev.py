@@ -27,6 +27,13 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=8000, help="API port (default 8000)")
     args = parser.parse_args()
 
+    if sys.version_info[:2] != (3, 12):
+        print(
+            f"[dev] Warning: Python {sys.version_info.major}.{sys.version_info.minor} detected. "
+            "This project targets Python 3.12; 3.13+ may fail to install some dependencies "
+            "(pydantic-core). Create the venv with `py -3.12 -m venv .venv` if install failed.",
+            file=sys.stderr,
+        )
     os.chdir(ROOT)
     env = {**os.environ}
     env.setdefault("MEET_COMPANION_CONFIG", "data/config.json")

@@ -94,7 +94,7 @@ async def require_meetstream_api_key(db: AsyncSession, user_id: uuid.UUID) -> st
     if not key:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Add your own MeetStream API key in Agent settings before doing this.",
+            detail="Add your MeetStream API key in Settings → Meetings before doing this.",
         )
     return key
 

@@ -270,8 +270,13 @@ async def list_agents(user: User = Depends(get_current_user), db: AsyncSession =
     member's Agent Settings page showed every agent anyone else had ever
     created, including their system prompts.
     """
+    own_key = await get_meetstream_api_key(db, user.id)
+    if not own_key:
+        # No MeetStream call to make - and the raw 403 it returns is a
+        # confusing "Forbidden ... developer.mozilla.org" the UI shouldn't show.
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Add your MeetStream API key in Settings → Meetings to manage agents.")
     try:
-        agents = await meetstream_client.list_mia_agents(api_key=await get_meetstream_api_key(db, user.id))
+        agents = await meetstream_client.list_mia_agents(api_key=own_key)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
     active_id = await get_active_agent_config_id(db, user.id)
@@ -295,8 +300,11 @@ async def list_importable_agents(user: User = Depends(get_current_user), db: Asy
     dashboard, or left behind after whoever owned them was removed. Lets a
     member adopt one instead of it just sitting invisible forever.
     """
+    own_key = await get_meetstream_api_key(db, user.id)
+    if not own_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Add your MeetStream API key in Settings → Meetings to import agents.")
     try:
-        agents = await meetstream_client.list_mia_agents(api_key=await get_meetstream_api_key(db, user.id))
+        agents = await meetstream_client.list_mia_agents(api_key=own_key)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
 

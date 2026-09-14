@@ -149,7 +149,7 @@ export default function SignIn({ onSignedIn }) {
 
             {error && (
               <div className="mb-4">
-                <ErrorMessage title="Could not sign you in" detail={error} />
+                <ErrorMessage title={mode === 'signin' ? 'Could not sign you in' : 'Could not create your account'} detail={error} />
               </div>
             )}
 

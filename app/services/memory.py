@@ -206,15 +206,19 @@ class MemoryExtractionService:
         provider = try_get_llm_provider()
         if provider is not None:
             try:
-                return await self._extract_with_provider(
+                result = await self._extract_with_provider(
                     provider, transcript_text, meeting_title, customer_name, project_name, meeting_date
                 )
+                result["ai_used"] = True
+                return result
             except (LLMError, OSError) as exc:
                 logger.warning(f"Memory extraction via {provider.label} failed: {exc}. "
                     "Falling back to rule-based parser."
                 )
 
-        return self._heuristic_extract(transcript_text, meeting_title, customer_name, project_name)
+        result = self._heuristic_extract(transcript_text, meeting_title, customer_name, project_name)
+        result["ai_used"] = False
+        return result
 
     async def _extract_with_provider(
         self, provider, transcript_text, meeting_title, customer_name, project_name, meeting_date

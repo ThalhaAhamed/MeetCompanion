@@ -352,6 +352,11 @@ npm --prefix frontend run dev
 Open <http://localhost:3000>. No `.env` is required — first run walks you
 through setup.
 
+> The API serves the built UI from `frontend/dist` only if it exists when the
+> server starts. In development you use Vite on :3000 (above) and don't need
+> it; for a single-process deployment, run `npm --prefix frontend run build`
+> **before** starting the server.
+
 **Fully offline:** install [Ollama](https://ollama.com), `ollama pull llama3.1`,
 and pick *Ollama (local)* during setup.
 

@@ -79,7 +79,7 @@ export default function Onboarding({ onComplete }) {
   const [llmTest, setLlmTest] = useState(null)
   const [testing, setTesting] = useState(false)
 
-  const [storage, setStorage] = useState('')
+  const [storage, setStorage] = useState('sqlite')  // the Recommended default
   const [dbValues, setDbValues] = useState({})
   const [dbTest, setDbTest] = useState(null)
 

@@ -118,7 +118,7 @@ def _reject_escaping_sqlite_path(url: str) -> None:
     if data_dir != target and data_dir not in target.parents:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"SQLite files must live inside {data_dir}.",
+            detail=f"The SQLite file must be inside the app data directory.",
         )
 
 

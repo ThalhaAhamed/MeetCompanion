@@ -155,6 +155,7 @@ class MeetingProcessingPipeline:
                 extracted_memories_data = extraction_result.get("memories", [])
                 extracted_actions_data = extraction_result.get("action_items", [])
                 summary = extraction_result.get("summary", "")
+                ai_used = extraction_result.get("ai_used", True)
 
                 # 6. Save Memories to DB
                 created_memories = await memory_repo.create_batch(
@@ -189,11 +190,19 @@ class MeetingProcessingPipeline:
                     }
                 )
 
-                # 9. Finalize meeting record
+                # 9. Finalize meeting record. If the AI never ran (no provider
+                # or it was unreachable), say so rather than leaving a
+                # summary-less meeting that looks broken.
                 await meeting_repo.update_status(
                     meeting_id=meeting.id,
                     summary=summary,
                     processing_status="completed",
+                    processing_error=(
+                        None if ai_used else
+                        "Processed without AI: the configured model was unreachable, so this uses a basic "
+                        "rule-based extraction. Set a working provider in Settings, then Reprocess for a full "
+                        "summary and richer action items."
+                    ),
                 )
 
                 # 10. File the meeting in the notebook. Its own failure must
