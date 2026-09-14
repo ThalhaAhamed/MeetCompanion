@@ -2,10 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Page, PageHeader } from '../components/AppShell'
 import { MeetingsIcon, PlusIcon, SearchIcon } from '../components/Icons'
-import { Badge, Card, EmptyState, ErrorMessage, Field, Loading, Modal, Spinner } from '../components/ui'
+import { Badge, Card, EmptyState, ErrorMessage, ExportMenu, Field, Loading, Modal, Spinner } from '../components/ui'
 import {
   createMeeting,
   deleteMeeting,
+  exportMeetingUrl,
   getMeeting,
   getTranscript,
   importBot,
@@ -386,6 +387,13 @@ function MeetingDetail({ meetingId, onChanged, onDeleted }) {
                 {stopping ? <Spinner size={13} /> : null} Stop bot
               </button>
             )}
+            <ExportMenu
+              label="Export"
+              options={[
+                { href: exportMeetingUrl(meetingId, 'md'), label: 'Markdown (.md)' },
+                { href: exportMeetingUrl(meetingId, 'json'), label: 'JSON (.json)' },
+              ]}
+            />
             {!isLive && (
               <button
                 type="button"

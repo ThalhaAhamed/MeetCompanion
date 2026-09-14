@@ -40,6 +40,7 @@ Ask AI — all with a model, database and machine that you choose.
 - [Configuration](#%EF%B8%8F-configuration)
 - [Docker](#-docker)
 - [Live meetings: reaching your server](#-live-meetings-reaching-your-server)
+- [Export](#-export)
 - [Privacy and data](#-privacy-and-data)
 - [Security model](#-security-model)
 - [For developers](#%EF%B8%8F-for-developers)
@@ -282,6 +283,21 @@ tool calls (`/mcp`).
 4. Create or activate an agent in **Agent**; Meet Companion wires the MCP
    server URL and your workspace's token into it.
 
+## 📤 Export
+
+Your notes and meetings come back out in formats that outlive the app.
+
+| Where | What you get |
+| --- | --- |
+| A note (Notebook -> export) | `.md` with YAML front matter, or `.json` |
+| A meeting (Meetings -> Export) | `.md` with summary, decisions, action items and transcript, or `.json` |
+| Everything (Settings -> General) | `.zip` of Markdown that keeps your folder tree, or one `.json` |
+
+Markdown is written for reading and for dropping straight into Obsidian or
+Notion - front matter carries the title, tags, folder and dates. JSON is the
+lossless one: ids, metadata and the raw note text, so an export can be
+processed or re-imported by something else.
+
 ## 🔒 Privacy and data
 
 Everything is stored in the database you choose (SQLite file by default):
@@ -408,7 +424,6 @@ Contributions are welcome — issues, pull requests, providers, docs. Start with
 - [ ] Code-signed Windows and macOS builds
 - [ ] MySQL / MariaDB support (listed as *coming soon* in the picker)
 - [ ] Re-indexing task after changing embedding models
-- [ ] Export (Markdown, JSON) for notes and meetings
 - [ ] Auto-update for the desktop app
 
 ## 📄 License

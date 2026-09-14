@@ -195,3 +195,11 @@ export const GraphIcon = (p) => (
     <path d="M8.2 8.4l2.6 6.9M16.2 8.2l-2.7 7.1M8.4 6.6l7.2-.4" />
   </Icon>
 )
+
+export const DownloadIcon = (p) => (
+  <Icon {...p}>
+    <path d="M12 3v12" />
+    <path d="M7 11l5 5 5-5" />
+    <path d="M4 20h16" />
+  </Icon>
+)

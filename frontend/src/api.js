@@ -418,3 +418,22 @@ export function uploadTranscript(payload) {
 export function reprocessMeeting(id) {
   return req(`/meetings/${id}/reprocess`, { method: 'POST' })
 }
+
+/**
+ * Download URLs for exports.
+ *
+ * These are plain links rather than fetch calls: the browser sends the session
+ * cookie, honours the Content-Disposition filename the server sets, and streams
+ * the file straight to disk without it passing through JS memory.
+ */
+export function exportNoteUrl(id, format = 'md') {
+  return `${BASE}/export/note/${id}?format=${format}`
+}
+
+export function exportMeetingUrl(id, format = 'md') {
+  return `${BASE}/export/meeting/${id}?format=${format}`
+}
+
+export function exportWorkspaceUrl(format = 'json') {
+  return `${BASE}/export/workspace?format=${format}`
+}

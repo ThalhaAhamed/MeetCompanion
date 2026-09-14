@@ -12,7 +12,7 @@ import {
   StarIcon,
   TrashIcon,
 } from '../components/Icons'
-import { Badge, EmptyState, ErrorMessage, Loading, Modal, Spinner } from '../components/ui'
+import { Badge, EmptyState, ErrorMessage, ExportMenu, Loading, Modal, Spinner } from '../components/ui'
 import Markdown, { toggleTaskInMarkdown } from '../components/Markdown'
 import {
   createFolder,
@@ -25,6 +25,7 @@ import {
   listNotes,
   syncMeetingNotes,
   updateNote,
+  exportNoteUrl,
 } from '../api'
 
 const SORTS = [
@@ -291,6 +292,14 @@ function NoteEditor({ note, onChange, onDelete, onBack, saving }) {
         >
           <StarIcon size={17} filled={draft.is_favorite} />
         </button>
+        <ExportMenu
+          compact
+          label="Export note"
+          options={[
+            { href: exportNoteUrl(draft.id, 'md'), label: 'Markdown (.md)' },
+            { href: exportNoteUrl(draft.id, 'json'), label: 'JSON (.json)' },
+          ]}
+        />
         <button
           type="button"
           className="mc-btn mc-btn-ghost px-2"

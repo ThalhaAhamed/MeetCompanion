@@ -4,8 +4,8 @@
  * Small, unopinionated building blocks so pages stay readable and every screen
  * handles loading, empty and error states the same way.
  */
-import { useEffect } from 'react'
-import { AlertIcon, CloseIcon, InboxIcon } from './Icons'
+import { useEffect, useRef, useState } from 'react'
+import { AlertIcon, CloseIcon, DownloadIcon, InboxIcon } from './Icons'
 
 export function Card({ children, className = '', padded = true, ...rest }) {
   return (
@@ -229,5 +229,69 @@ export function StatTile({ label, value, hint, icon, tone = 'brand' }) {
         {icon && <IconChip icon={icon} tone={tone} />}
       </div>
     </Card>
+  )
+}
+
+
+/**
+ * Download-as menu.
+ *
+ * The options are plain anchors, not buttons: the browser then handles the
+ * download itself (cookie sent, server filename honoured) instead of the app
+ * pulling the file into memory to re-save it.
+ */
+export function ExportMenu({ options, label = 'Export', compact = false, align = 'right' }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef(null)
+
+  useEffect(() => {
+    if (!open) return undefined
+    const close = (event) => {
+      if (!box.current?.contains(event.target)) setOpen(false)
+    }
+    const onKey = (event) => event.key === 'Escape' && setOpen(false)
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div className="relative" ref={box}>
+      <button
+        type="button"
+        className={compact ? 'mc-btn mc-btn-ghost px-2' : 'mc-btn mc-btn-secondary'}
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={label}
+        title={label}
+      >
+        <DownloadIcon size={compact ? 17 : 15} />
+        {compact ? null : <span className="ml-1.5">{label}</span>}
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="mc-panel absolute z-20 mt-1 min-w-[12rem] overflow-hidden p-1"
+          style={{ [align]: 0, boxShadow: 'var(--shadow-lg, 0 10px 30px rgba(0,0,0,.25))' }}
+        >
+          {options.map((option) => (
+            <a
+              key={option.href}
+              role="menuitem"
+              href={option.href}
+              download
+              className="mc-nav-item block w-full px-3 py-2 text-left text-sm"
+              onClick={() => setOpen(false)}
+            >
+              {option.label}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }

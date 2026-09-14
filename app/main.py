@@ -25,6 +25,7 @@ from app.api.auth import router as auth_router
 from app.api.members import router as members_router
 from app.api.setup import router as setup_router
 from app.api.notebook import router as notebook_router
+from app.api.export import router as export_router
 from app.mcp.server import router as mcp_router
 from app.middleware.auth_gate import AuthGateMiddleware
 from app.middleware.limits import RequestLimitsMiddleware
@@ -96,6 +97,7 @@ app.include_router(search_router)
 app.include_router(action_items_router)
 app.include_router(graph_router)
 app.include_router(notebook_router)
+app.include_router(export_router)
 app.include_router(mcp_router)
 
 

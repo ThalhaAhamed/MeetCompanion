@@ -4,9 +4,10 @@ import { useTheme } from '../components/AppShell'
 import { Badge, Card, ErrorMessage, Field, Loading, Spinner } from '../components/ui'
 import { useIsOwner } from '../user'
 import {
-  getAgentCredentials,
   clearMeetstreamApiKey,
   completeSetup,
+  exportWorkspaceUrl,
+  getAgentCredentials,
   getProviderCatalog,
   getSetupStatus,
   getWriteTools,
@@ -494,6 +495,22 @@ export default function Settings() {
                 <button type="button" className="mc-btn mc-btn-secondary" onClick={toggleTheme}>
                   Switch to {theme === 'dark' ? 'light' : 'dark'} theme
                 </button>
+              </Card>
+
+              <Card>
+                <h2 className="mb-1 text-base font-semibold">Export your data</h2>
+                <p className="mb-4 text-sm" style={{ color: 'var(--text-muted)' }}>
+                  Everything in this workspace, in a format that outlives the app. Markdown is a
+                  zip you can open as a vault (folders preserved); JSON keeps ids and metadata.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <a className="mc-btn mc-btn-secondary" href={exportWorkspaceUrl('md')} download>
+                    Download Markdown (.zip)
+                  </a>
+                  <a className="mc-btn mc-btn-secondary" href={exportWorkspaceUrl('json')} download>
+                    Download JSON
+                  </a>
+                </div>
               </Card>
 
               {!status.read_only && (
