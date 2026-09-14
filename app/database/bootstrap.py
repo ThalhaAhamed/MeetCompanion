@@ -37,31 +37,107 @@ async def bootstrap(engine: AsyncEngine) -> None:
 
 async def ensure_schema(engine: AsyncEngine) -> None:
     """
-    Bring the database up to date at startup.
+    Bring the database up to date at startup, through Alembic.
 
-    Creating the schema from the ORM metadata means a brand new database - in
-    particular a local SQLite file - needs no migration step, no psql session
-    and no setup script; the application simply works on first run.
+    Three cases, so the zero-setup promise holds and existing installs are not
+    disturbed:
 
-    Existing Postgres deployments predate several columns, so they additionally
-    get the idempotent patches below.
+    * Brand-new database (no application tables): run every migration. A local
+      SQLite file still needs no psql session and no manual step - the app
+      creates and migrates it on first run.
+    * Existing database created before Alembic (tables but no alembic_version):
+      apply the historical idempotent patches once to close any old-schema
+      gaps, then stamp it at the baseline so it becomes migration-managed.
+    * Already migration-managed: upgrade to head, applying any new revisions.
+
+    pgvector's extension and its HNSW indexes are not expressible in portable
+    ORM metadata, so they are (re)created here after the schema is in place.
     """
     dialect = engine.dialect.name
-    async with engine.begin() as conn:
-        if dialect == POSTGRESQL:
-            # The vector column type cannot be created until the extension is.
+
+    async with engine.connect() as conn:
+        has_app_tables = await conn.run_sync(_has_table, "organizations")
+        has_alembic = await conn.run_sync(_has_table, "alembic_version")
+
+    if not has_app_tables:
+        # Fresh database - or one whose app tables were dropped out from under
+        # a stale alembic_version (e.g. a per-test reset). A version row that
+        # claims "head" would make `upgrade` a no-op and leave no schema, so
+        # clear it first and build from the baseline.
+        if has_alembic:
+            async with engine.begin() as conn:
+                await conn.execute(text("DROP TABLE alembic_version"))
+        await _alembic(engine, "upgrade", "head")
+    elif not has_alembic:
+        # Adopt an existing pre-Alembic database: make sure its schema is fully
+        # current, then hand ownership to Alembic without re-running the baseline.
+        async with engine.begin() as conn:
+            if dialect == POSTGRESQL:
+                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                await conn.run_sync(Base.metadata.create_all)
+                await _patch_legacy_postgres_schema(conn)
+            else:
+                await conn.run_sync(Base.metadata.create_all)
+            await _patch_action_items(conn, dialect)
+            await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_users_email ON users (email)"))
+        await _alembic(engine, "stamp", BASELINE_REVISION)
+    else:
+        # Already migration-managed: apply any new revisions.
+        await _alembic(engine, "upgrade", "head")
+
+    # Extension + vector indexes live outside the ORM metadata (and outside the
+    # migrations, since the HNSW/ivfflat choice has runtime logic); ensure them
+    # every start. Cheap and idempotent.
+    if dialect == POSTGRESQL:
+        async with engine.begin() as conn:
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-
-        await conn.run_sync(Base.metadata.create_all)
-
-        if dialect == POSTGRESQL:
             await _create_postgres_vector_indexes(conn)
-            await _patch_legacy_postgres_schema(conn)
-        await _patch_action_items(conn, dialect)
-        # Uniqueness used to be enforced only by the API (a check-then-insert
-        # race). A unique index closes it on databases created before the
-        # column carried the constraint; create_all already did it for new ones.
-        await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_users_email ON users (email)"))
+
+
+#: The first migration; existing databases are stamped here on adoption.
+BASELINE_REVISION = "0001_baseline"
+
+
+def _has_table(sync_conn, name: str) -> bool:
+    from sqlalchemy import inspect
+
+    return inspect(sync_conn).has_table(name)
+
+
+async def _alembic(engine: AsyncEngine, action: str, target: str) -> None:
+    """
+    Run an Alembic command against this engine's URL.
+
+    Alembic's env.py runs its own asyncio loop, so it is executed in a worker
+    thread to avoid nesting event loops inside the startup lifespan. The URL is
+    passed through config attributes so env.py targets exactly this database.
+    """
+    import asyncio
+    import sys
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+
+    # In the PyInstaller bundle, alembic.ini and app/migrations are unpacked
+    # under _MEIPASS; from source they sit at the repository root.
+    if getattr(sys, "frozen", False):
+        root = Path(sys._MEIPASS)
+    else:
+        root = Path(__file__).resolve().parents[2]
+
+    def _run() -> None:
+        cfg = Config(str(root / "alembic.ini"))
+        cfg.set_main_option("script_location", str(root / "app" / "migrations"))
+        cfg.attributes["url"] = str(engine.url)
+        if action == "upgrade":
+            command.upgrade(cfg, target)
+        elif action == "stamp":
+            command.stamp(cfg, target)
+        else:  # pragma: no cover - guard
+            raise ValueError(action)
+
+    await asyncio.to_thread(_run)
 
 
 async def _patch_action_items(conn, dialect: str) -> None:

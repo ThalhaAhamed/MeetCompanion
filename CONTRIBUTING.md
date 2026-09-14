@@ -2,6 +2,25 @@
 
 Thanks for your interest. Issues, questions, and pull requests are all welcome.
 
+## Database migrations
+
+Schema is managed with [Alembic](https://alembic.sqlalchemy.org). You normally
+do nothing: the app runs `alembic upgrade head` at startup against whatever
+database it is configured for (SQLite or Postgres), a fresh database is built
+from the baseline, and an older one created before Alembic is adopted and
+stamped automatically.
+
+When you change a model in `app/models/database.py`, add a revision:
+
+```bash
+alembic revision --autogenerate -m "what changed"
+```
+
+Review the generated file in `app/migrations/versions/` (autogenerate is a
+draft, not gospel - check it, especially for renames and server defaults), then
+`alembic upgrade head` to apply it locally. `tests/test_migrations.py` fails if
+the models drift from the migrations, so CI catches a forgotten revision.
+
 ## Getting set up
 
 Requirements: **Python 3.12**, **Node 22**, and optionally Docker (for Postgres).

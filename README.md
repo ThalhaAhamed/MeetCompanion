@@ -407,7 +407,6 @@ Contributions are welcome — issues, pull requests, providers, docs. Start with
 - [ ] Code-signed Windows and macOS builds
 - [ ] MySQL / MariaDB support (listed as *coming soon* in the picker)
 - [ ] Re-indexing task after changing embedding models
-- [ ] Alembic migrations (schema changes are applied by idempotent patches today)
 - [ ] Export (Markdown, JSON) for notes and meetings
 - [ ] Auto-update for the desktop app
 

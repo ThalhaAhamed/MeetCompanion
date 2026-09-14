@@ -17,7 +17,11 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 ROOT = Path(SPECPATH).resolve().parent
 
 hiddenimports = []
-datas = [(str(ROOT / "frontend" / "dist"), "static")]
+datas = [
+    (str(ROOT / "frontend" / "dist"), "static"),
+    (str(ROOT / "alembic.ini"), "."),
+    (str(ROOT / "app" / "migrations"), "app/migrations"),
+]
 binaries = []
 
 # fastembed/onnxruntime/tokenizers ship native libraries and data files that
@@ -32,6 +36,8 @@ for package in ("fastembed", "onnxruntime", "tokenizers"):
 hiddenimports += collect_submodules("uvicorn")
 hiddenimports += ["aiosqlite", "asyncpg", "pgvector", "pgvector.sqlalchemy", "app.desktop_entry"]
 hiddenimports += collect_submodules("app")
+# Alembic drives schema migrations at first run inside the frozen server.
+hiddenimports += collect_submodules("alembic")
 
 a = Analysis(
     [str(ROOT / "app" / "desktop_entry.py")],

@@ -12,6 +12,7 @@ python-multipart==0.0.32
 # SQLite is the zero-setup default; the Postgres drivers and pgvector are only
 # exercised when DATABASE_URL points at Postgres.
 sqlalchemy[asyncio]==2.0.41
+alembic==1.20.0
 aiosqlite==0.21.0
 asyncpg==0.31.0
 pgvector==0.3.6
