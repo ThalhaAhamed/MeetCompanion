@@ -32,9 +32,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # The pgvector extension is ensured in env.py before this runs, so the
-    # Vector columns can be created on a fresh Postgres database.
     bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        # Inside the migration's own transaction, so it commits with the tables
+        # that depend on the vector type.
+        op.execute("CREATE EXTENSION IF NOT EXISTS vector")
     Base.metadata.create_all(bind=bind)
 
 

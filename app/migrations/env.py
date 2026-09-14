@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 
 from alembic import context
-from sqlalchemy import pool, text
+from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -35,8 +35,10 @@ config.set_main_option("sqlalchemy.url", _URL.replace("%", "%%"))
 
 
 def _run_migrations(connection: Connection) -> None:
-    if connection.dialect.name == "postgresql":
-        connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    # The pgvector extension is created inside the migration itself (see the
+    # baseline's upgrade), not here: executing on the connection before Alembic
+    # configures it would open a transaction Alembic then declines to own,
+    # leaving the schema uncommitted.
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
