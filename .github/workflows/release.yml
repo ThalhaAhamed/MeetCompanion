@@ -56,8 +56,11 @@ jobs:
 
       - name: Build web UI
         working-directory: frontend
+        # bash on every runner (including Windows) so the retry wrapper behaves
+        # the same everywhere.
+        shell: bash
         run: |
-          npm ci
+          bash ../scripts/retry.sh npm ci
           npm run build
 
       - name: Freeze server
@@ -67,14 +70,18 @@ jobs:
           pyinstaller desktop/server.spec --noconfirm --distpath desktop/build --workpath desktop/work
 
       - name: Package desktop app
+        # npm ci here runs Electron's postinstall, which downloads the Electron
+        # binary with its own HTTP client - npm's fetch-retries does not cover
+        # it, and one 504 from that CDN failed a whole release. Retried.
         working-directory: desktop
         env:
           # Unsigned builds: no certificates are configured. Signing can be
           # added later with CSC_LINK / CSC_KEY_PASSWORD secrets.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        shell: bash
         run: |
-          npm ci
-          npx electron-builder ${{ matrix.target }} --publish never
+          bash ../scripts/retry.sh npm ci
+          bash ../scripts/retry.sh npx electron-builder ${{ matrix.target }} --publish never
 
       - uses: actions/upload-artifact@v4
         with:
