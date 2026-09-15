@@ -120,3 +120,50 @@ async def test_role_follows_the_workspace(authed_client):
 async def test_workspace_endpoints_need_a_session(client):
     assert (await client.get("/api/members/workspaces")).status_code == 401
     assert (await client.post(f"/api/members/workspaces/{uuid.uuid4()}/activate")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_join_another_workspace_with_a_code_keeps_one_account(authed_client):
+    """Joining by code must extend this account, not create a second one."""
+    me = (await authed_client.get("/api/auth/check")).json()["member"]
+    other_id, code = await _second_workspace(authed_client, "Invited")
+
+    r = await authed_client.post("/api/members/workspaces/join", json={"join_code": code})
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "Invited" and r.json()["role"] == "member"
+
+    # Same account, now in two workspaces, looking at the new one.
+    assert (await authed_client.get("/api/auth/check")).json()["member"]["id"] == me["id"]
+    names = {w["name"] for w in await _workspaces(authed_client)}
+    assert len(names) == 2 and "Invited" in names
+    assert next(w for w in await _workspaces(authed_client) if w["is_active"])["name"] == "Invited"
+
+
+@pytest.mark.asyncio
+async def test_joining_by_code_never_grants_ownership(authed_client):
+    _, code = await _second_workspace(authed_client, "Someone else's")
+    r = await authed_client.post("/api/members/workspaces/join", json={"join_code": code})
+    assert r.json()["role"] == "member"
+    assert (await authed_client.get("/api/auth/check")).json()["member"]["role"] == "member"
+
+
+@pytest.mark.asyncio
+async def test_bad_and_repeated_join_codes(authed_client):
+    assert (await authed_client.post("/api/members/workspaces/join",
+                                     json={"join_code": "nope"})).status_code == 404
+    assert (await authed_client.post("/api/members/workspaces/join",
+                                     json={"join_code": "  "})).status_code == 400
+
+    _, code = await _second_workspace(authed_client, "Twice")
+    first = await authed_client.post("/api/members/workspaces/join", json={"join_code": code})
+    again = await authed_client.post("/api/members/workspaces/join", json={"join_code": code})
+    assert first.status_code == 200 and again.status_code == 200
+    assert again.json()["already_member"] is True
+    # Still exactly one membership for it.
+    assert len([w for w in await _workspaces(authed_client) if w["name"] == "Twice"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_join_requires_a_session(client):
+    r = await client.post("/api/members/workspaces/join", json={"join_code": "x"})
+    assert r.status_code == 401

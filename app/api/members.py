@@ -210,6 +210,69 @@ async def list_my_workspaces(
     }
 
 
+class JoinWorkspaceRequest(BaseModel):
+    join_code: str
+    activate: bool = True
+
+
+@router.post("/workspaces/join")
+async def join_workspace(
+    body: JoinWorkspaceRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Add the signed-in account to another workspace using its join code.
+
+    Distinct from sign-up, which also takes a join code but makes a *new*
+    account: this adds a membership to the account you are already using, so
+    one person can hold several workspaces and switch between them rather than
+    juggling a login per workspace.
+    """
+    code = (body.join_code or "").strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="A join code is required.")
+
+    org = (
+        await db.execute(select(Organization).where(Organization.join_code == code))
+    ).scalar_one_or_none()
+    if org is None:
+        raise HTTPException(status_code=404, detail="No workspace found with that join code.")
+
+    existing = (
+        await db.execute(
+            select(Membership).where(
+                Membership.user_id == user.id, Membership.organization_id == org.id
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is None:
+        # Joining by code never confers ownership - that belongs to whoever
+        # created the workspace.
+        db.add(Membership(user_id=user.id, organization_id=org.id, role="member"))
+        try:
+            await db.flush()
+        except IntegrityError:
+            # Someone double-clicked; the membership they already have is fine.
+            await db.rollback()
+            raise HTTPException(status_code=409, detail="You are already a member of that workspace.")
+        role = "member"
+    else:
+        role = existing.role
+
+    if body.activate:
+        user.organization_id = org.id
+        user.role = role
+    await db.commit()
+    return {
+        "id": str(org.id),
+        "name": org.name,
+        "role": role,
+        "activated": body.activate,
+        "already_member": existing is not None,
+    }
+
+
 @router.post("/workspaces/{organization_id}/activate")
 async def activate_workspace(
     organization_id: uuid.UUID,

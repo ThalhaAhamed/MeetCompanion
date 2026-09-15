@@ -1,4 +1,4 @@
-import { activateWorkspace, listMyWorkspaces } from '../api'
+import { activateWorkspace, joinWorkspace, listMyWorkspaces } from '../api'
 import { useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import Logo from './Logo'
@@ -113,6 +113,8 @@ function WorkspaceSwitcher() {
   const [workspaces, setWorkspaces] = useState(null)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [joining, setJoining] = useState(false)
+  const [error, setError] = useState(null)
   const box = useRef(null)
 
   useEffect(() => {
@@ -137,7 +139,7 @@ function WorkspaceSwitcher() {
     }
   }, [open])
 
-  if (!workspaces || workspaces.length < 2) return null
+  if (!workspaces) return null
   const active = workspaces.find((w) => w.is_active) || workspaces[0]
 
   async function choose(workspace) {
@@ -186,6 +188,52 @@ function WorkspaceSwitcher() {
               </span>
             </button>
           ))}
+          <div style={{ borderTop: '1px solid var(--border-subtle)' }} className="mt-1 pt-1">
+            {joining ? (
+              <form
+                className="flex items-center gap-1 p-1"
+                onSubmit={async (event) => {
+                  event.preventDefault()
+                  const code = event.target.elements.code.value.trim()
+                  if (!code) return
+                  setBusy(true)
+                  setError(null)
+                  try {
+                    await joinWorkspace(code)
+                    window.location.reload()
+                  } catch (err) {
+                    setError(err.message)
+                    setBusy(false)
+                  }
+                }}
+              >
+                <input
+                  name="code"
+                  className="mc-input py-1 text-xs"
+                  placeholder="Join code"
+                  aria-label="Workspace join code"
+                  autoFocus
+                  disabled={busy}
+                />
+                <button type="submit" className="mc-btn mc-btn-primary px-2 py-1 text-xs" disabled={busy}>
+                  Join
+                </button>
+              </form>
+            ) : (
+              <button
+                type="button"
+                className="mc-nav-item w-full px-3 py-2 text-left text-sm"
+                onClick={() => setJoining(true)}
+              >
+                Join a workspace…
+              </button>
+            )}
+            {error && (
+              <div className="px-3 py-1 text-xs" style={{ color: 'var(--color-danger-500, #e5484d)' }}>
+                {error}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -445,3 +445,11 @@ export function listMyWorkspaces() {
 export function activateWorkspace(id) {
   return req(`/members/workspaces/${id}/activate`, { method: 'POST' })
 }
+
+export function joinWorkspace(joinCode) {
+  return req('/members/workspaces/join', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ join_code: joinCode }),
+  })
+}

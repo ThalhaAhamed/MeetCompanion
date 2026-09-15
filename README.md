@@ -294,8 +294,18 @@ notes, memory, action items - so switching changes what you see. Your role
 travels with the workspace too: you can own one and be a plain member of
 another.
 
-To put someone in a workspace, share its join code from **Members**. To join a
-second workspace yourself, use that code at sign-up.
+To put someone in a workspace, share its join code from **Members**. To add
+your existing account to another workspace, open the workspace picker and
+choose *Join a workspace…* - joining by code always makes you a member, never
+an owner.
+
+What is shared and what is not:
+
+| Shared across the workspace | Stays yours alone |
+| --- | --- |
+| Meetings, transcripts, memories, action items | Your MeetStream API key (bots bill to you) |
+| Notes, folders, documents, knowledge graph | Your agent |
+| Search and Ask AI results | Your LLM provider and key (per install) |
 
 ## 📤 Export
 
