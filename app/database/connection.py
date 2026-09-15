@@ -32,11 +32,37 @@ def normalize_database_url(url: str) -> str:
     if url.startswith("sqlite:"):
         return url.replace("sqlite:", "sqlite+aiosqlite:", 1)
     if url.startswith("postgresql+"):
-        return url
+        return _asyncpg_query(url)
     if url.startswith(("postgresql:", "postgres:")):
         scheme, _, rest = url.partition(":")
-        return f"postgresql+asyncpg:{rest}"
+        return _asyncpg_query(f"postgresql+asyncpg:{rest}")
     return url
+
+
+#: libpq parameters asyncpg has no equivalent for. Neon's dashboard string
+#: carries `channel_binding=require`; SQLAlchemy hands every query parameter
+#: to asyncpg.connect() as a keyword, which then fails with "unexpected
+#: keyword argument". SSL is already required on those hosts, so dropping
+#: these loses nothing.
+_LIBPQ_ONLY_PARAMS = frozenset({"channel_binding", "gssencmode", "sslcompression", "sslsni", "krbsrvname"})
+
+
+def _asyncpg_query(url: str) -> str:
+    """Rewrite a Postgres URL's query string into what asyncpg accepts."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+    parts = urlsplit(url)
+    if not parts.query:
+        return url
+    params = []
+    for key, value in parse_qsl(parts.query, keep_blank_values=True):
+        if key == "sslmode":
+            # asyncpg reads `ssl`, and understands libpq's mode names.
+            key = "ssl"
+        if key in _LIBPQ_ONLY_PARAMS:
+            continue
+        params.append((key, value))
+    return urlunsplit(parts._replace(query=urlencode(params)))
 
 
 def dialect_of(url: str) -> str:

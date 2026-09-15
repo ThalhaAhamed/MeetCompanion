@@ -346,3 +346,20 @@ async def test_live_backend_matches_live_dialect():
         # Empty result, but the query must be valid SQL for this dialect.
         assert await backend.vector_search(Note, [Note.embedding.isnot(None)], [0.0] * 384, limit=3) == []
         assert await backend.keyword_search(Note, [], "nothing here", limit=3) == []
+
+
+def test_neon_dashboard_string_is_accepted_as_pasted():
+    """
+    Live QA against Neon: its dashboard string carries `channel_binding=require`,
+    which SQLAlchemy passed to asyncpg.connect() as a keyword -> "unexpected
+    keyword argument 'channel_binding'". Every libpq-only parameter is dropped
+    and every sslmode value (not just require) becomes asyncpg's ssl.
+    """
+    url = build_database_url("neon", {"url": "postgresql://u:p@ep-x-pooler.neon.tech/neondb?sslmode=require&channel_binding=require"})
+    assert url == "postgresql+asyncpg://u:p@ep-x-pooler.neon.tech/neondb?ssl=require"
+    url = build_database_url("postgres-url", {"url": "postgresql://u:p@h/db?sslmode=verify-full&gssencmode=disable&application_name=mc"})
+    assert url == "postgresql+asyncpg://u:p@h/db?ssl=verify-full&application_name=mc"
+    assert build_database_url("postgres-url", {"url": "postgresql://u:p@h/db"}) == "postgresql+asyncpg://u:p@h/db"
+    # The environment path goes through the same normalisation.
+    from app.database.connection import normalize_database_url
+    assert normalize_database_url("postgres://u:p@h/db?channel_binding=require&sslmode=require") == "postgresql+asyncpg://u:p@h/db?ssl=require"

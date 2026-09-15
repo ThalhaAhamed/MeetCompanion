@@ -182,7 +182,7 @@ def build_database_url(provider: str, values: Dict[str, Any] | None) -> str:
         raise ValueError("A connection string is required.")
     if not url.startswith(("postgres://", "postgresql://", "postgresql+")):
         raise ValueError("Expected a PostgreSQL connection string starting with postgresql://.")
-    return normalize_database_url(url.replace("?sslmode=require", "?ssl=require").replace("&sslmode=require", "&ssl=require"))
+    return normalize_database_url(url)
 
 
 def provider_for_url(url: str | None) -> str:
