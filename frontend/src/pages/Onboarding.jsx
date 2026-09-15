@@ -1,16 +1,23 @@
 import { useEffect, useMemo, useState } from 'react'
 import Logo from '../components/Logo'
 import { CheckIcon, ChevronRightIcon } from '../components/Icons'
-import { Card, ErrorMessage, Loading, Spinner } from '../components/ui'
-import { completeSetup, getProviderCatalog, testLlmProvider } from '../api'
+import { Card, ErrorMessage, Field, Loading, Spinner } from '../components/ui'
+import { addMember, completeSetup, getProviderCatalog, login, setMeetstreamApiKey, testLlmProvider } from '../api'
 import DatabasePicker, { isDatabaseFormComplete } from '../components/DatabasePicker'
 import ProviderFields from '../components/ProviderFields'
 
-const STEPS = ['Welcome', 'AI provider', 'Storage', 'Review']
+/**
+ * First-run setup. Everything is asked up front and applied at the end, in
+ * the only order that works: the database first, so the account is created
+ * *in* that database - for someone joining a team that is the shared
+ * PostgreSQL where the join code lives - then the account, then their
+ * MeetStream key, which belongs to the account.
+ */
+const STEPS = ['Workspace', 'Account', 'Storage', 'AI model', 'Review']
 
 function StepRail({ current }) {
   return (
-    <ol className="flex items-center gap-2 text-xs font-medium" aria-label="Setup progress">
+    <ol className="flex flex-wrap items-center justify-center gap-2 text-xs font-medium" aria-label="Setup progress">
       {STEPS.map((label, index) => {
         const done = index < current
         const active = index === current
@@ -36,11 +43,11 @@ function StepRail({ current }) {
   )
 }
 
-function ProviderOption({ descriptor, selected, onSelect }) {
+function OptionCard({ selected, onSelect, title, children, badge }) {
   return (
     <button
       type="button"
-      onClick={() => onSelect(descriptor.name)}
+      onClick={onSelect}
       className="w-full rounded-xl p-4 text-left transition-colors"
       style={{
         border: `1px solid ${selected ? 'var(--brand-ring)' : 'var(--border-subtle)'}`,
@@ -50,22 +57,57 @@ function ProviderOption({ descriptor, selected, onSelect }) {
       aria-pressed={selected}
     >
       <div className="flex items-center justify-between gap-3">
-        <span className="font-medium" style={{ color: 'var(--text-strong)' }}>
-          {descriptor.label}
-        </span>
-        {descriptor.local && (
+        <span className="font-medium" style={{ color: 'var(--text-strong)' }}>{title}</span>
+        {badge && (
           <span
             className="mc-badge"
             style={{ backgroundColor: 'var(--color-peach-200)', color: 'var(--color-peach-700)', borderColor: 'transparent' }}
           >
-            Runs locally
+            {badge}
           </span>
         )}
       </div>
-      <p className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>
-        {descriptor.summary}
-      </p>
+      <p className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>{children}</p>
     </button>
+  )
+}
+
+function ProviderOption({ descriptor, selected, onSelect }) {
+  return (
+    <OptionCard
+      selected={selected}
+      onSelect={() => onSelect(descriptor.name)}
+      title={descriptor.label}
+      badge={descriptor.local ? 'Runs locally' : null}
+    >
+      {descriptor.summary}
+    </OptionCard>
+  )
+}
+
+function StepButtons({ onBack, onNext, nextLabel = 'Continue', nextDisabled = false, busy = false }) {
+  return (
+    <div className="mt-6 flex justify-between">
+      {onBack ? (
+        <button type="button" className="mc-btn mc-btn-ghost" onClick={onBack} disabled={busy}>
+          Back
+        </button>
+      ) : <span />}
+      <button type="button" className="mc-btn mc-btn-primary" onClick={onNext} disabled={nextDisabled || busy}>
+        {busy ? <Spinner size={14} /> : null}
+        {nextLabel}
+        {!busy && <ChevronRightIcon size={16} />}
+      </button>
+    </div>
+  )
+}
+
+function Row({ label, children }) {
+  return (
+    <div className="flex justify-between gap-4 py-3">
+      <dt className="text-sm" style={{ color: 'var(--text-muted)' }}>{label}</dt>
+      <dd className="truncate text-sm font-medium">{children}</dd>
+    </div>
   )
 }
 
@@ -74,17 +116,32 @@ export default function Onboarding({ onComplete }) {
   const [catalog, setCatalog] = useState(null)
   const [loadError, setLoadError] = useState(null)
 
+  // Step 0 - workspace
+  const [mode, setMode] = useState('start') // 'start' | 'join'
+  const [workspaceName, setWorkspaceName] = useState('')
+  const [joinCode, setJoinCode] = useState('')
+
+  // Step 1 - account
+  const [account, setAccount] = useState({ name: '', email: '', password: '', meetstream_api_key: '' })
+
+  // Step 2 - storage
+  const [storage, setStorage] = useState('sqlite') // the Recommended default
+  const [dbValues, setDbValues] = useState({})
+  const [dbTest, setDbTest] = useState(null)
+
+  // Step 3 - AI
   const [provider, setProvider] = useState('ollama')
   const [values, setValues] = useState({})
   const [llmTest, setLlmTest] = useState(null)
   const [testing, setTesting] = useState(false)
 
-  const [storage, setStorage] = useState('sqlite')  // the Recommended default
-  const [dbValues, setDbValues] = useState({})
-  const [dbTest, setDbTest] = useState(null)
-
+  // Step 4 - finish
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState(null)
+  // Server-wide setup is accepted exactly once (it closes first-run); if a
+  // later step fails, a retry must not send it again.
+  const [progress, setProgress] = useState({ setup: false, account: false })
+  const [keyWarning, setKeyWarning] = useState(null)
 
   useEffect(() => {
     getProviderCatalog()
@@ -108,6 +165,22 @@ export default function Onboarding({ onComplete }) {
     setValues(defaults)
     setLlmTest(null)
   }, [descriptor])
+
+  // Joining a team means sharing its database: a private SQLite file could
+  // never contain the workspace the join code refers to.
+  const databases = useMemo(() => {
+    if (!catalog) return []
+    return mode === 'join' ? catalog.databases.filter((d) => d.name !== 'sqlite') : catalog.databases
+  }, [catalog, mode])
+
+  function chooseMode(next) {
+    setMode(next)
+    if (next === 'join' && storage === 'sqlite') {
+      setStorage('postgres-url')
+      setDbValues({})
+      setDbTest(null)
+    }
+  }
 
   function updateValue(key, value) {
     setValues((current) => ({ ...current, [key]: value }))
@@ -139,11 +212,40 @@ export default function Onboarding({ onComplete }) {
   async function finish() {
     setSaving(true)
     setSaveError(null)
+    setKeyWarning(null)
+    const email = account.email.trim()
     try {
-      await completeSetup({
-        llm: buildLlmPayload(),
-        database: { provider: storage, values: dbValues },
-      })
+      if (!progress.setup) {
+        await completeSetup({
+          llm: buildLlmPayload(),
+          database: { provider: storage, values: dbValues },
+        })
+        setProgress((p) => ({ ...p, setup: true }))
+      }
+      if (!progress.account) {
+        await addMember({
+          name: account.name.trim(),
+          email,
+          password: account.password,
+          workspace_name: mode === 'start' ? workspaceName.trim() : undefined,
+          join_code: mode === 'join' ? joinCode.trim() : undefined,
+        })
+        setProgress((p) => ({ ...p, account: true }))
+      }
+      await login(email, account.password)
+      const key = account.meetstream_api_key.trim()
+      if (key) {
+        try {
+          const result = await setMeetstreamApiKey(key)
+          if (!result.connected) {
+            setKeyWarning(result.connection_error || 'Saved, but MeetStream did not accept the key.')
+            return
+          }
+        } catch (error) {
+          setKeyWarning(`Your account is ready, but the MeetStream key was not saved: ${error.message}`)
+          return
+        }
+      }
       onComplete?.()
     } catch (error) {
       setSaveError(error.message)
@@ -168,14 +270,19 @@ export default function Onboarding({ onComplete }) {
     return <Loading label="Preparing setup…" />
   }
 
-  const canContinueFromProvider =
+  const canLeaveWorkspace = mode === 'start' ? workspaceName.trim().length > 0 : joinCode.trim().length > 0
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account.email.trim())
+  const canLeaveAccount = account.name.trim().length > 0 && emailOk && account.password.length >= 8
+  const dbEntry = databases.find((item) => item.name === storage)
+  const canLeaveStorage = Boolean(dbEntry) && isDatabaseFormComplete(dbEntry, dbValues)
+  const canLeaveProvider =
     Boolean(values.model) &&
+    Boolean(descriptor) &&
     descriptor.fields
       .filter((field) => field.required)
       .every((field) => String(values[field.key] ?? '').trim().length > 0)
 
-  const dbEntry = catalog.databases.find((item) => item.name === storage)
-  const canFinish = isDatabaseFormComplete(dbEntry, dbValues)
+  const muted = { color: 'var(--text-muted)' }
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: 'var(--surface-page)' }}>
@@ -185,45 +292,134 @@ export default function Onboarding({ onComplete }) {
         </div>
 
         {step === 0 && (
-          <Card className="text-center">
-            <div className="flex flex-col items-center py-6">
-              <Logo variant="icon" size={84} />
-              <h1 className="mt-6 text-3xl font-semibold">Meet Companion</h1>
-              <p
-                className="mt-2 text-xs font-semibold uppercase tracking-[0.22em]"
-                style={{ color: 'var(--text-faint)' }}
-              >
-                Make meeting data smarter.
+          <Card>
+            <div className="flex flex-col items-center pb-6 text-center">
+              <Logo variant="icon" size={64} />
+              <h1 className="mt-4 text-2xl font-semibold">Welcome to Meet Companion</h1>
+              <p className="mt-2 max-w-md text-sm leading-relaxed" style={muted}>
+                Your own AI meeting companion - your models, your storage, your data. First: is
+                this a workspace of your own, or are you joining one?
               </p>
-              <p className="mt-6 max-w-md text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-                Your open-source AI meeting companion. Choose your own AI models, storage and
-                infrastructure — nothing is locked to a vendor, and nothing leaves your machine
-                unless you configure it to.
-              </p>
-              <button type="button" className="mc-btn mc-btn-primary mt-8" onClick={() => setStep(1)}>
-                Get started
-                <ChevronRightIcon size={16} />
-              </button>
             </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <OptionCard selected={mode === 'start'} onSelect={() => chooseMode('start')} title="Start a workspace" badge="Most people">
+                Just you, or you are setting it up for your team. You will be its owner.
+              </OptionCard>
+              <OptionCard selected={mode === 'join'} onSelect={() => chooseMode('join')} title="Join my team's workspace">
+                Someone gave you a join code. You will connect to the team's shared database.
+              </OptionCard>
+            </div>
+
+            <div className="mt-6">
+              {mode === 'start' ? (
+                <Field label="Workspace name" htmlFor="ob-workspace" hint="Your team or company - shown in the top bar. You can rename it later.">
+                  <input
+                    id="ob-workspace"
+                    className="mc-input"
+                    value={workspaceName}
+                    onChange={(e) => setWorkspaceName(e.target.value)}
+                    placeholder="e.g. Acme"
+                    autoFocus
+                  />
+                </Field>
+              ) : (
+                <Field
+                  label="Join code"
+                  htmlFor="ob-join"
+                  hint="From your workspace owner's Members page. You will also need the connection string of the team's database, two steps from now."
+                >
+                  <input
+                    id="ob-join"
+                    className="mc-input font-mono"
+                    value={joinCode}
+                    onChange={(e) => setJoinCode(e.target.value)}
+                    placeholder="e.g. 646f1536"
+                    autoFocus
+                  />
+                </Field>
+              )}
+            </div>
+
+            <StepButtons onNext={() => setStep(1)} nextDisabled={!canLeaveWorkspace} />
           </Card>
         )}
 
         {step === 1 && (
           <Card>
-            <h2 className="text-lg font-semibold">Choose your AI provider</h2>
-            <p className="mt-1 mb-5 text-sm" style={{ color: 'var(--text-muted)' }}>
+            <h2 className="text-lg font-semibold">Your account</h2>
+            <p className="mt-1 mb-5 text-sm" style={muted}>
+              {mode === 'start'
+                ? 'This account owns the workspace: it configures the server and invites others.'
+                : 'This is you inside the team workspace.'}
+            </p>
+
+            <Field label="Name" htmlFor="ob-name">
+              <input id="ob-name" className="mc-input" autoComplete="name" value={account.name}
+                onChange={(e) => setAccount({ ...account, name: e.target.value })} autoFocus />
+            </Field>
+            <Field label="Email" htmlFor="ob-email">
+              <input id="ob-email" type="email" className="mc-input" autoComplete="email" value={account.email}
+                onChange={(e) => setAccount({ ...account, email: e.target.value })} />
+            </Field>
+            <Field label="Password" htmlFor="ob-password" hint="At least 8 characters.">
+              <input id="ob-password" type="password" className="mc-input" autoComplete="new-password" value={account.password}
+                onChange={(e) => setAccount({ ...account, password: e.target.value })} />
+            </Field>
+
+            <div className="mt-6 border-t pt-5" style={{ borderColor: 'var(--border-subtle)' }}>
+              <Field
+                label="MeetStream API key"
+                htmlFor="ob-meetstream"
+                hint="Lets Meet Companion send a bot into your calls. Optional - skip it if you only upload transcripts; you can add it any time in Settings → Meetings."
+              >
+                <input id="ob-meetstream" type="password" className="mc-input font-mono" autoComplete="off"
+                  value={account.meetstream_api_key}
+                  onChange={(e) => setAccount({ ...account, meetstream_api_key: e.target.value })}
+                  placeholder="ms_…" />
+              </Field>
+            </div>
+
+            <StepButtons onBack={() => setStep(0)} onNext={() => setStep(2)} nextDisabled={!canLeaveAccount} />
+          </Card>
+        )}
+
+        {step === 2 && (
+          <Card>
+            <h2 className="text-lg font-semibold">
+              {mode === 'join' ? "Connect to your team's database" : 'Where should Meet Companion store your data?'}
+            </h2>
+            <p className="mt-1 mb-5 text-sm" style={muted}>
+              {mode === 'join'
+                ? 'Meetings, notes and memory are shared through it. Paste the connection string your workspace owner gave you.'
+                : 'Meetings, notes and memory all live here. Local SQLite needs nothing installed; pick a hosted Postgres to share the workspace with others.'}
+            </p>
+
+            <DatabasePicker
+              catalog={databases}
+              provider={storage}
+              values={dbValues}
+              onProviderChange={setStorage}
+              onValuesChange={setDbValues}
+              testResult={dbTest}
+              onTestResult={setDbTest}
+            />
+
+            <StepButtons onBack={() => setStep(1)} onNext={() => setStep(3)} nextDisabled={!canLeaveStorage} />
+          </Card>
+        )}
+
+        {step === 3 && (
+          <Card>
+            <h2 className="text-lg font-semibold">Choose your AI model</h2>
+            <p className="mt-1 mb-5 text-sm" style={muted}>
               Used to extract decisions and action items from meetings, and to answer questions
               about your notes. You can change this later in Settings.
             </p>
 
             <div className="grid gap-2 sm:grid-cols-2">
               {catalog.llm.map((item) => (
-                <ProviderOption
-                  key={item.name}
-                  descriptor={item}
-                  selected={item.name === provider}
-                  onSelect={setProvider}
-                />
+                <ProviderOption key={item.name} descriptor={item} selected={item.name === provider} onSelect={setProvider} />
               ))}
             </div>
 
@@ -237,20 +433,12 @@ export default function Onboarding({ onComplete }) {
                 />
 
                 <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    className="mc-btn mc-btn-secondary"
-                    onClick={runLlmTest}
-                    disabled={testing}
-                  >
+                  <button type="button" className="mc-btn mc-btn-secondary" onClick={runLlmTest} disabled={testing}>
                     {testing ? <Spinner size={14} /> : null}
                     Test connection
                   </button>
                   {llmTest && (
-                    <span
-                      className="text-sm"
-                      style={{ color: llmTest.ok ? 'var(--color-brand-600)' : 'var(--color-rose-700)' }}
-                    >
+                    <span className="text-sm" style={{ color: llmTest.ok ? 'var(--color-brand-600)' : 'var(--color-rose-700)' }}>
                       {llmTest.ok ? 'Connected.' : llmTest.detail}
                     </span>
                   )}
@@ -258,107 +446,44 @@ export default function Onboarding({ onComplete }) {
               </div>
             )}
 
-            <div className="mt-6 flex justify-between">
-              <button type="button" className="mc-btn mc-btn-ghost" onClick={() => setStep(0)}>
-                Back
-              </button>
-              <button
-                type="button"
-                className="mc-btn mc-btn-primary"
-                onClick={() => setStep(2)}
-                disabled={!canContinueFromProvider}
-              >
-                Continue
-                <ChevronRightIcon size={16} />
-              </button>
-            </div>
+            <StepButtons onBack={() => setStep(2)} onNext={() => setStep(4)} nextDisabled={!canLeaveProvider} />
           </Card>
         )}
 
-        {step === 2 && (
+        {step === 4 && (
           <Card>
-            <h2 className="text-lg font-semibold">Where should Meet Companion store your data?</h2>
-            <p className="mt-1 mb-5 text-sm" style={{ color: 'var(--text-muted)' }}>
-              Meetings, notes and memory all live here.
-            </p>
-
-            <DatabasePicker
-              catalog={catalog.databases}
-              provider={storage}
-              values={dbValues}
-              onProviderChange={setStorage}
-              onValuesChange={setDbValues}
-              testResult={dbTest}
-              onTestResult={setDbTest}
-            />
-
-            <div className="mt-6 flex justify-between">
-              <button type="button" className="mc-btn mc-btn-ghost" onClick={() => setStep(1)}>
-                Back
-              </button>
-              <button
-                type="button"
-                className="mc-btn mc-btn-primary"
-                onClick={() => setStep(3)}
-                disabled={!canFinish}
-              >
-                Continue
-                <ChevronRightIcon size={16} />
-              </button>
-            </div>
-          </Card>
-        )}
-
-        {step === 3 && (
-          <Card>
-            <h2 className="text-lg font-semibold">Review your setup</h2>
-            <p className="mt-1 mb-5 text-sm" style={{ color: 'var(--text-muted)' }}>
+            <h2 className="text-lg font-semibold">Review</h2>
+            <p className="mt-1 mb-5 text-sm" style={muted}>
               You can change any of this later in Settings.
             </p>
 
             <dl className="divide-y" style={{ borderColor: 'var(--border-subtle)' }}>
-              <div className="flex justify-between gap-4 py-3">
-                <dt className="text-sm" style={{ color: 'var(--text-muted)' }}>AI provider</dt>
-                <dd className="text-sm font-medium">{descriptor?.label}</dd>
-              </div>
-              <div className="flex justify-between gap-4 py-3">
-                <dt className="text-sm" style={{ color: 'var(--text-muted)' }}>Model</dt>
-                <dd className="text-sm font-medium">{values.model || '—'}</dd>
-              </div>
-              {values.base_url && (
-                <div className="flex justify-between gap-4 py-3">
-                  <dt className="text-sm" style={{ color: 'var(--text-muted)' }}>Endpoint</dt>
-                  <dd className="truncate text-sm font-medium">{values.base_url}</dd>
-                </div>
-              )}
-              <div className="flex justify-between gap-4 py-3">
-                <dt className="text-sm" style={{ color: 'var(--text-muted)' }}>Storage</dt>
-                <dd className="text-sm font-medium">
-                  {dbEntry?.label || storage}
-                </dd>
-              </div>
+              <Row label="Workspace">{mode === 'start' ? `${workspaceName.trim()} (new - you own it)` : `Joining with code ${joinCode.trim()}`}</Row>
+              <Row label="Account">{account.name.trim()} · {account.email.trim()}</Row>
+              <Row label="MeetStream">{account.meetstream_api_key.trim() ? 'API key provided' : 'Not now'}</Row>
+              <Row label="Storage">{dbEntry?.label || storage}</Row>
+              <Row label="AI provider">{descriptor?.label}</Row>
+              <Row label="Model">{values.model || '—'}</Row>
+              {values.base_url && <Row label="Endpoint">{values.base_url}</Row>}
             </dl>
 
             {saveError && (
               <div className="mt-4">
-                <ErrorMessage title="Could not save your setup" detail={saveError} />
+                <ErrorMessage title="Could not finish setup" detail={saveError} />
+              </div>
+            )}
+            {keyWarning && (
+              <div className="mt-4">
+                <ErrorMessage title="Set up, with one thing to fix" detail={`${keyWarning} You can enter the key again in Settings → Meetings.`} />
+                <button type="button" className="mc-btn mc-btn-primary mt-3" onClick={() => onComplete?.()}>
+                  Continue to the app
+                </button>
               </div>
             )}
 
-            <div className="mt-6 flex justify-between">
-              <button type="button" className="mc-btn mc-btn-ghost" onClick={() => setStep(2)}>
-                Back
-              </button>
-              <button
-                type="button"
-                className="mc-btn mc-btn-primary"
-                onClick={finish}
-                disabled={saving}
-              >
-                {saving ? <Spinner size={14} /> : null}
-                Finish setup
-              </button>
-            </div>
+            {!keyWarning && (
+              <StepButtons onBack={() => setStep(3)} onNext={finish} nextLabel="Finish setup" busy={saving} />
+            )}
           </Card>
         )}
       </div>

@@ -131,9 +131,21 @@ chmod +x MeetCompanion-Linux-x86_64.AppImage
 
 ### What happens on first launch
 
-The app walks you through choosing an **AI provider** and **storage**, and then
-creates your account. The embedding model (~90 MB) is downloaded once on first
-use. All data lives under your user data directory:
+Setup is five short steps:
+
+1. **Workspace** — start your own (you become its owner) or **join your
+   team's** with the join code from their Members page.
+2. **Account** — name, email, password, and optionally your **MeetStream API
+   key** so the app can send a bot into calls (skip it if you only upload
+   transcripts; add it later in Settings → Meetings).
+3. **Storage** — local SQLite by default; a hosted Postgres to share the
+   workspace with others. Joining a team means pasting the team's connection
+   string here.
+4. **AI model** — Ollama locally, or any supported provider with your key.
+5. **Review** — one click, and you are in.
+
+The embedding model (~90 MB) is downloaded once on first use. All data lives
+under your user data directory:
 
 | OS | Location |
 | --- | --- |
