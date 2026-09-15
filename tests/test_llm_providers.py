@@ -201,6 +201,55 @@ async def test_ollama_health_check_flags_unpulled_model(httpx_mock):
 
 
 @pytest.mark.asyncio
+async def test_groq_health_check_flags_a_model_the_provider_does_not_have(httpx_mock):
+    """
+    Seen in QA: Test connection said "Connected." for a decommissioned Groq
+    model, and the first meeting was then processed without AI. The key
+    being valid is not the same as the model existing.
+    """
+    httpx_mock.add_response(
+        url="https://api.groq.com/openai/v1/models",
+        json={"data": [{"id": "openai/gpt-oss-120b"}, {"id": "llama-3.3-70b-versatile"}, {"id": "whisper-large-v3"}]},
+    )
+    provider = create_llm_provider(LLMConfig(provider="groq", model="llama-3.1-8b-instant", api_key="gsk_x"))
+    status = await provider.health_check()
+    assert status.ok is False
+    assert "llama-3.1-8b-instant" in status.detail and "Available" in status.detail
+    assert "whisper-large-v3" not in status.models  # picker still hides non-chat models
+
+    httpx_mock.add_response(
+        url="https://api.groq.com/openai/v1/models",
+        json={"data": [{"id": "openai/gpt-oss-120b"}, {"id": "whisper-large-v3"}]},
+    )
+    provider = create_llm_provider(LLMConfig(provider="groq", model="openai/gpt-oss-120b", api_key="gsk_x"))
+    assert (await provider.health_check()).ok is True
+
+    # A model the picker hides (matches a non-chat marker) but the provider
+    # does list is still accepted - the check is against everything listed.
+    httpx_mock.add_response(
+        url="https://api.groq.com/openai/v1/models",
+        json={"data": [{"id": "llama-guard-3-8b"}]},
+    )
+    provider = create_llm_provider(LLMConfig(provider="groq", model="llama-guard-3-8b", api_key="gsk_x"))
+    assert (await provider.health_check()).ok is True
+
+
+@pytest.mark.asyncio
+async def test_anthropic_and_gemini_health_checks_verify_the_model(httpx_mock):
+    httpx_mock.add_response(url="https://api.anthropic.com/v1/models", json={"data": [{"id": "claude-sonnet-5"}]})
+    provider = create_llm_provider(LLMConfig(provider="anthropic", model="claude-2", api_key="sk-ant"))
+    status = await provider.health_check()
+    assert status.ok is False and "claude-2" in status.detail
+
+    httpx_mock.add_response(
+        url="https://generativelanguage.googleapis.com/v1beta/models",
+        json={"models": [{"name": "models/gemini-2.5-flash"}]},
+    )
+    provider = create_llm_provider(LLMConfig(provider="gemini", model="gemini-2.5-flash", api_key="g"))
+    assert (await provider.health_check()).ok is True
+
+
+@pytest.mark.asyncio
 async def test_health_check_reports_unreachable_host_without_raising(httpx_mock):
     import httpx as _httpx
 

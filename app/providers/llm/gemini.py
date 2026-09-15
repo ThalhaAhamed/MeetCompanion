@@ -85,7 +85,7 @@ class GeminiProvider(LLMProvider):
             for item in data.get("models", [])
             if isinstance(item, dict) and item.get("name")
         )
-        return ProviderStatus(ok=True, detail="Connected.", models=models)
+        return self._connected(models)
 
     def _headers(self) -> dict:
         # Sent as a header rather than the ?key= query parameter documented by

@@ -88,7 +88,7 @@ class AnthropicProvider(LLMProvider):
             for item in data.get("data", [])
             if isinstance(item, dict) and item.get("id")
         )
-        return ProviderStatus(ok=True, detail="Connected.", models=models)
+        return self._connected(models)
 
     def _headers(self) -> dict:
         return {

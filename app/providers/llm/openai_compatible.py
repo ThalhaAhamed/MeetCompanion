@@ -72,12 +72,9 @@ class OpenAICompatibleProvider(LLMProvider):
         except httpx.HTTPError as exc:
             return ProviderStatus(ok=False, detail=f"Could not reach {self.base_url}: {exc}")
 
-        models = sorted(
-            str(item.get("id"))
-            for item in data.get("data", [])
-            if isinstance(item, dict) and item.get("id") and _is_chat_model(str(item["id"]))
-        )
-        return ProviderStatus(ok=True, detail="Connected.", models=models)
+        listed = [str(item.get("id")) for item in data.get("data", []) if isinstance(item, dict) and item.get("id")]
+        models = sorted(model_id for model_id in listed if _is_chat_model(model_id))
+        return self._connected(models, listed)
 
     def _headers(self) -> dict:
         headers = {"Content-Type": "application/json"}

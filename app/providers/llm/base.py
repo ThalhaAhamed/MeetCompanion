@@ -59,6 +59,29 @@ class LLMProvider(ABC):
     """Base class for all LLM adapters."""
 
     name: ClassVar[str]
+
+    def _connected(self, available: List[str], listed: List[str] | None = None) -> ProviderStatus:
+        """
+        The status to return once the provider answered a model listing.
+
+        "Connected." used to mean only "the key works" - onboarding's Test
+        connection said so for a model that did not exist, and the first
+        meeting was then quietly processed without AI. When the provider
+        told us which models it has, the configured one must be among them.
+        `available` is the list shown to the user (chat models); `listed` is
+        everything the provider returned, so a legitimately configured model
+        hidden from the picker still passes.
+        """
+        model = (self.config.model or "").strip()
+        known = listed if listed is not None else available
+        if model and known and model not in known:
+            hint = ", ".join(available[:6]) + ("…" if len(available) > 6 else "")
+            return ProviderStatus(
+                ok=False,
+                detail=f"Model '{model}' is not available on {self.label}. Available: {hint or 'none listed'}",
+                models=available,
+            )
+        return ProviderStatus(ok=True, detail="Connected.", models=available)
     #: Human-readable label shown in onboarding and settings.
     label: ClassVar[str]
     #: Whether the provider can guarantee JSON-only output natively. When it
