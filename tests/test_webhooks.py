@@ -76,3 +76,128 @@ def test_verify_signature_missing_prefix():
         timestamp_header=datetime.now(timezone.utc).isoformat(),
     )
     assert is_valid is False
+
+
+# ---------------------------------------------------------------------------
+# The whole live-bot path over HTTP, with MeetStream mocked at the client:
+# launch → bot.inmeeting → bot.stopped → transcription.processed → pipeline.
+# This is what a real call did on 2026-09-15; here it runs in a second.
+# ---------------------------------------------------------------------------
+
+_TRANSCRIPT = [
+    {
+        "participant": {"name": "Priya"},
+        "words": [
+            {"text": w, "start_timestamp": {"relative": i}, "end_timestamp": {"relative": i + 1}}
+            for i, w in enumerate("We agreed to ship the billing migration on October 3rd .".split())
+        ],
+    },
+    {
+        "participant": {"name": "Marcus"},
+        "words": [
+            {"text": w, "start_timestamp": {"relative": 20 + i}, "end_timestamp": {"relative": 21 + i}}
+            for i, w in enumerate("I will write the rollback runbook by Friday .".split())
+        ],
+    },
+]
+
+
+async def _launch(authed_client, monkeypatch):
+    """A member with a MeetStream key launches a bot; MeetStream is mocked."""
+    from app.api import agent as agent_api
+    from app.api import meetings as meetings_api
+    from app.api import webhooks as webhooks_api
+
+    async def list_mia_agents(api_key=None):
+        return {"agent_configs": []}
+
+    async def create_bot(**kwargs):
+        assert kwargs["callback_url"].endswith("/api/webhooks/meetstream")
+        assert kwargs["custom_attributes"]["meeting_id"]
+        return {"bot_id": "bot-123", "transcript_id": "tr-123"}
+
+    async def get_transcript(transcript_id, raw=False, api_key=None):
+        assert transcript_id == "tr-123"
+        return _TRANSCRIPT
+
+    monkeypatch.setattr(agent_api.meetstream_client, "list_mia_agents", list_mia_agents)
+    monkeypatch.setattr(meetings_api.meetstream_client, "create_bot", create_bot)
+    monkeypatch.setattr("app.services.processing.processing_pipeline.meetstream_client.get_transcript", get_transcript)
+    monkeypatch.setattr("app.services.memory.try_get_llm_provider", lambda: None)  # rule-based extraction
+    monkeypatch.setattr(webhooks_api, "effective_webhook_secret", lambda: None)
+
+    assert (await authed_client.put("/api/agent/api-key", json={"meetstream_api_key": "ms_test"})).status_code == 200
+    r = await authed_client.post("/api/meetings", params={"deploy_bot": "true"}, json={
+        "meeting_url": "https://meet.google.com/abc-defg-hij", "title": "Launched", "platform": "google_meet",
+    })
+    assert r.status_code == 201, r.text
+    meeting = r.json()
+    assert meeting["status"] == "joining"
+    assert meeting["meetstream_bot_id"] == "bot-123"
+    assert meeting["meetstream_transcript_id"] == "tr-123"
+    return meeting
+
+
+def _event(bot_id, event, **extra):
+    return {"bot_id": bot_id, "bot_event": event, "timestamp": f"2026-09-15T03:00:{len(event):02d}+00:00", **extra}
+
+
+@pytest.mark.asyncio
+async def test_unsigned_webhooks_drive_a_launched_meeting_through_processing(authed_client, monkeypatch):
+    meeting = await _launch(authed_client, monkeypatch)
+    mid, bot = meeting["id"], meeting["meetstream_bot_id"]
+
+    async def deliver(event):
+        r = await authed_client.post("/api/webhooks/meetstream", json=_event(bot, event))
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    assert (await deliver("bot.inmeeting"))["status"] == "accepted"
+    m = (await authed_client.get(f"/api/meetings/{mid}")).json()
+    assert m["status"] == "in_meeting" and m["started_at"]
+
+    assert (await deliver("bot.stopped"))["status"] == "accepted"
+    m = (await authed_client.get(f"/api/meetings/{mid}")).json()
+    assert m["status"] == "stopped" and m["ended_at"]
+
+    # Same (bot, event, timestamp) again: a duplicate, not a second run.
+    dup = await authed_client.post("/api/webhooks/meetstream", json=_event(bot, "bot.stopped"))
+    assert dup.json()["status"] == "ignored" and dup.json()["reason"].startswith("duplicate")
+
+    assert (await deliver("transcription.processed"))["status"] == "accepted"
+    m = (await authed_client.get(f"/api/meetings/{mid}")).json()
+    assert m["processing_status"] == "completed", m
+    segments = (await authed_client.get(f"/api/meetings/{mid}/transcript")).json()
+    assert [s["speaker"] for s in segments] == ["Priya", "Marcus"]
+    assert "rollback runbook" in segments[1]["text"]
+    items = (await authed_client.get("/api/action-items", params={"meeting_id": mid})).json()["action_items"]
+    assert any("runbook" in i["task"] for i in items)
+
+    # A bot this install never launched is dropped, not stored.
+    stray = await authed_client.post("/api/webhooks/meetstream", json=_event("bot-999", "bot.inmeeting"))
+    assert stray.json() == {"status": "ignored", "reason": "unknown_bot"}
+
+
+@pytest.mark.asyncio
+async def test_signed_webhooks_are_verified_over_http(authed_client, monkeypatch):
+    from app.api import webhooks as webhooks_api
+
+    meeting = await _launch(authed_client, monkeypatch)
+    monkeypatch.setattr(webhooks_api, "effective_webhook_secret", lambda: "whsec_test")
+
+    body = json.dumps(_event(meeting["meetstream_bot_id"], "bot.inmeeting")).encode()
+    now = datetime.now(timezone.utc).isoformat()
+    good = "sha256=" + hmac.new(b"whsec_test", body, hashlib.sha256).hexdigest()
+
+    ok = await authed_client.post("/api/webhooks/meetstream", content=body, headers={
+        "Content-Type": "application/json", "X-Meetstream-Signature": good, "X-Meetstream-Timestamp": now,
+    })
+    assert ok.status_code == 200 and ok.json()["status"] == "accepted"
+
+    bad = await authed_client.post("/api/webhooks/meetstream", content=body, headers={
+        "Content-Type": "application/json", "X-Meetstream-Signature": "sha256=" + "0" * 64, "X-Meetstream-Timestamp": now,
+    })
+    assert bad.status_code == 401
+
+    unsigned = await authed_client.post("/api/webhooks/meetstream", content=body, headers={"Content-Type": "application/json"})
+    assert unsigned.status_code == 401

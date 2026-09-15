@@ -47,6 +47,7 @@ Ask AI — all with a model, database and machine that you choose.
 - [Privacy and data](#-privacy-and-data)
 - [Security model](#-security-model)
 - [For developers](#%EF%B8%8F-for-developers)
+- [Troubleshooting](#-troubleshooting)
 - [Contributing](#-contributing)
 - [Roadmap](#%EF%B8%8F-roadmap)
 - [License](#-license)
@@ -443,12 +444,16 @@ Requires **Python 3.12** (3.13+ is not yet supported by every dependency) and **
 git clone https://github.com/ThalhaAhamed/MeetCompanion.git
 cd MeetCompanion
 
-python -m venv .venv
+py -3.12 -m venv .venv        # Windows  (python3.12 -m venv .venv on macOS / Linux)
 .venv/Scripts/activate        # Windows
 # source .venv/bin/activate   # macOS / Linux
 pip install -r requirements.txt
 npm --prefix frontend install
 ```
+
+> Use the 3.12 launcher explicitly: a bare `python -m venv` picks whatever
+> `python` is on your PATH, and on a machine where that is 3.13 or 3.14 the
+> venv is silently wrong.
 
 Run both with one command:
 
@@ -503,6 +508,42 @@ npm --prefix desktop run dist                                          # -> desk
 packaging. Set `MEET_COMPANION_DATA_DIR` to point it at an existing workspace.
 Releases for all three platforms are built by
 [`.github/workflows/release.yml`](.github/workflows/release.yml) on a `v*` tag.
+
+## 🩺 Troubleshooting
+
+**A meeting sits at "Extracting…" / "joining" forever.** MeetStream cannot
+reach your server: its webhooks never arrive. Check `MCP_SERVER_URL` is a
+public URL (see [Live meetings](#-live-meetings-reaching-your-server)), that
+the tunnel is still running, and re-activate the agent after changing it.
+*Reprocess* on the meeting fetches the transcript by id without webhooks.
+
+**"Processed without AI (…)"** on a meeting. The AI provider failed and the
+rule-based parser ran instead; the message in brackets is the provider's own
+reason. For Ollama, `Model 'x' is not pulled` means `ollama pull x`; a CUDA
+*out of memory* means the GPU is full - close other GPU work or pick a
+smaller model. Fix the provider in Settings, then *Reprocess*.
+
+**Ask AI answers "Could not answer that".** Same cause as above; the error
+text is the provider's. *Test connection* in Settings → AI provider reproduces
+it without a meeting.
+
+**Blank page after upgrading from v0.2.0.** Fixed in v0.3.1 - accounts from
+before workspaces had no membership row. Upgrade; the server repairs it on
+start.
+
+**Port 8000 already in use.** Find what holds it (`netstat -ano | findstr :8000`
+on Windows, `lsof -i :8000` elsewhere) and stop it - the Vite dev proxy in
+`frontend/vite.config.js` expects the API on 8000. Running the API alone on
+another port is `scripts/dev.py --port 8010 --no-ui`.
+
+**Database "Not reachable" in Settings.** The banner shows the driver's
+reason. *Connection refused* → nothing listening on that host/port;
+*could not resolve host* → check the hostname; a Supabase direct URL on a
+network without IPv6 → use the pooler connection string instead.
+
+**The desktop app shows the sign-in screen although it used to sign itself in.**
+That happens only when the workspace has more than one owner - the device key
+signs in *the* owner and refuses to guess between several. Sign in normally.
 
 ## 🤝 Contributing
 
