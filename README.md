@@ -37,6 +37,7 @@ Ask AI — all with a model, database and machine that you choose.
 - [Installation](#-installation)
 - [Features in action](#-features-in-action)
 - [How it works](#%EF%B8%8F-how-it-works)
+- [Tech stack](#-tech-stack)
 - [Configuration](#%EF%B8%8F-configuration)
 - [Docker](#-docker)
 - [Live meetings: reaching your server](#-live-meetings-reaching-your-server)
@@ -163,9 +164,26 @@ a note you have touched.
 <img src="docs/screenshots/graph.png" alt="Knowledge graph of meetings, people, memories and action items" width="900" />
 </div>
 
-See how meetings, people, decisions and action items connect. Filter by type,
-hide orphans, tune node size, link distance and forces — settings persist
-between visits.
+See how meetings, people, decisions and action items connect. Every processed
+meeting, each person who spoke, each memory extracted and each action item is
+a node; the edges are who said what in which meeting.
+
+<div align="center">
+<img src="docs/screenshots/graph-selected.png" alt="A meeting selected in the graph: its summary, tags and the 28 people, memories and action items it connects to" width="900" />
+</div>
+
+Click any node and the rest of the graph fades back: the panel shows what it
+is, what was said, and everything it connects to — here a weekly sync with the
+five people who were in it, the decisions made, and the tasks that came out
+of it, each one a click away. *Find a node* searches by name.
+
+<div align="center">
+<img src="docs/screenshots/graph-settings.png" alt="Graph settings: filter by node type, show or hide unconnected nodes, node size, link thickness and force controls" width="900" />
+</div>
+
+Filter by type, hide orphans, tune node size, link thickness, link distance and
+the forces themselves. The layout is a small force simulation written for this
+project — no graph library — and your settings persist between visits.
 
 ### 🗄️ Pick any database
 
@@ -218,6 +236,21 @@ is why Ollama never shows an API-key box.
 between databases — similarity search and keyword search — and those live in
 `app/providers/database/`, selected from the live connection's dialect.
 Everything else is ordinary SQLAlchemy on portable column types.
+
+## 🧰 Tech stack
+
+| Layer | What | Why |
+|---|---|---|
+| **Backend** | Python 3.12 · [FastAPI](https://fastapi.tiangolo.com) · Uvicorn · Pydantic v2 | Async end to end; the request schemas double as the API contract. |
+| **Data** | SQLAlchemy 2 (async) · Alembic migrations · SQLite via `aiosqlite` · PostgreSQL via `asyncpg` + [pgvector](https://github.com/pgvector/pgvector) | One ORM model runs on a local file or a hosted Postgres; migrations run themselves at startup. |
+| **Embeddings** | [fastembed](https://github.com/qdrant/fastembed) running `all-MiniLM-L6-v2` on ONNX Runtime | Same vectors as the PyTorch model without a multi-gigabyte torch dependency; computed locally, never sent anywhere. |
+| **LLMs** | Adapters over `httpx` for OpenAI, Anthropic, Gemini, Groq, xAI, Ollama and any OpenAI-compatible endpoint | No vendor SDKs — one small file per provider, so adding one is an afternoon. |
+| **Meeting capture** | [MeetStream](https://meetstream.ai) bots, webhooks (HMAC-signed) and a built-in [MCP](https://modelcontextprotocol.io) server | The in-call agent's memory lookups are ordinary MCP tool calls against this app. |
+| **Documents** | `pypdf`, `.docx` read as XML, `langchain-text-splitters` for chunking | Reference material for Ask AI without a heavyweight document pipeline. |
+| **Frontend** | [React 19](https://react.dev) · [Vite 8](https://vite.dev) · [Tailwind CSS 4](https://tailwindcss.com) · React Router 7 · `marked` for Markdown | Small, fast, no component framework; the knowledge graph is a hand-written force simulation on SVG. |
+| **Desktop** | [Electron 33](https://www.electronjs.org) shell around a [PyInstaller](https://pyinstaller.org)-frozen server | Windows, macOS and Linux installers from one codebase; the shell signs itself in with a per-machine device key. |
+| **Security** | `bcrypt` passwords · HMAC-signed session cookies · per-workspace MCP bearer tokens · rate-limited sign-in | Nothing custom where a standard primitive exists. |
+| **Tooling** | pytest (SQLite *and* Postgres in CI) · vitest · oxlint · pip-audit · GitHub Actions for CI and multi-platform releases | 230+ tests; the Docker image is built and booted on every push. |
 
 **The desktop app is the web app.** An Electron shell starts the bundled server
 on a free localhost port and opens it in a window. Embeddings run through ONNX
