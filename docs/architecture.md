@@ -64,7 +64,7 @@ Only two operations genuinely differ between databases:
 
 | Operation | PostgreSQL | Everything else |
 | --- | --- | --- |
-| Similarity | pgvector `<=>` over an ivfflat index | cosine similarity with numpy |
+| Similarity | pgvector `<=>` over an HNSW index | cosine similarity with numpy |
 | Keyword | `tsvector` / `ts_rank` | distinct term matches scored with `LIKE` |
 
 Both live behind `SearchBackend` (`app/providers/database/`) and the backend is
@@ -97,13 +97,30 @@ Read JSON keys with `col["k"].as_string()`, which works on both. JSONB-only
 
 ## Schema management
 
-The schema is created from ORM metadata at startup, so a new database needs no
-migration step. Indexes are declared on the models and therefore created on
-every dialect; the ivfflat indexes are Postgres-only and created alongside the
-`vector` extension in `app/main.py`.
+The schema is owned by Alembic (`app/migrations/versions/`) and brought up to
+date at startup by `app/database/bootstrap.py:ensure_schema`, so no manual
+migration step exists for users:
 
-Postgres databases created before several columns existed get idempotent
-`ADD COLUMN IF NOT EXISTS` patches, skipped entirely on other dialects.
+- a brand-new database runs every migration from the baseline;
+- a database created before Alembic existed (v0.2.0 and earlier) is adopted:
+  `create_all` closes any schema gaps, then it is stamped at head;
+- an already-managed database is upgraded to head.
+
+**A model change therefore means a migration.** Edit `app/models/database.py`
+and run `alembic revision --autogenerate -m "..."`; `tests/test_migrations.py`
+fails when the models and the migrations disagree. Do not add ad-hoc schema
+patches to `bootstrap.py` - the historical patches there are only for adopting
+pre-Alembic databases.
+
+Two things live outside the migrations because they need runtime decisions:
+the pgvector `vector` extension and the **HNSW** indexes on the embedding
+columns (Postgres only), both (re)created idempotently on every start by
+`bootstrap._create_postgres_vector_indexes`. HNSW rather than ivfflat because
+an ivfflat index built on an empty table has no centroids to train on.
+
+Data repairs that must run on every start - a missing default workspace, a
+workspace with no owner, an account with no membership row - are also
+`bootstrap` steps, kept idempotent.
 
 ## Configuration
 

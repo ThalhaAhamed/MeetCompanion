@@ -78,9 +78,11 @@ Docker image, and lints and builds the UI.
 - Keep pull requests focused. One behaviour change per PR is ideal.
 - Add or update tests for behaviour you change. Tests use the `authed_client`
   fixture for signed-in requests; see `tests/conftest.py`.
-- Schema changes go in `app/models/database.py` **and**, for existing
-  databases, an idempotent patch in `app/database/bootstrap.py` for both
-  Postgres and SQLite.
+- Schema changes go in `app/models/database.py` **and** an Alembic revision
+  (see *Database migrations* above). Never as a patch in `bootstrap.py`.
+- Every route that changes data takes a permission dependency -
+  `dependencies=[Depends(perms.require("edit_content"))]` etc. - see
+  `app/permissions.py` for the six keys. Owners always pass.
 - Never log or return a secret in full. `app/runtime_config.py` masks them.
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
   (`feat:`, `fix:`, `docs:`, `ci:` ...).
