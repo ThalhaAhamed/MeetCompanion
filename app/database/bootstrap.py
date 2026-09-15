@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import secrets
 import uuid
+from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -26,13 +27,51 @@ POSTGRESQL = "postgresql"
 PLACEHOLDER_TOKENS = frozenset({"dev-mcp-token-meetstream-2026", "local-dev-token", "change-me-to-a-random-string"})
 
 
+#: Advisory-lock key for start-up schema/seed work. Arbitrary, but must be the
+#: same in every process sharing a database.
+BOOTSTRAP_LOCK_KEY = 8_274_301_556_120_733
+
+
 async def bootstrap(engine: AsyncEngine) -> None:
-    """Schema first, then the rows every request depends on."""
-    await ensure_schema(engine)
-    await ensure_default_workspace(engine)
-    await ensure_workspace_owners(engine)
-    await prune_operational_tables(engine)
-    await fail_interrupted_processing(engine)
+    """
+    Schema first, then the rows every request depends on.
+
+    Serialized with a Postgres advisory lock, because a shared database is a
+    supported deployment: several people each run the app on their own machine
+    pointed at one Postgres. Booting two of them at the same moment used to
+    race - both created alembic_version, both inserted the default workspace -
+    and the loser died with "duplicate key ... already exists" before it ever
+    served a request. Whoever gets the lock does the work; the others wait a
+    moment and then find nothing left to do.
+
+    SQLite needs none of this: it is a single local file, not a shared server.
+    """
+    async with _bootstrap_lock(engine):
+        await ensure_schema(engine)
+        await ensure_default_workspace(engine)
+        await ensure_workspace_owners(engine)
+        await prune_operational_tables(engine)
+        await fail_interrupted_processing(engine)
+
+
+@asynccontextmanager
+async def _bootstrap_lock(engine: AsyncEngine):
+    if engine.dialect.name != POSTGRESQL:
+        yield
+        return
+
+    # AUTOCOMMIT: a session-level advisory lock must not be tied to a
+    # transaction that the migration work below might roll back.
+    conn = await engine.connect()
+    try:
+        await conn.execution_options(isolation_level="AUTOCOMMIT")
+        await conn.execute(text("SELECT pg_advisory_lock(:key)"), {"key": BOOTSTRAP_LOCK_KEY})
+        try:
+            yield
+        finally:
+            await conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": BOOTSTRAP_LOCK_KEY})
+    finally:
+        await conn.close()
 
 
 async def ensure_schema(engine: AsyncEngine) -> None:
