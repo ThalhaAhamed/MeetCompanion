@@ -28,6 +28,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import get_current_org_id
 from app.database.connection import get_db
 from app.models.database import Meeting, Note, NotebookFolder
+from app.models.schemas import utc_iso
 
 router = APIRouter(prefix="/api/export", tags=["export"])
 
@@ -51,7 +52,9 @@ def _slug(value: Optional[str], fallback: str = "untitled") -> str:
 
 
 def _iso(value: Any) -> Optional[str]:
-    if isinstance(value, (datetime, date)):
+    if isinstance(value, datetime):
+        return utc_iso(value)
+    if isinstance(value, date):
         return value.isoformat()
     return value
 

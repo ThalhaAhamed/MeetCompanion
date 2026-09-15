@@ -83,3 +83,13 @@ async def test_unsupported_and_oversized_uploads_are_refused(authed_client, monk
     assert (await authed_client.post("/api/documents/upload", files={"file": ("x.exe", b"MZ", "application/octet-stream")})).status_code == 400
     monkeypatch.setattr(documents, "MAX_UPLOAD_BYTES", 10)
     assert (await authed_client.post("/api/documents/upload", files={"file": ("big.txt", b"x" * 11, "text/plain")})).status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_upload_keeps_only_the_base_name(authed_client):
+    r = await authed_client.post(
+        "/api/documents/upload",
+        files={"file": ("../../evil.txt", b"hello world " * 20, "text/plain")},
+    )
+    assert r.status_code == 202, r.text
+    assert r.json()["filename"] == "evil.txt"

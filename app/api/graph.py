@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 from app.database.connection import get_db
 from app.api.deps import get_current_org_id
 from app.models.database import Meeting
+from app.models.schemas import utc_iso
 
 router = APIRouter(prefix="/api/graph", tags=["graph"])
 
@@ -60,7 +61,7 @@ async def get_knowledge_graph(org_id: uuid.UUID = Depends(get_current_org_id), d
             mid,
             label=m.title or "Untitled meeting",
             type="meeting",
-            date=m.started_at.isoformat() if m.started_at else None,
+            date=utc_iso(m.started_at),
             platform=m.platform,
             status=m.status,
             summary=m.summary,

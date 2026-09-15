@@ -25,6 +25,7 @@ from app.database.notebook_repository import (
     build_folder_tree,
 )
 from app.models.database import Note, User
+from app.models.schemas import utc_iso
 from app.providers.database import get_search_backend
 from app.providers.llm import ChatMessage, LLMConfigError, LLMError
 from app.services.embedding import embedding_service
@@ -120,8 +121,8 @@ def _serialize_note(note: Note, *, include_content: bool = True) -> Dict[str, An
         "is_favorite": note.is_favorite,
         "folder_id": str(note.folder_id) if note.folder_id else None,
         "meeting_id": str(note.meeting_id) if note.meeting_id else None,
-        "created_at": note.created_at.isoformat() if note.created_at else None,
-        "updated_at": note.updated_at.isoformat() if note.updated_at else None,
+        "created_at": utc_iso(note.created_at),
+        "updated_at": utc_iso(note.updated_at),
     }
     if include_content:
         data["content"] = note.content

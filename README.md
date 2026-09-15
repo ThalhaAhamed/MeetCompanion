@@ -305,7 +305,7 @@ MeetStream's side; the meeting is marked failed with that reason.
 ## 🔀 Workspaces
 
 One account can belong to several workspaces and switch between them from the
-picker in the top bar (it only appears when there is more than one).
+picker in the top bar (the workspace name next to the theme toggle).
 
 Everything is scoped to the workspace you currently have open - meetings,
 notes, memory, action items - so switching changes what you see. Your role

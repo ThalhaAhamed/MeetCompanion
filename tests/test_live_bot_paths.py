@@ -136,3 +136,31 @@ async def test_activate_repoints_stale_share_in_chat_url(monkeypatch):
     stale["agent_config"]["Agent"]["custom_functions"][0]["url"] = "https://new-host.example.com/api/agent/chat-relay"
     await agents.ensure_mcp_wired("agent-1", "tok", api_key="k")
     assert sent == {}
+
+
+@pytest.mark.asyncio
+async def test_api_timestamps_carry_an_explicit_utc_offset(authed_client):
+    """
+    SQLite returns stored UTC datetimes naive; serialised without an offset
+    the browser read them as local time, so a fresh (SQLite) install showed
+    every "Saved …" and meeting time shifted by the viewer's UTC offset.
+    """
+    r = await authed_client.post("/api/meetings", params={"deploy_bot": "false"}, json={
+        "meeting_url": "https://meet.google.com/abc-defg-hij", "title": "tz", "platform": "google_meet",
+    })
+    assert r.status_code == 201, r.text
+    created_at = r.json()["created_at"]
+    assert created_at.endswith("Z") or created_at.endswith("+00:00"), created_at
+
+    r = await authed_client.post("/api/notebook/notes", json={"title": "tz", "content": "x"})
+    assert r.status_code in (200, 201), r.text
+    updated_at = r.json()["updated_at"]
+    assert updated_at.endswith("Z") or updated_at.endswith("+00:00"), updated_at
+
+    note_id = r.json()["id"]
+    r = await authed_client.get(f"/api/export/note/{note_id}", params={"format": "json"})
+    assert r.status_code == 200, r.text
+    exported = r.json()
+    stamp = exported.get("updated_at") or exported.get("note", {}).get("updated_at")
+    if stamp:
+        assert stamp.endswith("+00:00") or stamp.endswith("Z"), stamp

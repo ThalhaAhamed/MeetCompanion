@@ -46,8 +46,12 @@ async def upload_company_document(
     """
     Upload and index a company document into Company Knowledge RAG.
     """
-    if not file.filename:
+    # The name is only ever stored as a label (content goes straight into
+    # the database), but "../../x.txt" is still not a name worth keeping.
+    filename = os.path.basename((file.filename or "").replace("\\", "/")).strip()
+    if not filename:
         raise HTTPException(status_code=400, detail="No filename provided")
+    file.filename = filename
 
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in SUPPORTED_EXTENSIONS:

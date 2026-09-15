@@ -96,3 +96,32 @@ def test_transcript_markers_cannot_be_closed_early():
     assert prompt.count(TRANSCRIPT_OPEN) == 1
     assert prompt.count(TRANSCRIPT_CLOSE) == 1
     assert prompt.rstrip().endswith(TRANSCRIPT_CLOSE)
+
+
+@pytest.mark.asyncio
+async def test_fallback_keeps_the_providers_actual_error(monkeypatch):
+    """
+    Seen on a fresh install: Ollama answered, but returned 500 "cudaMalloc
+    failed: out of memory" loading the model. The meeting used to say the
+    model "was unreachable", which sends the user to check the wrong thing.
+    """
+    from app.providers.llm.base import LLMError
+
+    class Broken:
+        label = "Ollama (local)"
+
+    async def boom(*a, **k):
+        raise LLMError('Ollama (local) request failed (500): {"error":"cudaMalloc failed: out of memory"}')
+
+    monkeypatch.setattr("app.services.memory.try_get_llm_provider", lambda: Broken())
+    service = MemoryExtractionService()
+    monkeypatch.setattr(service, "_extract_with_provider", boom)
+
+    result = await service.extract_memories(transcript_text="A: we ship on Friday.", meeting_title="t")
+    assert result["ai_used"] is False
+    assert "out of memory" in result["ai_error"]
+    assert result["ai_error"].startswith("Ollama (local): ")
+
+    monkeypatch.setattr("app.services.memory.try_get_llm_provider", lambda: None)
+    result = await service.extract_memories(transcript_text="A: we ship on Friday.", meeting_title="t")
+    assert result["ai_error"] == "No AI provider is configured."

@@ -186,6 +186,7 @@ class MeetingProcessingPipeline:
                 extracted_actions_data = extraction_result.get("action_items", [])
                 summary = extraction_result.get("summary", "")
                 ai_used = extraction_result.get("ai_used", True)
+                ai_error = extraction_result.get("ai_error") or "the configured model was unreachable"
 
                 # 6. Save Memories to DB
                 created_memories = await memory_repo.create_batch(
@@ -229,8 +230,8 @@ class MeetingProcessingPipeline:
                     processing_status="completed",
                     processing_error=(
                         None if ai_used else
-                        "Processed without AI: the configured model was unreachable, so this uses a basic "
-                        "rule-based extraction. Set a working provider in Settings, then Reprocess for a full "
+                        f"Processed without AI ({ai_error[:300]}), so this uses a basic "
+                        "rule-based extraction. Fix the provider in Settings, then Reprocess for a full "
                         "summary and richer action items."
                     ),
                 )

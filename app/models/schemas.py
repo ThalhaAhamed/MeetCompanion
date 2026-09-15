@@ -2,15 +2,37 @@
 Pydantic schemas for request validation, serialization, and response bodies.
 """
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional, List, Dict, Any, Literal
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, field_serializer
 from app.models.database import MemoryType
+
+
+def as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """
+    Every timestamp is stored as UTC, but SQLite hands it back naive, and a
+    naive ISO string ("2026-09-15T04:07:15") is read by browsers as *local*
+    time - so the UI showed every time off by the viewer's UTC offset.
+    Stamp the zone on the way out; Postgres already does.
+    """
+    if isinstance(value, datetime) and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def utc_iso(value: Optional[datetime]) -> Optional[str]:
+    """ISO 8601 with an explicit offset, for handlers that build dicts by hand."""
+    value = as_utc(value)
+    return value.isoformat() if value else None
 
 
 # ---- Common Base ----
 class SchemaBase(BaseModel):
     model_config = {"from_attributes": True}
+
+    @field_serializer("*", mode="wrap")
+    def _utc_timestamps(self, value, handler, info):
+        return handler(as_utc(value))
 
 
 # ---- Organization Schemas ----

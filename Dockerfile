@@ -31,10 +31,12 @@ COPY app/ ./app/
 COPY scripts/ ./scripts/
 COPY --from=ui /ui/dist ./frontend/dist
 
-# Everything the container writes goes under /data.
+# Everything the container writes goes under /data. APP_ENV=production keeps
+# the unauthenticated interactive API docs (/docs) off; API_DOCS=true re-enables.
 ENV MEET_COMPANION_CONFIG=/data/config.json \
     DATABASE_URL=sqlite+aiosqlite:////data/meet-companion.db \
     EMBEDDING_CACHE_DIR=/data/models \
+    APP_ENV=production \
     APP_HOST=0.0.0.0 \
     PORT=8000
 VOLUME ["/data"]

@@ -204,6 +204,7 @@ class MemoryExtractionService:
         meeting_date: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         provider = try_get_llm_provider()
+        ai_error = "No AI provider is configured."
         if provider is not None:
             try:
                 result = await self._extract_with_provider(
@@ -215,9 +216,14 @@ class MemoryExtractionService:
                 logger.warning(f"Memory extraction via {provider.label} failed: {exc}. "
                     "Falling back to rule-based parser."
                 )
+                # Kept for the meeting record: "unreachable" was all the user
+                # saw for an Ollama that answered fine but ran out of GPU
+                # memory loading the model.
+                ai_error = f"{provider.label}: {str(exc).strip() or exc.__class__.__name__}"
 
         result = self._heuristic_extract(transcript_text, meeting_title, customer_name, project_name)
         result["ai_used"] = False
+        result["ai_error"] = ai_error
         return result
 
     async def _extract_with_provider(

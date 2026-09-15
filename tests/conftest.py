@@ -31,13 +31,6 @@ from app.main import app  # noqa: E402
 from app.models.database import Base  # noqa: E402
 
 
-@pytest.fixture(scope="session", autouse=True)
-def event_loop_policy():
-    import asyncio
-
-    return asyncio.get_event_loop_policy()
-
-
 @pytest_asyncio.fixture(autouse=True)
 async def database_schema():
     """
