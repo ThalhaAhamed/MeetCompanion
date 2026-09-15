@@ -85,3 +85,54 @@ async def test_stop_sets_ended_at_without_a_webhook(authed_client, monkeypatch):
     m = (await authed_client.get(f"/api/meetings/{meeting_id}")).json()
     assert m["status"] == "stopped"
     assert m["ended_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_activate_repoints_stale_share_in_chat_url(monkeypatch):
+    """
+    Observed on a real agent on 2026-09-15: after MCP_SERVER_URL moved to a new
+    tunnel, activation updated mcp_servers but left share_in_chat pointing at a
+    long-dead host, because only the function's *name* was checked.
+    """
+    from app.config import settings
+    from app.services import agents
+
+    monkeypatch.setattr(settings, "MCP_SERVER_URL", "https://new-host.example.com/mcp")
+    stale = {
+        "agent_config": {
+            "Agent": {
+                "mcp_servers": [{
+                    "url": "https://new-host.example.com/mcp", "active": True,
+                    "headers": {"Authorization": "Bearer tok"}, "allowed_tools": ["get_meeting"],
+                }],
+                "custom_functions": [{
+                    "name": "share_in_chat", "method": "POST",
+                    "url": "https://old-host.example.com/api/agent/chat-relay",
+                    "headers": {"Authorization": "Bearer tok"},
+                }],
+            }
+        }
+    }
+    sent = {}
+
+    async def fake_get(agent_config_id, api_key=None):
+        return stale
+
+    async def fake_update(agent_config_id, agent=None, model=None, api_key=None):
+        sent["agent"] = agent
+        return {}
+
+    monkeypatch.setattr(agents.meetstream_client, "get_mia_agent", fake_get)
+    monkeypatch.setattr(agents.meetstream_client, "update_mia_agent_settings", fake_update)
+
+    await agents.ensure_mcp_wired("agent-1", "tok", api_key="k")
+
+    fns = [f for f in sent["agent"]["custom_functions"] if f["name"] == "share_in_chat"]
+    assert len(fns) == 1
+    assert fns[0]["url"] == "https://new-host.example.com/api/agent/chat-relay"
+
+    # Already correct -> nothing sent.
+    sent.clear()
+    stale["agent_config"]["Agent"]["custom_functions"][0]["url"] = "https://new-host.example.com/api/agent/chat-relay"
+    await agents.ensure_mcp_wired("agent-1", "tok", api_key="k")
+    assert sent == {}

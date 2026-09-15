@@ -4,6 +4,7 @@ Allows creating meetings, triggering MeetStream bot deployment, and retrieving m
 """
 import uuid
 from datetime import date, datetime, timezone
+import httpx
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
@@ -592,6 +593,10 @@ async def stop_meeting_bot(
     key_owner_id = meeting.created_by_user_id or user.id
     try:
         result = await meetstream_client.remove_bot(meeting.meetstream_bot_id, api_key=await get_meetstream_api_key(db, key_owner_id))
+    except httpx.TimeoutException:
+        # str() of an httpx timeout is empty - "MeetStream API error: " told
+        # the user nothing.
+        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="MeetStream did not confirm the bot left in time. Check the meeting - it may still be leaving - and try again.")
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
 

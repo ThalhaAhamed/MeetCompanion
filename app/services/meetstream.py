@@ -170,8 +170,11 @@ class MeetStreamClient:
             return resp.json()
 
     async def remove_bot(self, bot_id: str, api_key: Optional[str] = None) -> Dict[str, Any]:
-        """Send a stop signal to remove a bot from its meeting."""
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        """Send a stop signal to remove a bot from its meeting.
+
+        MeetStream answers only once the bot has actually left - 13s on a
+        real call - so this cannot share the short timeout the lookups use."""
+        async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.get(
                 f"{self.base_url}/api/v1/bots/{bot_id}/remove_bot",
                 headers=self._headers(api_key),

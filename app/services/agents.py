@@ -9,6 +9,7 @@ HTTPException where the router used to, so the router stays thin.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import asdict
 from typing import Any, Dict, Optional
@@ -21,6 +22,8 @@ from app.database.repositories import UserRepository
 from app.models.database import User
 from app.runtime_config import load_config
 from app.services.meetstream import meetstream_client, _share_in_chat_function
+
+logger = logging.getLogger(__name__)
 
 
 # The built-in template agent's system prompt - the starting point every new
@@ -195,7 +198,16 @@ async def ensure_mcp_wired(agent_config_id: str, mcp_token: Optional[str], api_k
         and mcp_servers[0].get("url") == settings.MCP_SERVER_URL
         and (mcp_servers[0].get("headers") or {}).get("Authorization") == f"Bearer {mcp_token}"
     )
-    chat_fn_ok = any(f.get("name") == "share_in_chat" for f in custom_functions)
+    # The function has to point at *this* server, not merely exist: after a
+    # move (new tunnel, new host) an agent kept its old share_in_chat URL and
+    # posted chat messages to a server that no longer answered.
+    wanted_fn = _share_in_chat_function(settings.MCP_SERVER_URL, mcp_token)
+    chat_fn_ok = any(
+        f.get("name") == "share_in_chat"
+        and f.get("url") == wanted_fn["url"]
+        and (f.get("headers") or {}).get("Authorization") == wanted_fn.get("headers", {}).get("Authorization")
+        for f in custom_functions
+    )
     if mcp_ok and chat_fn_ok:
         return
 
@@ -213,13 +225,16 @@ async def ensure_mcp_wired(agent_config_id: str, mcp_token: Optional[str], api_k
         current_agent["mcp_servers"] = [server_config]
 
     if not chat_fn_ok:
-        custom_functions.append(_share_in_chat_function(settings.MCP_SERVER_URL, mcp_token))
+        custom_functions = [f for f in custom_functions if f.get("name") != "share_in_chat"]
+        custom_functions.append(wanted_fn)
         current_agent["custom_functions"] = custom_functions
 
     try:
         await meetstream_client.update_mia_agent_settings(agent_config_id=agent_config_id, agent=current_agent, api_key=api_key)
-    except Exception:
-        pass
+    except Exception as exc:
+        # Activation still succeeds - the agent just keeps its previous wiring.
+        detail = getattr(getattr(exc, "response", None), "text", "") or str(exc)
+        logger.warning(f"Could not re-wire agent {agent_config_id} to {settings.MCP_SERVER_URL}: {detail[:300]}")
 
 
 def get_agent_template() -> Dict[str, Any]:

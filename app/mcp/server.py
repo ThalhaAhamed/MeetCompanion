@@ -6,6 +6,7 @@ Exposes Streamable HTTP endpoint at /mcp handling JSON-RPC 2.0 requests:
 - tools/call
 Also provides REST compatibility endpoints.
 """
+import logging
 import uuid
 import json
 from typing import Dict, Any, Optional
@@ -13,6 +14,8 @@ from fastapi import APIRouter, Request, Depends, HTTPException, status
 from fastapi.responses import JSONResponse, Response
 from app.mcp.auth import verify_mcp_token
 from app.mcp.tools import MCP_TOOL_DEFINITIONS, execute_tool, format_tool_output_text, tool_definitions_for
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
 
@@ -75,6 +78,10 @@ async def handle_mcp_jsonrpc(
         tool_name = params.get("name")
         arguments = params.get("arguments", {})
 
+        # The only trace a live voice agent leaves of *using* memory - the
+        # access log shows anonymous "POST /mcp 200" lines for every
+        # initialize/tools-list round-trip as well.
+        logger.info(f"mcp tools/call org={org_id} tool={tool_name} args={arguments}")
         try:
             tool_output = await execute_tool(org_id, tool_name, arguments)
             return {
