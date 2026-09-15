@@ -6,6 +6,7 @@ import {
   CheckIcon,
   MeetingsIcon,
   NotebookIcon,
+  PencilIcon,
   PlusIcon,
   StarIcon,
 } from '../components/Icons'
@@ -20,6 +21,8 @@ import {
   StatTile,
 } from '../components/ui'
 import { listActionItems, listFolders, listMeetings, listNotes, updateActionItem } from '../api'
+import ActionItemEditor from '../components/ActionItemEditor'
+import { useCan } from '../user'
 
 function today() {
   return new Date().toISOString().slice(0, 10)
@@ -71,6 +74,9 @@ export default function Dashboard() {
   useEffect(() => {
     load()
   }, [load])
+
+  const canEdit = useCan('edit_content')
+  const [editing, setEditing] = useState(null)
 
   async function complete(item) {
     setCompleting(item.id)
@@ -221,6 +227,17 @@ export default function Dashboard() {
                         ) : null}
                       </div>
                     </div>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        className="mc-btn mc-btn-ghost shrink-0 px-2"
+                        onClick={() => setEditing(item)}
+                        aria-label={`Edit "${item.task}"`}
+                        title="Edit owner, due date, priority"
+                      >
+                        <PencilIcon size={15} />
+                      </button>
+                    )}
                   </li>
                 )
               })}
@@ -268,6 +285,11 @@ export default function Dashboard() {
           )}
         </SectionCard>
       </div>
+      <ActionItemEditor
+        item={editing}
+        onClose={() => setEditing(null)}
+        onSaved={(updated) => setActionItems((current) => current.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)))}
+      />
     </Page>
   )
 }

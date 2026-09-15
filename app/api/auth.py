@@ -78,11 +78,16 @@ async def logout(request: Request, response: Response):
 async def check(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     token = request.cookies.get(COOKIE_NAME)
     user_id = decode_session(token) if token else None
-    if not user_id:
+    user = await _active_user(db, user_id) if user_id else None
+    if not user:
         # /api/auth/* skips the gate (sign-in has to be reachable when signed
         # out), so the device key has to be honoured here as well. Without
         # this the desktop app is signed in for every API call yet still shown
         # the sign-in screen, because this is the endpoint the UI boots on.
+        # It also has to apply when the cookie is well-signed but for a user
+        # this database does not have - after switching databases, or an
+        # account removed - or the desktop app is stuck at sign-in with a
+        # cookie it cannot clear.
         from app.middleware.auth_gate import _session_from_device_key
 
         issued = await _session_from_device_key(request)
@@ -93,12 +98,15 @@ async def check(request: Request, response: Response, db: AsyncSession = Depends
             key=COOKIE_NAME, value=session_token, max_age=SESSION_TTL_SECONDS,
             httponly=True, **cookie_flags(request),
         )
-
-    result = await db.execute(select(User).where(User.id == user_id, User.is_active.is_(True)))
-    user = result.scalar_one_or_none()
-    if not user:
-        return {"authenticated": False}
+        user = await _active_user(db, user_id)
+        if not user:
+            return {"authenticated": False}
     return {"authenticated": True, "member": await member_payload(user, db)}
+
+
+async def _active_user(db: AsyncSession, user_id) -> User | None:
+    result = await db.execute(select(User).where(User.id == user_id, User.is_active.is_(True)))
+    return result.scalar_one_or_none()
 
 
 async def member_payload(user: User, db: AsyncSession) -> dict:

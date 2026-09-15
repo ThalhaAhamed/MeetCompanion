@@ -164,3 +164,34 @@ async def test_api_timestamps_carry_an_explicit_utc_offset(authed_client):
     stamp = exported.get("updated_at") or exported.get("note", {}).get("updated_at")
     if stamp:
         assert stamp.endswith("+00:00") or stamp.endswith("Z"), stamp
+
+
+@pytest.mark.asyncio
+async def test_action_item_owner_due_date_and_priority_are_editable(authed_client):
+    """The extractor's guesses must be fixable by hand - including clearing a due date."""
+    from app.database.connection import AsyncSessionLocal
+    from app.database.repositories import ActionItemRepository, MeetingRepository
+    from app.config import settings
+
+    org_id = uuid.UUID(settings.DEFAULT_ORG_ID)
+    async with AsyncSessionLocal() as db:
+        meeting = await MeetingRepository(db).create(org_id=org_id, meeting_url="https://meet.google.com/abc-defg-hij", title="t", platform="google_meet")
+        await db.flush()
+        from datetime import date as _date
+        item = await ActionItemRepository(db).create(
+            org_id=org_id, meeting_id=meeting.id, task="Write the runbook",
+            owner="MeetStream Companion", due_date=_date(2026, 9, 16), priority="medium",
+        )
+        await db.commit()
+        item_id = str(item.id)
+
+    r = await authed_client.patch(f"/api/action-items/{item_id}", json={"owner": "Marcus", "due_date": "2026-09-30", "priority": "high"})
+    assert r.status_code == 200, r.text
+    assert (r.json()["owner"], r.json()["due_date"], r.json()["priority"]) == ("Marcus", "2026-09-30", "high")
+
+    r = await authed_client.patch(f"/api/action-items/{item_id}", json={"due_date": None, "owner": None})
+    assert r.status_code == 200, r.text
+    assert r.json()["due_date"] is None and r.json()["owner"] is None
+
+    assert (await authed_client.patch(f"/api/action-items/{item_id}", json={"priority": "urgent"})).status_code == 422
+    assert (await authed_client.patch(f"/api/action-items/{item_id}", json={"due_date": "next friday"})).status_code == 422

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Page, PageHeader } from '../components/AppShell'
-import { MeetingsIcon, PlusIcon, SearchIcon } from '../components/Icons'
+import { MeetingsIcon, PencilIcon, PlusIcon, SearchIcon } from '../components/Icons'
 import { Badge, Card, EmptyState, ErrorMessage, ExportMenu, Field, Loading, Modal, Spinner } from '../components/ui'
 import {
   createMeeting,
@@ -17,6 +17,7 @@ import {
   uploadTranscript,
 } from '../api'
 import { useCan } from '../user'
+import ActionItemEditor from '../components/ActionItemEditor'
 
 const LIVE_STATUSES = ['pending', 'joining', 'recording', 'in_progress']
 // Stop bot only makes sense once there is a bot to stop.
@@ -267,6 +268,7 @@ function UploadTranscriptModal({ open, onClose, onUploaded }) {
 
 function MeetingDetail({ meetingId, onChanged, onDeleted }) {
   const canEdit = useCan('edit_content')
+  const [editingItem, setEditingItem] = useState(null)
   const canDelete = useCan('delete_content')
   const canExport = useCan('export_workspace')
   const [meeting, setMeeting] = useState(null)
@@ -464,6 +466,7 @@ function MeetingDetail({ meetingId, onChanged, onDeleted }) {
           (actionItems.length === 0 ? (
             <EmptyState title="No action items" />
           ) : (
+            <>
             <ul className="flex flex-col gap-2">
               {actionItems.map((item) => (
                 <li key={item.id} className="mc-panel flex items-start justify-between gap-3 p-3">
@@ -471,13 +474,40 @@ function MeetingDetail({ meetingId, onChanged, onDeleted }) {
                     <p className="text-sm">{item.task}</p>
                     <div className="mt-1 flex flex-wrap gap-1.5">
                       {item.owner && <Badge>{item.owner}</Badge>}
+                      {item.priority && item.priority !== 'medium' && (
+                        <Badge tone={item.priority === 'low' ? 'neutral' : 'warning'}>{item.priority}</Badge>
+                      )}
                       {item.due_date && <Badge tone="warning">due {item.due_date}</Badge>}
                     </div>
                   </div>
-                  <Badge tone={item.status === 'completed' ? 'success' : 'neutral'}>{item.status}</Badge>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Badge tone={item.status === 'completed' ? 'success' : 'neutral'}>{item.status}</Badge>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        className="mc-btn mc-btn-ghost px-2"
+                        onClick={() => setEditingItem(item)}
+                        aria-label={`Edit "${item.task}"`}
+                        title="Edit owner, due date, priority"
+                      >
+                        <PencilIcon size={15} />
+                      </button>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>
+            <ActionItemEditor
+              item={editingItem}
+              onClose={() => setEditingItem(null)}
+              onSaved={(updated) =>
+                setMeeting((current) => ({
+                  ...current,
+                  action_items: (current.action_items || []).map((c) => (c.id === updated.id ? { ...c, ...updated } : c)),
+                }))
+              }
+            />
+            </>
           ))}
 
         {tab === 'transcript' &&

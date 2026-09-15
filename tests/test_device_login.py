@@ -133,3 +133,32 @@ async def test_auth_check_still_reports_signed_out_without_a_key(client):
     assert (await client.get("/api/auth/check")).json()["authenticated"] is False
     bad = await client.get("/api/auth/check", headers={"Cookie": f"{DEVICE_COOKIE_NAME}=nope"})
     assert bad.json()["authenticated"] is False
+
+
+@pytest.mark.asyncio
+async def test_device_key_recovers_from_a_session_for_a_user_this_database_lacks(client):
+    """
+    Seen after switching databases from Settings: the browser kept a
+    well-signed session cookie for a user the new database does not have.
+    /auth/check decoded it, skipped the device key, failed the lookup and
+    answered signed-out - and the desktop app cannot clear that cookie.
+    """
+    import time
+
+    from app.middleware.auth_gate import SESSION_TTL_SECONDS, sign_session
+
+    owner = await _make_owner("survivor@device.test")
+    ghost = sign_session(str(uuid.uuid4()), int(time.time()) + SESSION_TTL_SECONDS)
+    r = await client.get(
+        "/api/auth/check",
+        headers={"Cookie": f"{COOKIE_NAME}={ghost}; {DEVICE_COOKIE_NAME}={device_secret()}"},
+    )
+    assert r.status_code == 200
+    assert r.json()["authenticated"] is True
+    assert r.json()["member"]["email"] == "survivor@device.test"
+    assert COOKIE_NAME in r.headers.get("set-cookie", "")  # replaced with a live session
+
+    # Without the device key a ghost session is still simply signed out.
+    r = await client.get("/api/auth/check", headers={"Cookie": f"{COOKIE_NAME}={ghost}"})
+    assert r.json() == {"authenticated": False}
+    assert owner is not None
