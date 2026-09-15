@@ -24,6 +24,8 @@ from sqlalchemy import select
 from app.secrets import session_secret
 
 COOKIE_NAME = "hub_session"
+#: Set by the desktop shell before it loads the UI, never by the page itself.
+DEVICE_COOKIE_NAME = "mc_device"
 SESSION_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
 
 EXEMPT_PREFIXES = ("/api/auth/", "/api/members", "/api/agent/chat-relay", "/api/webhooks", "/mcp", "/health", "/docs", "/openapi.json", "/redoc")
@@ -85,7 +87,81 @@ class AuthGateMiddleware(BaseHTTPMiddleware):
                 return await call_next(request)
 
         token = request.cookies.get(COOKIE_NAME)
-        if not token or not await verify_session(token):
-            return JSONResponse(status_code=401, content={"detail": "Sign in required."})
+        if token and await verify_session(token):
+            return await call_next(request)
 
-        return await call_next(request)
+        # No session: the desktop app on this machine may present the device
+        # key instead, which signs the owner in rather than waving the request
+        # through - everything downstream still sees a normal session.
+        issued = await _session_from_device_key(request)
+        if issued is not None:
+            session_token, _user_id = issued
+            # Put it on the *request* as well, not just the response: the
+            # endpoints' own get_current_user dependency reads the cookie
+            # header, so without this the gate would pass and the route would
+            # still answer 401.
+            _inject_session_cookie(request, session_token)
+            response = await call_next(request)
+            set_session_cookie(response, session_token, request)
+            return response
+
+        return JSONResponse(status_code=401, content={"detail": "Sign in required."})
+
+
+def _inject_session_cookie(request: Request, token: str) -> None:
+    """Make the rest of the stack see an ordinary signed-in request."""
+    headers = [(k, v) for k, v in request.scope["headers"] if k.lower() != b"cookie"]
+    existing = request.headers.get("cookie")
+    merged = f"{existing}; {COOKIE_NAME}={token}" if existing else f"{COOKIE_NAME}={token}"
+    headers.append((b"cookie", merged.encode("latin-1")))
+    request.scope["headers"] = headers
+    # starlette caches the parsed cookies on first access.
+    request._cookies = None
+    if "cookies" in request.__dict__:
+        del request.__dict__["cookies"]
+
+
+def set_session_cookie(response, token: str, request: Request) -> None:
+    """Same attributes the login endpoint uses, so the two are indistinguishable."""
+    from app.api.auth import cookie_flags
+
+    response.set_cookie(
+        key=COOKIE_NAME, value=token, max_age=SESSION_TTL_SECONDS, httponly=True,
+        **cookie_flags(request),
+    )
+
+
+async def _session_from_device_key(request: Request):
+    """
+    Turn a valid device key into a session for the sole owner.
+
+    Deliberately only when there is exactly one owner: on a shared workspace
+    "the local user" is ambiguous, and silently picking one of several people
+    would be both wrong and a way to inherit someone else's role.
+    """
+    import hmac as _hmac
+    import time as _time
+
+    presented = request.cookies.get(DEVICE_COOKIE_NAME)
+    if not presented:
+        return None
+
+    from app.secrets import device_secret
+
+    if not _hmac.compare_digest(presented, device_secret()):
+        return None
+
+    from app.database.connection import get_db_context
+    from app.models.database import User
+
+    async with get_db_context() as db:
+        owners = (
+            await db.execute(
+                select(User.id).where(User.role == "owner", User.is_active.is_(True)).limit(2)
+            )
+        ).scalars().all()
+    if len(owners) != 1:
+        return None
+
+    user_id = owners[0]
+    return sign_session(str(user_id), int(_time.time()) + SESSION_TTL_SECONDS), user_id

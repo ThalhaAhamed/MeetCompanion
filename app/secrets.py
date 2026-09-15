@@ -124,3 +124,23 @@ def configured_mcp_token() -> Optional[str]:
 def reset_for_tests() -> None:
     global _session_secret
     _session_secret = None
+
+
+_device_secret: Optional[str] = None
+
+
+def device_secret() -> str:
+    """
+    Secret proving a request comes from this machine's own desktop app.
+
+    The desktop shell can read the data directory; a browser reaching the
+    server through a tunnel cannot. That difference is the whole point:
+    "is the client on localhost?" stops meaning anything once a tunnel is
+    running, because the tunnel daemon runs locally and every forwarded
+    request arrives from 127.0.0.1 too. Possession of this file is a claim a
+    remote visitor cannot forge.
+    """
+    global _device_secret
+    if _device_secret is None:
+        _device_secret = _file_secret("device.key")
+    return _device_secret

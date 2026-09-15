@@ -5,7 +5,7 @@
 // it to answer, and opens it in a window. All data lives in the user's app
 // data directory; the installed files are never written to.
 
-const { app, BrowserWindow, dialog, shell } = require('electron')
+const { app, BrowserWindow, dialog, session, shell } = require('electron')
 const { spawn } = require('node:child_process')
 const http = require('node:http')
 const path = require('node:path')
@@ -99,6 +99,33 @@ function stopServer() {
   serverProcess = null
 }
 
+/**
+ * Hand the server proof that this is the app on this machine, so the person
+ * who installed it is not asked to sign in every launch.
+ *
+ * The key is a file the server wrote into its own data directory - readable
+ * here, unreachable for anyone arriving over a tunnel. "Came from localhost"
+ * would not do: a tunnel daemon runs locally too, so forwarded requests also
+ * arrive from 127.0.0.1.
+ */
+async function attachDeviceKey(port) {
+  try {
+    const keyPath = path.join(dataDir(), 'device.key')
+    const key = fs.readFileSync(keyPath, 'utf8').trim()
+    if (!key) return
+    await session.defaultSession.cookies.set({
+      url: `http://127.0.0.1:${port}`,
+      name: 'mc_device',
+      value: key,
+      httpOnly: true,
+      sameSite: 'lax',
+    })
+  } catch {
+    // No key yet (first run races the server's own start-up), or unreadable.
+    // Signing in by hand still works, so this is never fatal.
+  }
+}
+
 function createWindow(port) {
   mainWindow = new BrowserWindow({
     width: 1360,
@@ -124,7 +151,7 @@ function createWindow(port) {
     return { action: 'allow' }
   })
 
-  mainWindow.loadURL(`http://127.0.0.1:${port}/`)
+  attachDeviceKey(port).finally(() => mainWindow?.loadURL(`http://127.0.0.1:${port}/`))
   mainWindow.on('closed', () => {
     mainWindow = null
   })

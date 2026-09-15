@@ -40,6 +40,7 @@ Ask AI — all with a model, database and machine that you choose.
 - [Configuration](#%EF%B8%8F-configuration)
 - [Docker](#-docker)
 - [Live meetings: reaching your server](#-live-meetings-reaching-your-server)
+- [Signing in](#-signing-in)
 - [Workspaces](#-workspaces)
 - [Export](#-export)
 - [Privacy and data](#-privacy-and-data)
@@ -321,6 +322,27 @@ Markdown is written for reading and for dropping straight into Obsidian or
 Notion - front matter carries the title, tags, folder and dates. JSON is the
 lossless one: ids, metadata and the raw note text, so an export can be
 processed or re-imported by something else.
+
+## 🔑 Signing in
+
+The desktop app signs you in automatically. On first run the server writes a
+`device.key` into its data directory; the app reads it and presents it, which
+is proof the request comes from this machine rather than from someone who
+found your tunnel. Reaching the same server from a phone or over a tunnel
+still asks for the password, so exposing the server never exposes your
+meetings.
+
+Auto sign-in deliberately applies only when the install has exactly one owner.
+On a shared workspace "the local user" is ambiguous, and quietly picking one
+person would hand over someone else's role.
+
+Locked out of the only owner account? Nobody can reset it from inside the app,
+so run this where the server lives:
+
+```bash
+python scripts/reset_password.py --list          # see the accounts
+python scripts/reset_password.py you@example.com # set a new password
+```
 
 ## 🔒 Privacy and data
 
