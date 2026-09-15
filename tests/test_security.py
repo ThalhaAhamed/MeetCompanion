@@ -483,3 +483,43 @@ async def test_racing_signups_with_the_same_workspace_name_never_500():
     codes = await asyncio.gather(*(one(i) for i in range(6)))
     assert 500 not in codes and codes.count(200) + codes.count(201) == 6, codes
     rate_limiter.reset()
+
+
+# ---------------------------------------------------------------------------
+# Self-signup policy
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_self_signup_can_be_switched_off_but_the_first_account_always_works(monkeypatch):
+    """
+    A server on the public internet may not want strangers creating
+    workspaces. With ALLOW_SELF_SIGNUP=false, anonymous sign-up is refused -
+    except the very first account, or nobody could ever sign in - and an
+    owner can still add teammates.
+    """
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "ALLOW_SELF_SIGNUP", False)
+    async with _client() as first, _client() as stranger:
+        await _signup(first, f"first-{uuid.uuid4().hex[:6]}@example.com", workspace="Closed Co")
+        code = (await first.get("/api/members/workspace")).json()["join_code"]
+
+        r = await stranger.post("/api/members", json={"name": "s", "email": f"s-{uuid.uuid4().hex[:6]}@example.com", "password": "correct-horse-battery", "workspace_name": "Mine"})
+        assert r.status_code == 403 and "switched off" in r.json()["detail"]
+        r = await stranger.post("/api/members", json={"name": "s", "email": f"s-{uuid.uuid4().hex[:6]}@example.com", "password": "correct-horse-battery", "join_code": code})
+        assert r.status_code == 403
+
+        # An owner adding someone is not self-signup.
+        r = await first.post("/api/members", json={"name": "t", "email": f"t-{uuid.uuid4().hex[:6]}@example.com", "password": "correct-horse-battery"})
+        assert r.status_code == 200, r.text
+
+
+@pytest.mark.asyncio
+async def test_account_creation_has_a_tighter_per_address_ceiling():
+    """QA: sixty distinct-email sign-ups a minute from one address all passed. Fifteen is plenty for a team."""
+    async with _client() as c:
+        codes = []
+        for i in range(20):
+            r = await c.post("/api/members", json={"name": "r", "email": f"r{i}-{uuid.uuid4().hex[:6]}@example.com", "password": "correct-horse-battery", "workspace_name": f"rl{i}"})
+            codes.append(r.status_code)
+        assert codes[:15] == [200] * 15 and 429 in codes[15:], codes

@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     # Same-origin only unless told otherwise. A wildcard here combined with
     # credentialed requests would let any website act as a signed-in user.
     CORS_ORIGINS: List[str] = []
+    # Whether people can create their own account (new workspace, or join
+    # one with a code) without being added by someone already signed in.
+    # On by default - a personal or team install wants that. Off for a server
+    # on the public internet you do not want strangers making workspaces on.
+    ALLOW_SELF_SIGNUP: bool = True
 
     # ---- Database ----
     # Local SQLite by default so the application runs with no external

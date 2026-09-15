@@ -30,8 +30,11 @@ RATE_LIMITED: Dict[Tuple[str, str], Tuple[int, int]] = {
 }
 
 #: Coarse ceiling per address across all emails, so a single client cannot
-#: dodge the per-email limit by rotating addresses.
+#: dodge the per-email limit by rotating addresses. Account creation gets a
+#: tighter one: sixty new workspaces a minute from one address is a spray,
+#: not a team signing up.
 PER_IP_CEILING: Tuple[int, int] = (60, 60)
+PER_IP_CEILINGS: Dict[str, Tuple[int, int]] = {"/api/members": (15, 60)}
 
 
 def _client_ip(request: Request) -> str:
@@ -113,7 +116,7 @@ class RequestLimitsMiddleware(BaseHTTPMiddleware):
             if prefix == "/api/members" and path != "/api/members":
                 continue
             key = await _client_key(request)
-            ip_ok = rate_limiter.allow(prefix + "#ip", key.split("|", 1)[0], *PER_IP_CEILING)
+            ip_ok = rate_limiter.allow(prefix + "#ip", key.split("|", 1)[0], *PER_IP_CEILINGS.get(prefix, PER_IP_CEILING))
             if not ip_ok or not rate_limiter.allow(prefix, key, limit, window):
                 return JSONResponse(
                     status_code=429,

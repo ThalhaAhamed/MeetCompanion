@@ -295,6 +295,7 @@ Everything is configurable from **Settings** in the app. Precedence is:
 | `SESSION_SECRET` | generated | Cookie signing key; generated into `data/session.key` on first run |
 | `TRUST_PROXY` | `false` | Read client address/scheme from `X-Forwarded-*` — only behind your own reverse proxy |
 | `API_DOCS` | dev only | Interactive API docs at `/docs` |
+| `ALLOW_SELF_SIGNUP` | `true` | Let people create their own account (new workspace, or join with a code). Set `false` on a public server so only owners can add members; the first account is always allowed |
 
 Configuration saved from the UI lives in `data/config.json` next to the SQLite
 database, alongside `session.key`. All of `data/` is gitignored — it holds API

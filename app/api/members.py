@@ -22,6 +22,7 @@ from app.models.database import Membership, Organization, User
 from app.middleware.auth_gate import COOKIE_NAME, decode_session
 from app.api.deps import OWNER, get_current_org_id, get_current_user, is_owner, require_owner
 from app import permissions as perms
+from app.config import settings
 from app.security import hash_password, verify_password
 
 router = APIRouter(prefix="/api/members", tags=["members"])
@@ -173,6 +174,13 @@ async def add_member(body: CreateMemberRequest, request: Request, db: AsyncSessi
             )
     else:
         # Self-signup - must explicitly create a new workspace or join one by code.
+        # A deployment can switch that off; the very first account is always
+        # allowed, or nobody could ever sign in.
+        if not settings.ALLOW_SELF_SIGNUP and (await db.execute(select(func.count(User.id)))).scalar_one() > 0:
+            raise HTTPException(
+                status_code=403,
+                detail="Self-signup is switched off on this server. Ask a workspace owner to add you from their Members page.",
+            )
         if bool(body.workspace_name) == bool(body.join_code):
             raise HTTPException(
                 status_code=400,
