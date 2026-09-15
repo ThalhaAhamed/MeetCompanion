@@ -8,6 +8,7 @@ import os
 from datetime import date, datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status, Query
+from app import permissions as perms
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, func, and_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,7 +38,7 @@ def _docx_text(content_bytes: bytes) -> str:
     return re.sub(r"<[^>]+>", "", xml)
 
 
-@router.post("/upload", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/upload", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(perms.require("create_content"))])
 async def upload_company_document(
     file: UploadFile = File(...),
     org_id: uuid.UUID = Depends(get_current_org_id),
@@ -147,7 +148,7 @@ async def list_documents(
     ]
 
 
-@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(perms.require("delete_content"))])
 async def delete_document(
     document_id: uuid.UUID,
     org_id: uuid.UUID = Depends(get_current_org_id),

@@ -10,6 +10,7 @@ import uuid
 import httpx
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, Header
+from app import permissions as perms
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from dataclasses import asdict
@@ -386,7 +387,7 @@ async def update_agent_template(body: AgentTemplateUpdateRequest, user: User = D
     return get_agent_template()
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(perms.require("manage_agents"))])
 async def create_agent(body: AgentCreateRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Create a brand new MIA agent, owned by you personally and pre-wired to
     your workspace's MCP token so it can recall your workspace's meeting
@@ -437,7 +438,7 @@ class ActivateRequest(BaseModel):
     agent_config_id: str
 
 
-@router.post("/activate")
+@router.post("/activate", dependencies=[Depends(perms.require("manage_agents"))])
 async def activate_agent(body: ActivateRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Switch which agent your own new bots launch with, without touching env vars or redeploying."""
     await require_claimable_agent(db, user.id, body.agent_config_id)
@@ -466,7 +467,7 @@ class AgentUpdateRequest(BaseModel):
     mcp_server_url: Optional[str] = None
 
 
-@router.put("")
+@router.put("", dependencies=[Depends(perms.require("manage_agents"))])
 async def update_current_agent(body: AgentUpdateRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """
     Partially update an MIA agent's model/agent blocks (your own active one,

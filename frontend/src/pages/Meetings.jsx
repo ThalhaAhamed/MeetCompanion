@@ -16,6 +16,7 @@ import {
   stopMeetingBot,
   uploadTranscript,
 } from '../api'
+import { useCan } from '../user'
 
 const LIVE_STATUSES = ['pending', 'joining', 'recording', 'in_progress']
 // Stop bot only makes sense once there is a bot to stop.
@@ -265,6 +266,9 @@ function UploadTranscriptModal({ open, onClose, onUploaded }) {
 }
 
 function MeetingDetail({ meetingId, onChanged, onDeleted }) {
+  const canEdit = useCan('edit_content')
+  const canDelete = useCan('delete_content')
+  const canExport = useCan('export_workspace')
   const [meeting, setMeeting] = useState(null)
   const [transcript, setTranscript] = useState(null)
   const [tab, setTab] = useState('summary')
@@ -371,7 +375,7 @@ function MeetingDetail({ meetingId, onChanged, onDeleted }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {!isLive && (
+            {!isLive && canEdit && (
               <button
                 type="button"
                 className="mc-btn mc-btn-secondary"
@@ -382,19 +386,21 @@ function MeetingDetail({ meetingId, onChanged, onDeleted }) {
                 {reprocessing || inFlight ? <Spinner size={13} /> : null} {inFlight ? 'Extracting…' : 'Reprocess'}
               </button>
             )}
-            {isLive && (
+            {isLive && canEdit && (
               <button type="button" className="mc-btn mc-btn-danger" onClick={stop} disabled={stopping}>
                 {stopping ? <Spinner size={13} /> : null} Stop bot
               </button>
             )}
-            <ExportMenu
-              label="Export"
-              options={[
-                { href: exportMeetingUrl(meetingId, 'md'), label: 'Markdown (.md)' },
-                { href: exportMeetingUrl(meetingId, 'json'), label: 'JSON (.json)' },
-              ]}
-            />
-            {!isLive && (
+            {canExport && (
+              <ExportMenu
+                label="Export"
+                options={[
+                  { href: exportMeetingUrl(meetingId, 'md'), label: 'Markdown (.md)' },
+                  { href: exportMeetingUrl(meetingId, 'json'), label: 'JSON (.json)' },
+                ]}
+              />
+            )}
+            {!isLive && canDelete && (
               <button
                 type="button"
                 className="mc-btn mc-btn-secondary"
@@ -501,6 +507,7 @@ export default function Meetings() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
 
+  const canCreate = useCan('create_content')
   const [day, setDay] = useState(() => new Date().toISOString().slice(0, 10))
   const [meetings, setMeetings] = useState(null)
   const [error, setError] = useState(null)
@@ -579,15 +586,19 @@ export default function Meetings() {
               onChange={(event) => setDay(event.target.value)}
               aria-label="Day"
             />
-            <button type="button" className="mc-btn mc-btn-secondary" onClick={() => setUploadOpen(true)}>
-              Upload transcript
-            </button>
-            <button type="button" className="mc-btn mc-btn-secondary" onClick={() => setImportOpen(true)}>
-              Import past bots
-            </button>
-            <button type="button" className="mc-btn mc-btn-primary" onClick={() => setLaunchOpen(true)}>
-              <PlusIcon size={16} /> Launch bot
-            </button>
+            {canCreate && (
+              <>
+                <button type="button" className="mc-btn mc-btn-secondary" onClick={() => setUploadOpen(true)}>
+                  Upload transcript
+                </button>
+                <button type="button" className="mc-btn mc-btn-secondary" onClick={() => setImportOpen(true)}>
+                  Import past bots
+                </button>
+                <button type="button" className="mc-btn mc-btn-primary" onClick={() => setLaunchOpen(true)}>
+                  <PlusIcon size={16} /> Launch bot
+                </button>
+              </>
+            )}
           </>
         }
       />

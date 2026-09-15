@@ -21,6 +21,7 @@ from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from app import permissions as perms
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -306,7 +307,7 @@ def _meeting_options():
 
 
 # ---------------------------------------------------------------- endpoints
-@router.get("/note/{note_id}")
+@router.get("/note/{note_id}", dependencies=[Depends(perms.require("export_workspace"))])
 async def export_note(
     note_id: uuid.UUID,
     format: str = Query("md"),
@@ -333,7 +334,7 @@ async def export_note(
     )
 
 
-@router.get("/meeting/{meeting_id}")
+@router.get("/meeting/{meeting_id}", dependencies=[Depends(perms.require("export_workspace"))])
 async def export_meeting(
     meeting_id: uuid.UUID,
     format: str = Query("md"),
@@ -364,7 +365,7 @@ async def export_meeting(
     )
 
 
-@router.get("/workspace")
+@router.get("/workspace", dependencies=[Depends(perms.require("export_workspace"))])
 async def export_workspace(
     format: str = Query("json"),
     org_id: uuid.UUID = Depends(get_current_org_id),

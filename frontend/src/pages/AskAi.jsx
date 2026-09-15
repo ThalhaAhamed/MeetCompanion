@@ -5,6 +5,7 @@ import { AskAiIcon } from '../components/Icons'
 import { Badge, Card, EmptyState, ErrorMessage, Spinner } from '../components/ui'
 import Markdown from '../components/Markdown'
 import { askNotebook, deleteDocument, listDocuments, listFolders, uploadDocument } from '../api'
+import { useCan } from '../user'
 
 const SUGGESTIONS = [
   'What were the action items from my recent meetings?',
@@ -18,6 +19,8 @@ const SUGGESTIONS = [
  * reads alongside notes and meetings. Chunked and embedded on upload.
  */
 function DocumentsPanel() {
+  const canCreate = useCan('create_content')
+  const canDelete = useCan('delete_content')
   const [documents, setDocuments] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -71,10 +74,12 @@ function DocumentsPanel() {
             Reference material Ask AI can quote: PDF, Word, Markdown, text or CSV, up to 25 MB.
           </p>
         </div>
-        <label className="mc-btn mc-btn-secondary cursor-pointer">
-          {busy ? <Spinner size={13} /> : null} {busy ? 'Indexing…' : 'Upload document'}
-          <input ref={input} type="file" accept=".pdf,.docx,.txt,.md,.csv" className="hidden" onChange={upload} disabled={busy} />
-        </label>
+        {canCreate && (
+          <label className="mc-btn mc-btn-secondary cursor-pointer">
+            {busy ? <Spinner size={13} /> : null} {busy ? 'Indexing…' : 'Upload document'}
+            <input ref={input} type="file" accept=".pdf,.docx,.txt,.md,.csv" className="hidden" onChange={upload} disabled={busy} />
+          </label>
+        )}
       </div>
       {error && <div className="mt-3"><ErrorMessage title="Document problem" detail={error} /></div>}
       {documents && documents.length > 0 && (
@@ -84,7 +89,7 @@ function DocumentsPanel() {
               <Badge tone="neutral">
                 {doc.filename} · {doc.chunks_count} chunk{doc.chunks_count === 1 ? '' : 's'}
               </Badge>
-              {doc.document_id && (
+              {doc.document_id && canDelete && (
                 <button
                   type="button"
                   className="text-xs"

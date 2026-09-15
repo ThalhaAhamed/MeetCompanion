@@ -26,6 +26,7 @@ from app.database.notebook_repository import (
 )
 from app.models.database import Note, User
 from app.models.schemas import utc_iso
+from app import permissions as perms
 from app.providers.database import get_search_backend
 from app.providers.llm import ChatMessage, LLMConfigError, LLMError
 from app.services.embedding import embedding_service
@@ -251,7 +252,7 @@ async def list_folders(
     }
 
 
-@router.post("/folders", status_code=status.HTTP_201_CREATED)
+@router.post("/folders", status_code=status.HTTP_201_CREATED, dependencies=[Depends(perms.require("create_content"))])
 async def create_folder(
     body: FolderCreate,
     org_id: uuid.UUID = Depends(get_current_org_id),
@@ -266,7 +267,7 @@ async def create_folder(
             "parent_id": str(folder.parent_id) if folder.parent_id else None}
 
 
-@router.patch("/folders/{folder_id}")
+@router.patch("/folders/{folder_id}", dependencies=[Depends(perms.require("edit_content"))])
 async def update_folder(
     folder_id: uuid.UUID,
     body: FolderUpdate,
@@ -297,7 +298,7 @@ async def update_folder(
             "parent_id": str(folder.parent_id) if folder.parent_id else None}
 
 
-@router.delete("/folders/{folder_id}")
+@router.delete("/folders/{folder_id}", dependencies=[Depends(perms.require("delete_content"))])
 async def delete_folder(
     folder_id: uuid.UUID,
     cascade: bool = Query(False, description="Also delete the folder's notes and subfolders."),
@@ -367,7 +368,7 @@ async def list_tags(
     return {"tags": await NoteRepository(db).list_tags(org_id)}
 
 
-@router.post("/notes", status_code=status.HTTP_201_CREATED)
+@router.post("/notes", status_code=status.HTTP_201_CREATED, dependencies=[Depends(perms.require("create_content"))])
 async def create_note(
     body: NoteCreate,
     user: User = Depends(get_current_user),
@@ -414,7 +415,7 @@ async def get_note(
     return _serialize_note(note)
 
 
-@router.patch("/notes/{note_id}")
+@router.patch("/notes/{note_id}", dependencies=[Depends(perms.require("edit_content"))])
 async def update_note(
     note_id: uuid.UUID,
     body: NoteUpdate,
@@ -469,7 +470,7 @@ async def update_note(
     return _serialize_note(note)
 
 
-@router.delete("/notes/{note_id}")
+@router.delete("/notes/{note_id}", dependencies=[Depends(perms.require("delete_content"))])
 async def delete_note(
     note_id: uuid.UUID,
     org_id: uuid.UUID = Depends(get_current_org_id),
@@ -508,7 +509,7 @@ async def delete_note(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/sync-meetings")
+@router.post("/sync-meetings", dependencies=[Depends(perms.require("create_content"))])
 async def sync_meeting_notes(
     org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)
 ) -> Dict[str, int]:

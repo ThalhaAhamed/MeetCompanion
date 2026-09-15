@@ -7,6 +7,7 @@ from datetime import date, datetime, timezone
 import httpx
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from app import permissions as perms
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
@@ -43,7 +44,7 @@ def _redact_secrets(value):
     return value
 
 
-@router.post("", response_model=MeetingResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=MeetingResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(perms.require("create_content"))])
 async def create_meeting(
     meeting_in: MeetingCreate,
     deploy_bot: bool = Query(default=True, description="Whether to immediately deploy the MeetStream bot"),
@@ -270,7 +271,7 @@ class ImportBotRequest(BaseModel):
     meeting_url: Optional[str] = None
 
 
-@router.post("/import", response_model=MeetingResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/import", response_model=MeetingResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(perms.require("create_content"))])
 async def import_bot(
     body: ImportBotRequest,
     user: User = Depends(get_current_user),
@@ -394,7 +395,7 @@ def parse_transcript_text(text: str) -> List[dict]:
     return segments
 
 
-@router.post("/upload", response_model=MeetingResponse, status_code=status.HTTP_202_ACCEPTED)
+@router.post("/upload", response_model=MeetingResponse, status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(perms.require("create_content"))])
 async def upload_transcript(
     body: TranscriptUploadRequest,
     user: User = Depends(get_current_user),
@@ -438,7 +439,7 @@ async def upload_transcript(
     return meeting
 
 
-@router.post("/{meeting_id}/reprocess", response_model=MeetingResponse, status_code=status.HTTP_202_ACCEPTED)
+@router.post("/{meeting_id}/reprocess", response_model=MeetingResponse, status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(perms.require("edit_content"))])
 async def reprocess_meeting(
     meeting_id: uuid.UUID,
     org_id: uuid.UUID = Depends(get_current_org_id),
@@ -475,7 +476,7 @@ async def reprocess_meeting(
     return meeting
 
 
-@router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(perms.require("delete_content"))])
 async def delete_meeting(
     meeting_id: uuid.UUID,
     org_id: uuid.UUID = Depends(get_current_org_id),
@@ -575,7 +576,7 @@ async def get_meeting_bot(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
 
 
-@router.post("/{meeting_id}/stop")
+@router.post("/{meeting_id}/stop", dependencies=[Depends(perms.require("edit_content"))])
 async def stop_meeting_bot(
     meeting_id: uuid.UUID,
     user: User = Depends(get_current_user),

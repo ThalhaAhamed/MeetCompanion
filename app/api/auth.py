@@ -62,7 +62,7 @@ async def login(body: LoginRequest, request: Request, response: Response, db: As
 
     token = sign_session(str(user.id), int(time.time()) + SESSION_TTL_SECONDS)
     response.set_cookie(key=COOKIE_NAME, value=token, max_age=SESSION_TTL_SECONDS, httponly=True, **cookie_flags(request))
-    return {"authenticated": True, "member": {"id": str(user.id), "name": user.name, "email": user.email, "role": user.role}}
+    return {"authenticated": True, "member": await member_payload(user, db)}
 
 
 @router.post("/logout")
@@ -98,4 +98,22 @@ async def check(request: Request, response: Response, db: AsyncSession = Depends
     user = result.scalar_one_or_none()
     if not user:
         return {"authenticated": False}
-    return {"authenticated": True, "member": {"id": str(user.id), "name": user.name, "email": user.email, "role": user.role}}
+    return {"authenticated": True, "member": await member_payload(user, db)}
+
+
+async def member_payload(user: User, db: AsyncSession) -> dict:
+    """
+    The signed-in member as the UI needs it, including what they may do in
+    their workspace - so buttons a member cannot use are not shown. The
+    server enforces every one of these again on the endpoint itself.
+    """
+    from app import permissions as perms
+
+    org = await perms.load_org(user.organization_id, db)
+    return {
+        "id": str(user.id),
+        "name": user.name,
+        "email": user.email,
+        "role": user.role,
+        "permissions": perms.effective_permissions(user, org),
+    }

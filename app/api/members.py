@@ -21,6 +21,7 @@ from app.database.connection import get_db
 from app.models.database import Membership, Organization, User
 from app.middleware.auth_gate import COOKIE_NAME, decode_session
 from app.api.deps import OWNER, get_current_org_id, get_current_user, is_owner, require_owner
+from app import permissions as perms
 from app.security import hash_password, verify_password
 
 router = APIRouter(prefix="/api/members", tags=["members"])
@@ -97,13 +98,45 @@ class UpdateSelfRequest(BaseModel):
 
 
 @router.get("/workspace")
-async def get_workspace(org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
-    """This workspace's name and join code, so a member can invite others."""
-    result = await db.execute(select(Organization).where(Organization.id == org_id))
-    org = result.scalar_one_or_none()
+async def get_workspace(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """
+    This workspace's name, and its join code for anyone allowed to invite.
+    Everyone also gets the member permissions in effect, so the UI can show
+    what applies; only an owner may change them (see PUT /workspace/permissions).
+    """
+    org = await perms.load_org(user.organization_id, db)
     if not org:
         raise HTTPException(status_code=404, detail="Workspace not found.")
-    return {"name": org.name, "join_code": org.join_code}
+    mine = perms.effective_permissions(user, org)
+    return {
+        "name": org.name,
+        "join_code": org.join_code if mine["invite_members"] else None,
+        "member_permissions": perms.member_permissions(org),
+        "permissions": perms.describe(),
+    }
+
+
+class PermissionsUpdate(BaseModel):
+    member_permissions: dict[str, bool]
+
+
+@router.put("/workspace/permissions")
+async def set_workspace_permissions(
+    body: PermissionsUpdate, owner: User = Depends(require_owner), db: AsyncSession = Depends(get_db)
+):
+    """What members of this workspace may do. Owner-only; owners are never restricted."""
+    unknown = sorted(set(body.member_permissions) - perms.PERMISSION_KEYS)
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unknown permission: {', '.join(unknown)}")
+    org = await perms.load_org(owner.organization_id, db)
+    if not org:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+    current = perms.member_permissions(org)
+    current.update({k: bool(v) for k, v in body.member_permissions.items()})
+    # Reassign rather than mutate: the JSON column only notices a new value.
+    org.settings = {**(org.settings or {}), "permissions": current}
+    await db.commit()
+    return {"member_permissions": perms.member_permissions(org)}
 
 
 @router.get("")
@@ -129,9 +162,15 @@ async def add_member(body: CreateMemberRequest, request: Request, db: AsyncSessi
     role = "member"
     current_user_id = await _current_user_id(request, db)
     if current_user_id:
-        # Already signed in - adding a teammate straight into your own workspace.
+        # Already signed in - adding a teammate straight into your own workspace,
+        # which is inviting, so it needs the same permission the join code does.
         current = (await db.execute(select(User).where(User.id == current_user_id))).scalar_one()
         org_id = current.organization_id
+        if not perms.effective_permissions(current, await perms.load_org(org_id, db))["invite_members"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Members of this workspace cannot invite people. A workspace owner can change that from the Members page.",
+            )
     else:
         # Self-signup - must explicitly create a new workspace or join one by code.
         if bool(body.workspace_name) == bool(body.join_code):

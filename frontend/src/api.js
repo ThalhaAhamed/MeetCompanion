@@ -96,6 +96,14 @@ export function getWorkspace() {
   return req('/members/workspace')
 }
 
+export function setWorkspacePermissions(member_permissions) {
+  return req('/members/workspace/permissions', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ member_permissions }),
+  })
+}
+
 export function removeMember(id) {
   return req(`/members/${id}`, { method: 'DELETE' })
 }

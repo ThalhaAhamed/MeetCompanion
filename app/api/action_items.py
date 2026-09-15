@@ -9,6 +9,7 @@ import uuid
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from app import permissions as perms
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.connection import get_db
 from app.database.repositories import ActionItemRepository, MeetingRepository
@@ -73,7 +74,7 @@ async def list_action_items(
     }
 
 
-@router.patch("/{action_id}", response_model=ActionItemResponse)
+@router.patch("/{action_id}", response_model=ActionItemResponse, dependencies=[Depends(perms.require("edit_content"))])
 async def update_action_item(
     action_id: uuid.UUID,
     update_in: ActionItemUpdate,

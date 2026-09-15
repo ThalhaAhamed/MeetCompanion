@@ -23,6 +23,7 @@ import {
   updateAgent,
   updateAgentTemplate,
 } from '../api'
+import { useCan, useIsOwner } from '../user'
 
 const MODES = ['realtime', 'pipeline']
 const MODALITIES = ['text', 'audio', 'chat']
@@ -241,9 +242,12 @@ function ImportAgentsModal({ open, onClose, onImported }) {
   )
 }
 
-function AgentForm({ form, update, onSubmit, saving, saved, error, submitLabel, promptHint }) {
+function AgentForm({ form, update, onSubmit, saving, saved, error, submitLabel, promptHint, readOnly = false }) {
   return (
+    // readOnly: a member who may look at the agent but not change it - the
+    // fields stay visible, the inputs are disabled and there is no Save.
     <form onSubmit={onSubmit}>
+      <fieldset disabled={readOnly} className="contents">
       <Field
         label="System prompt"
         hint={promptHint}
@@ -331,17 +335,26 @@ function AgentForm({ form, update, onSubmit, saving, saved, error, submitLabel, 
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="submit" className="mc-btn mc-btn-primary" disabled={saving}>
-          {saving ? <Spinner size={14} /> : null} {submitLabel}
-        </button>
-        {saved && <span className="text-sm" style={{ color: 'var(--color-brand-600)' }}>Saved.</span>}
-      </div>
+      </fieldset>
+      {readOnly ? (
+        <p className="text-xs" style={{ color: 'var(--text-faint)' }}>
+          You can view this but not change it. A workspace owner can grant that from the Members page.
+        </p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="submit" className="mc-btn mc-btn-primary" disabled={saving}>
+            {saving ? <Spinner size={14} /> : null} {submitLabel}
+          </button>
+          {saved && <span className="text-sm" style={{ color: 'var(--color-brand-600)' }}>Saved.</span>}
+        </div>
+      )}
     </form>
   )
 }
 
 export default function Agent() {
+  const canManage = useCan('manage_agents')
+  const isOwner = useIsOwner()
   const [agents, setAgents] = useState(null)
   const [agentsError, setAgentsError] = useState(null)
   const [config, setConfig] = useState(null)
@@ -508,14 +521,16 @@ export default function Agent() {
         title="Agent"
         description="The assistant MeetStream deploys into your calls — what it knows, how it sounds, and when it speaks."
         actions={
-          <>
-            <button type="button" className="mc-btn mc-btn-secondary" onClick={() => setImportOpen(true)}>
-              Import from MeetStream
-            </button>
-            <button type="button" className="mc-btn mc-btn-primary" onClick={() => setNewOpen(true)}>
-              <PlusIcon size={16} /> New agent
-            </button>
-          </>
+          canManage && (
+            <>
+              <button type="button" className="mc-btn mc-btn-secondary" onClick={() => setImportOpen(true)}>
+                Import from MeetStream
+              </button>
+              <button type="button" className="mc-btn mc-btn-primary" onClick={() => setNewOpen(true)}>
+                <PlusIcon size={16} /> New agent
+              </button>
+            </>
+          )
         }
       />
 
@@ -547,7 +562,7 @@ export default function Agent() {
                 </div>
               </div>
             </div>
-            <span className="text-xs" style={{ color: 'var(--text-faint)' }}>Edit</span>
+            <span className="text-xs" style={{ color: 'var(--text-faint)' }}>{isOwner ? 'Edit' : 'View'}</span>
           </button>
 
           {agentsError && (
@@ -564,9 +579,11 @@ export default function Agent() {
               title="No agents yet"
               description="Create one, or import an agent that already exists on your MeetStream account."
               action={
-                <button type="button" className="mc-btn mc-btn-secondary" onClick={() => setNewOpen(true)}>
-                  Create an agent
-                </button>
+                canManage && (
+                  <button type="button" className="mc-btn mc-btn-secondary" onClick={() => setNewOpen(true)}>
+                    Create an agent
+                  </button>
+                )
               }
             />
           ) : (
@@ -598,7 +615,7 @@ export default function Agent() {
                   </button>
                   {agent.IsActive ? (
                     <Badge tone="brand"><CheckIcon size={12} /> Active</Badge>
-                  ) : (
+                  ) : canManage && (
                     <button
                       type="button"
                       className="mc-btn mc-btn-secondary"
@@ -635,6 +652,7 @@ export default function Agent() {
                 error={configError}
                 submitLabel="Save template"
                 promptHint="The starting system prompt for new agents."
+                readOnly={!isOwner}
               />
             </Card>
           ) : configError && !config ? (
@@ -657,7 +675,7 @@ export default function Agent() {
                     {config.AgentConfigID}
                   </span>
                 )}
-                {viewingId && (
+                {viewingId && canManage && (
                   <button
                     type="button"
                     className="mc-btn mc-btn-secondary ml-auto"
@@ -678,6 +696,7 @@ export default function Agent() {
                 error={configError}
                 submitLabel="Save agent"
                 promptHint="Controls when the agent speaks and how it answers."
+                readOnly={!canManage}
               />
             </Card>
           )}

@@ -15,3 +15,15 @@ export function useUser() {
 export function useIsOwner() {
   return useUser()?.role === 'owner'
 }
+
+/**
+ * Whether the signed-in member may do this in their workspace (see
+ * app/permissions.py for the keys). Owners always may. Presentation only -
+ * the server decides for real.
+ */
+export function useCan(permission) {
+  const user = useUser()
+  if (!user) return false
+  if (user.role === 'owner') return true
+  return Boolean(user.permissions?.[permission])
+}

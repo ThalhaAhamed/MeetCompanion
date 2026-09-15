@@ -27,6 +27,7 @@ import {
   updateNote,
   exportNoteUrl,
 } from '../api'
+import { useCan } from '../user'
 
 const SORTS = [
   { value: 'updated', label: 'Last updated' },
@@ -70,17 +71,19 @@ function FolderRow({ node, depth, selectedId, onSelect, onContextMenu }) {
             {node.note_count}
           </span>
         )}
-        <button
-          type="button"
-          className="opacity-0 transition-opacity group-hover:opacity-100"
-          onClick={(event) => {
-            event.stopPropagation()
-            onContextMenu(node)
-          }}
-          aria-label={`Manage folder ${node.name}`}
-        >
-          <TrashIcon size={14} />
-        </button>
+        {onContextMenu && (
+          <button
+            type="button"
+            className="opacity-0 transition-opacity group-hover:opacity-100"
+            onClick={(event) => {
+              event.stopPropagation()
+              onContextMenu(node)
+            }}
+            aria-label={`Manage folder ${node.name}`}
+          >
+            <TrashIcon size={14} />
+          </button>
+        )}
       </div>
 
       {open &&
@@ -166,6 +169,8 @@ function FolderNav({ scope, setScope, counts, tree, onDeleteFolder, className = 
 const VIEW_KEY = 'meet-companion:note-view'
 
 function NoteEditor({ note, onChange, onDelete, onBack, saving }) {
+  const canDelete = useCan('delete_content')
+  const canExport = useCan('export_workspace')
   const [draft, setDraft] = useState(note)
   const timer = useRef(null)
   // Preview by default for notes that already have content (the generated
@@ -292,23 +297,27 @@ function NoteEditor({ note, onChange, onDelete, onBack, saving }) {
         >
           <StarIcon size={17} filled={draft.is_favorite} />
         </button>
-        <ExportMenu
-          compact
-          label="Export note"
-          options={[
-            { href: exportNoteUrl(draft.id, 'md'), label: 'Markdown (.md)' },
-            { href: exportNoteUrl(draft.id, 'json'), label: 'JSON (.json)' },
-          ]}
-        />
-        <button
-          type="button"
-          className="mc-btn mc-btn-ghost px-2"
-          onClick={onDelete}
-          aria-label="Delete note"
-          title="Delete note"
-        >
-          <TrashIcon size={17} />
-        </button>
+        {canExport && (
+          <ExportMenu
+            compact
+            label="Export note"
+            options={[
+              { href: exportNoteUrl(draft.id, 'md'), label: 'Markdown (.md)' },
+              { href: exportNoteUrl(draft.id, 'json'), label: 'JSON (.json)' },
+            ]}
+          />
+        )}
+        {canDelete && (
+          <button
+            type="button"
+            className="mc-btn mc-btn-ghost px-2"
+            onClick={onDelete}
+            aria-label="Delete note"
+            title="Delete note"
+          >
+            <TrashIcon size={17} />
+          </button>
+        )}
       </div>
 
       <div
@@ -372,6 +381,8 @@ function NoteEditor({ note, onChange, onDelete, onBack, saving }) {
 }
 
 export default function Notebook() {
+  const canCreate = useCan('create_content')
+  const canDelete = useCan('delete_content')
   const { noteId } = useParams()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -554,15 +565,17 @@ export default function Notebook() {
       >
         <div className="flex items-center justify-between px-4 py-4">
           <h2 className="text-sm font-semibold">Notebook</h2>
-          <button
-            type="button"
-            className="mc-btn mc-btn-ghost px-2"
-            onClick={() => setNewFolderOpen(true)}
-            title="New folder"
-            aria-label="New folder"
-          >
-            <PlusIcon size={16} />
-          </button>
+          {canCreate && (
+            <button
+              type="button"
+              className="mc-btn mc-btn-ghost px-2"
+              onClick={() => setNewFolderOpen(true)}
+              title="New folder"
+              aria-label="New folder"
+            >
+              <PlusIcon size={16} />
+            </button>
+          )}
         </div>
 
         <FolderNav
@@ -570,7 +583,7 @@ export default function Notebook() {
           setScope={setScope}
           counts={counts}
           tree={tree}
-          onDeleteFolder={setFolderToDelete}
+          onDeleteFolder={canDelete ? setFolderToDelete : undefined}
           className="flex-1 overflow-y-auto"
         />
       </div>
@@ -595,9 +608,11 @@ export default function Notebook() {
                 {foldersOpen ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
               </span>
             </button>
-            <button type="button" className="mc-btn mc-btn-primary px-2 py-1" onClick={handleCreateNote}>
-              <PlusIcon size={15} /> New
-            </button>
+            {canCreate && (
+              <button type="button" className="mc-btn mc-btn-primary px-2 py-1" onClick={handleCreateNote}>
+                <PlusIcon size={15} /> New
+              </button>
+            )}
           </div>
 
           {/* Below lg the sidebar is gone; the same navigation folds out here. */}
@@ -611,15 +626,17 @@ export default function Notebook() {
                 <span className="text-[0.65rem] font-semibold uppercase tracking-[0.14em]" style={{ color: 'var(--text-faint)' }}>
                   Browse
                 </span>
-                <button
-                  type="button"
-                  className="mc-btn mc-btn-ghost px-1.5 py-0.5"
-                  onClick={() => setNewFolderOpen(true)}
-                  title="New folder"
-                  aria-label="New folder"
-                >
-                  <PlusIcon size={14} />
-                </button>
+                {canCreate && (
+                  <button
+                    type="button"
+                    className="mc-btn mc-btn-ghost px-1.5 py-0.5"
+                    onClick={() => setNewFolderOpen(true)}
+                    title="New folder"
+                    aria-label="New folder"
+                  >
+                    <PlusIcon size={14} />
+                  </button>
+                )}
               </div>
               <FolderNav
                 scope={scope}
@@ -629,7 +646,7 @@ export default function Notebook() {
                 }}
                 counts={counts}
                 tree={tree}
-                onDeleteFolder={setFolderToDelete}
+                onDeleteFolder={canDelete ? setFolderToDelete : undefined}
                 className="max-h-64 overflow-y-auto"
               />
             </div>
@@ -701,7 +718,7 @@ export default function Notebook() {
                   : 'Every processed meeting is filed here automatically. Create a note, or bring in the meetings you already have.'
               }
               action={
-                !query && !tagFilter ? (
+                !query && !tagFilter && canCreate ? (
                   <div className="flex flex-wrap justify-center gap-2">
                     <button type="button" className="mc-btn mc-btn-primary" onClick={handleSyncMeetings} disabled={syncing}>
                       {syncing ? <Spinner size={14} /> : null} Generate from meetings

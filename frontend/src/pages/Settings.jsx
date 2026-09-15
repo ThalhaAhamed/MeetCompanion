@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Page, PageHeader } from '../components/AppShell'
 import { useTheme } from '../components/AppShell'
 import { Badge, Card, ConnectionBadge, ErrorMessage, Field, Loading, Spinner } from '../components/ui'
-import { useIsOwner } from '../user'
+import { useCan, useIsOwner } from '../user'
 import {
   clearMeetstreamApiKey,
   completeSetup,
@@ -40,6 +40,7 @@ function EnvManagedNotice() {
 
 export default function Settings() {
   const isOwner = useIsOwner()
+  const canExport = useCan('export_workspace')
   const [section, setSection] = useState('ai')
   const [status, setStatus] = useState(null)
   const [catalog, setCatalog] = useState(null)
@@ -507,6 +508,7 @@ export default function Settings() {
                 </button>
               </Card>
 
+              {canExport && (
               <Card>
                 <h2 className="mb-1 text-base font-semibold">Export your data</h2>
                 <p className="mb-4 text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -522,6 +524,7 @@ export default function Settings() {
                   </a>
                 </div>
               </Card>
+              )}
 
               {!status.read_only && (
               <Card>
