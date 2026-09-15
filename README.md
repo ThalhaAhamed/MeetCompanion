@@ -144,6 +144,10 @@ Setup is five short steps:
 4. **AI model** — Ollama locally, or any supported provider with your key.
 5. **Review** — one click, and you are in.
 
+<div align="center">
+<img src="docs/media/onboarding.gif" alt="First-run setup: naming a workspace, creating the owner account, choosing local SQLite and a local AI model, then landing on the dashboard" width="900" />
+</div>
+
 The embedding model (~90 MB) is downloaded once on first use. All data lives
 under your user data directory:
 
@@ -161,8 +165,12 @@ under your user data directory:
 
 ### 📓 Meetings become organised notes
 
+Paste a transcript (or let a bot bring one back), and a few seconds later it is
+a meeting with a summary, memories and owner-attributed action items — and a
+note in your notebook.
+
 <div align="center">
-<img src="docs/screenshots/notebook.png" alt="A meeting filed as a note, with summary, action items and decisions" width="900" />
+<img src="docs/media/meeting-to-note.gif" alt="Uploading a transcript, the meeting being processed, its summary, action items and memories, then the same meeting as a note in the notebook" width="900" />
 </div>
 
 Every processed meeting is written as a Markdown note — summary, action items
@@ -170,6 +178,16 @@ as checkboxes, then decisions, commitments, requirements, concerns and open
 questions — and filed under `Meetings / 2026 / 09 September`, tagged with its
 platform, customer and project. Edit it freely; regeneration never overwrites
 a note you have touched.
+
+### 💬 Ask AI
+
+Ask a question in plain language; the answer is grounded in your notes,
+meetings and uploaded documents, and every source is one click away. It never
+invents — if the notes do not say, it says so.
+
+<div align="center">
+<img src="docs/media/ask-ai.gif" alt="Typing a question into Ask AI and receiving an answer with decisions, an owner table and source links to the meetings it came from" width="900" />
+</div>
 
 ### 🕸️ Knowledge graph
 
@@ -182,21 +200,15 @@ meeting, each person who spoke, each memory extracted and each action item is
 a node; the edges are who said what in which meeting.
 
 <div align="center">
-<img src="docs/screenshots/graph-selected.png" alt="A meeting selected in the graph: its summary, tags and the 28 people, memories and action items it connects to" width="900" />
+<img src="docs/media/knowledge-graph.gif" alt="Clicking a meeting node fades the rest of the graph and shows its summary and 24 connections; then opening graph settings and hiding memory and action-item nodes by type" width="900" />
 </div>
 
 Click any node and the rest of the graph fades back: the panel shows what it
-is, what was said, and everything it connects to — here a weekly sync with the
-five people who were in it, the decisions made, and the tasks that came out
-of it, each one a click away. *Find a node* searches by name.
-
-<div align="center">
-<img src="docs/screenshots/graph-settings.png" alt="Graph settings: filter by node type, show or hide unconnected nodes, node size, link thickness and force controls" width="900" />
-</div>
-
-Filter by type, hide orphans, tune node size, link thickness, link distance and
-the forces themselves. The layout is a small force simulation written for this
-project — no graph library — and your settings persist between visits.
+is, what was said, and everything it connects to, each one a click away.
+*Find a node* searches by name. Filter by type, hide orphans, tune node size,
+link thickness, link distance and the forces themselves. The layout is a small
+force simulation written for this project — no graph library — and your
+settings persist between visits.
 
 ### 🗄️ Pick any database
 
@@ -366,7 +378,12 @@ second login to keep track of.
 
 Your first workspace is created for you at sign-up. Nothing needs converting to
 share it: hand someone the join code from **Members** and it becomes a shared
-workspace.
+workspace. Owners decide what members may do there — add, edit, delete,
+manage agents, export, invite — from the same page.
+
+<div align="center">
+<img src="docs/media/workspaces.gif" alt="On the Members page an owner switches on Delete content and Invite people for members, then opens the workspace picker, creates a second workspace and switches back" width="900" />
+</div>
 
 What is shared and what is not:
 
