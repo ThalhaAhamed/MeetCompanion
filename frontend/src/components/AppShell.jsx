@@ -139,7 +139,9 @@ function WorkspaceSwitcher() {
     }
   }, [open])
 
-  if (!workspaces) return null
+  // An empty list (an account with no membership row) must not take the
+  // whole shell down with it - the rest of the app still works.
+  if (!workspaces || workspaces.length === 0) return null
   const active = workspaces.find((w) => w.is_active) || workspaces[0]
 
   async function choose(workspace) {

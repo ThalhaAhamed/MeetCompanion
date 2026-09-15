@@ -111,3 +111,45 @@ async def test_models_have_not_drifted_from_the_baseline():
         await engine.dispose()
     # On SQLite the diff should be empty (pgvector HNSW indexes never appear here).
     assert diff == [], f"models drifted from baseline; add a migration: {diff}"
+
+
+@pytest.mark.asyncio
+async def test_prealembic_accounts_get_a_membership_on_upgrade():
+    """
+    Adoption is create_all + stamp head, so migration 0002's membership
+    backfill never runs for a v0.2.0 database. Its accounts then had no
+    workspace at all - an empty list the UI could not render. Bootstrap
+    must mirror users.organization_id/role into memberships itself.
+    """
+    from datetime import datetime, timezone
+
+    from app.database.bootstrap import bootstrap
+    from app.models.database import Membership
+
+    engine = create_async_engine(_fresh_url())
+    try:
+        # A v0.2.0 database: every table except memberships, no alembic_version,
+        # one workspace with one owner who predates memberships entirely.
+        old_tables = [t for name, t in Base.metadata.tables.items() if name != "memberships"]
+        async with engine.begin() as conn:
+            await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=old_tables))
+            org_id, user_id = uuid.uuid4(), uuid.uuid4()
+            now = datetime.now(timezone.utc).isoformat()
+            await conn.execute(text(
+                "INSERT INTO organizations (id, name, slug, settings, mcp_token, created_at, updated_at) "
+                "VALUES (:id, 'Old', 'old', '{}', 'tok', :now, :now)"
+            ), {"id": org_id.hex, "now": now})
+            await conn.execute(text(
+                "INSERT INTO users (id, organization_id, email, name, role, is_active, settings, password_hash, created_at, updated_at) "
+                "VALUES (:id, :org, 'old@example.com', 'Old', 'owner', 1, '{}', 'x', :now, :now)"
+            ), {"id": user_id.hex, "org": org_id.hex, "now": now})
+
+        await bootstrap(engine)
+
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+        from sqlalchemy import select
+        async with async_sessionmaker(bind=engine, class_=AsyncSession)() as session:
+            rows = (await session.execute(select(Membership))).scalars().all()
+        assert [(m.user_id, m.organization_id, m.role) for m in rows] == [(user_id, org_id, "owner")]
+    finally:
+        await engine.dispose()

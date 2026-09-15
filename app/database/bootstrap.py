@@ -50,6 +50,7 @@ async def bootstrap(engine: AsyncEngine) -> None:
         await ensure_schema(engine)
         await ensure_default_workspace(engine)
         await ensure_workspace_owners(engine)
+        await ensure_memberships(engine)
         await prune_operational_tables(engine)
         await fail_interrupted_processing(engine)
 
@@ -403,6 +404,37 @@ async def ensure_workspace_owners(engine: AsyncEngine) -> None:
             changed = True
         if changed:
             await session.commit()
+
+
+async def ensure_memberships(engine: AsyncEngine) -> None:
+    """
+    Every account belongs to at least the workspace on its user row.
+
+    Migration 0002 backfills this, but a database whose memberships table
+    was created by create_all and then stamped never ran that backfill -
+    and an account with no membership at all gets an empty workspace list,
+    which the UI could not render. Mirror users.organization_id/role for
+    anyone still missing a row.
+    """
+    from app.models.database import Membership, User
+
+    factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        with_rows = {row[0] for row in (await session.execute(select(Membership.user_id).distinct())).all()}
+        orphans = (
+            await session.execute(
+                select(User).where(User.is_active.is_(True), User.organization_id.is_not(None))
+            )
+        ).scalars().all()
+        added = 0
+        for user in orphans:
+            if user.id in with_rows:
+                continue
+            session.add(Membership(user_id=user.id, organization_id=user.organization_id, role=user.role or "member"))
+            added += 1
+        if added:
+            await session.commit()
+            logger.info("Backfilled %d missing workspace membership(s)", added)
 
 
 #: Webhook deliveries and processing-job records are diagnostics, not data.
