@@ -210,6 +210,40 @@ async def list_my_workspaces(
     }
 
 
+class CreateWorkspaceRequest(BaseModel):
+    name: str
+    activate: bool = True
+
+
+@router.post("/workspaces")
+async def create_workspace_for_me(
+    body: CreateWorkspaceRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Start another workspace under the account already signed in.
+
+    The counterpart to joining by code: without this you could only ever end up
+    in a second workspace by being invited to one, which makes switching
+    useless for the person who wants to keep, say, personal notes apart from a
+    client's. Creating one makes you its owner, exactly as at sign-up.
+    """
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="A workspace name is required.")
+    if len(name) > 255:
+        raise HTTPException(status_code=400, detail="That workspace name is too long.")
+
+    org = await _create_workspace(db, name)
+    db.add(Membership(user_id=user.id, organization_id=org.id, role=OWNER))
+    if body.activate:
+        user.organization_id = org.id
+        user.role = OWNER
+    await db.commit()
+    return {"id": str(org.id), "name": org.name, "role": OWNER, "activated": body.activate}
+
+
 class JoinWorkspaceRequest(BaseModel):
     join_code: str
     activate: bool = True

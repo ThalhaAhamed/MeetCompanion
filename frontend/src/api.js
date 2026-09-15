@@ -453,3 +453,11 @@ export function joinWorkspace(joinCode) {
     body: JSON.stringify({ join_code: joinCode }),
   })
 }
+
+export function createWorkspace(name) {
+  return req('/members/workspaces', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+}

@@ -295,10 +295,14 @@ notes, memory, action items - so switching changes what you see. Your role
 travels with the workspace too: you can own one and be a plain member of
 another.
 
-To put someone in a workspace, share its join code from **Members**. To add
-your existing account to another workspace, open the workspace picker and
-choose *Join a workspace…* - joining by code always makes you a member, never
-an owner.
+From the workspace picker you can **create** another workspace (you own it) or
+**join** one with a code (you are a member - ownership stays with whoever made
+it). Both attach to the account you are already signed in as, so there is no
+second login to keep track of.
+
+Your first workspace is created for you at sign-up. Nothing needs converting to
+share it: hand someone the join code from **Members** and it becomes a shared
+workspace.
 
 What is shared and what is not:
 

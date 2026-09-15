@@ -167,3 +167,48 @@ async def test_bad_and_repeated_join_codes(authed_client):
 async def test_join_requires_a_session(client):
     r = await client.post("/api/members/workspaces/join", json={"join_code": "x"})
     assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_create_a_second_workspace_from_an_existing_account(authed_client):
+    """The counterpart to joining: you can start one yourself, as its owner."""
+    first = (await _workspaces(authed_client))[0]
+    await authed_client.post("/api/notebook/notes", json={"title": "Belongs to the first"})
+
+    r = await authed_client.post("/api/members/workspaces", json={"name": "Client work"})
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "Client work" and r.json()["role"] == "owner"
+
+    names = {w["name"] for w in await _workspaces(authed_client)}
+    assert names == {first["name"], "Client work"}
+
+    # It is active, owned, and empty - the first workspace's notes stayed put.
+    me = (await authed_client.get("/api/auth/check")).json()["member"]
+    assert me["role"] == "owner"
+    titles = [n["title"] for n in (await authed_client.get("/api/notebook/notes")).json()["notes"]]
+    assert titles == []
+
+    await authed_client.post(f"/api/members/workspaces/{first['id']}/activate")
+    titles = [n["title"] for n in (await authed_client.get("/api/notebook/notes")).json()["notes"]]
+    assert "Belongs to the first" in titles
+
+
+@pytest.mark.asyncio
+async def test_created_workspaces_can_share_a_name(authed_client):
+    """Two workspaces called the same thing must not collide on their slug."""
+    a = await authed_client.post("/api/members/workspaces", json={"name": "Acme"})
+    b = await authed_client.post("/api/members/workspaces", json={"name": "Acme"})
+    assert a.status_code == 200 and b.status_code == 200
+    assert a.json()["id"] != b.json()["id"]
+    assert len([w for w in await _workspaces(authed_client) if w["name"] == "Acme"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_create_workspace_rejects_an_empty_name(authed_client):
+    assert (await authed_client.post("/api/members/workspaces", json={"name": "  "})).status_code == 400
+    assert (await authed_client.post("/api/members/workspaces", json={"name": "x" * 300})).status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_create_workspace_needs_a_session(client):
+    assert (await client.post("/api/members/workspaces", json={"name": "Nope"})).status_code == 401
