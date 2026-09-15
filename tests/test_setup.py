@@ -318,3 +318,26 @@ def test_friendly_db_error_recognises_windows_connection_refused():
 
     win = OSError("[WinError 1225] The remote computer refused the network connection")
     assert _friendly_db_error(win, "postgresql+asyncpg://u:p@127.0.0.1:1/db").startswith("Connection refused")
+
+
+@pytest.mark.asyncio
+async def test_saving_a_value_the_environment_owns_is_refused_unless_identical(authed_client, monkeypatch):
+    """
+    QA: with LLM_PROVIDER set in the container, saving a different provider
+    answered 200 and changed nothing - the UI knew, the API pretended.
+    Re-submitting the same value (the wizard does) must still be fine.
+    """
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    r = await authed_client.post("/api/setup/complete", json={"llm": {"provider": "groq", "model": "x", "api_key": "k"}})
+    assert r.status_code == 409, r.text
+    assert "llm.provider" in r.json()["detail"] and "environment variable" in r.json()["detail"]
+    r = await authed_client.post("/api/setup/complete", json={"llm": {"provider": "ollama", "model": "llama3.1"}})
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.asyncio
+async def test_unknown_api_path_is_a_json_404_not_the_app_shell(authed_client):
+    """QA: an authenticated GET /api/nope was served index.html with 200 by the SPA catch-all."""
+    r = await authed_client.get("/api/definitely-not-a-route")
+    assert r.status_code == 404
+    assert "text/html" not in r.headers.get("content-type", "")

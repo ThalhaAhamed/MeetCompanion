@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
@@ -144,7 +144,11 @@ else:
     @app.get("/{path:path}", include_in_schema=False)
     async def spa(path: str):
         """Files from the build when they exist; index.html for every app route."""
-        if path and not path.startswith("api/"):
+        if path.startswith("api/"):
+            # An API path no router claimed is a 404, not the app shell -
+            # a client reading JSON must never be handed HTML with a 200.
+            return JSONResponse(status_code=404, content={"detail": "Not found"})
+        if path:
             candidate = (STATIC_DIR / path).resolve()
             if candidate.is_file() and STATIC_DIR in candidate.parents:
                 return FileResponse(candidate)

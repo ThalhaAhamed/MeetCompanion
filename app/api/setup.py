@@ -350,10 +350,49 @@ async def test_database(payload: DatabaseConfigPayload) -> Dict[str, Any]:
             await engine.dispose()
 
 
+def _environment_conflicts(payload: CompleteSetupPayload) -> list[str]:
+    """Fields this request would change that a process environment variable owns."""
+    from app.runtime_config import env_override
+
+    wanted = []
+    if payload.llm is not None:
+        wanted += [("llm.provider", "LLM_PROVIDER", payload.llm.provider), ("llm.model", "LLM_MODEL", payload.llm.model),
+                   ("llm.api_key", "LLM_API_KEY", payload.llm.api_key), ("llm.base_url", "LLM_BASE_URL", payload.llm.base_url)]
+    if payload.meetstream is not None:
+        wanted += [("meetstream.api_key", "MEETSTREAM_API_KEY", payload.meetstream.api_key),
+                   ("meetstream.webhook_secret", "MEETSTREAM_WEBHOOK_SECRET", payload.meetstream.webhook_secret)]
+    conflicts = []
+    for field, env_name, value in wanted:
+        if value is None:
+            continue
+        current = env_override(env_name)
+        if current is not None and str(value) != str(current):
+            conflicts.append(field)
+    if payload.database is not None and env_override("DATABASE_URL") is not None:
+        requested = payload.database.url or (payload.database.values or {}).get("url")
+        if requested and requested != env_override("DATABASE_URL"):
+            conflicts.append("database.url")
+        elif not requested and (payload.database.provider or "sqlite") != provider_for_url(env_override("DATABASE_URL")):
+            conflicts.append("database.url")
+    return conflicts
+
+
 @router.post("/complete", dependencies=[Depends(require_setup_access)])
 async def complete_setup(payload: CompleteSetupPayload) -> Dict[str, Any]:
     """Persist the chosen configuration and leave first-run onboarding."""
     current = load_config()
+
+    # A field the environment owns cannot be changed here - the env var wins
+    # on every read, so accepting a *different* value would only pretend.
+    # Re-submitting the value the environment already enforces (the wizard
+    # does, on a container that sets LLM_PROVIDER) is fine.
+    blocked = _environment_conflicts(payload)
+    if blocked:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{', '.join(blocked)} is set by an environment variable on this deployment and cannot be changed here. "
+                   "Change the environment and restart.",
+        )
 
     llm = current.llm
     if payload.llm is not None:

@@ -98,6 +98,9 @@ async def handle_mcp_jsonrpc(
                 }
             }
         except Exception as e:
+            # The caller is a voice agent: it needs a sentence to say, not
+            # a Python message. The details go to the log.
+            logger.exception(f"mcp tools/call failed org={org_id} tool={tool_name}")
             return {
                 "jsonrpc": "2.0",
                 "id": jsonrpc_id,
@@ -105,7 +108,7 @@ async def handle_mcp_jsonrpc(
                     "content": [
                         {
                             "type": "text",
-                            "text": f"Tool execution failed: {str(e)}"
+                            "text": f"Tool execution failed ({type(e).__name__}). Please try again or rephrase."
                         }
                     ],
                     "isError": True
@@ -149,5 +152,14 @@ async def call_tool_rest(
     org_id: uuid.UUID = Depends(verify_mcp_token),
 ):
     """REST endpoint to invoke a specific tool."""
-    result = await execute_tool(org_id, tool_name, arguments)
-    return result
+    from fastapi import HTTPException
+
+    from app.mcp.tools import InvalidArguments, UnknownTool, validate_arguments
+
+    try:
+        validate_arguments(tool_name, arguments)
+    except UnknownTool as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except InvalidArguments as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return await execute_tool(org_id, tool_name, arguments)

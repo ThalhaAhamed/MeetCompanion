@@ -129,3 +129,38 @@ async def test_members_cannot_change_write_tools():
         code = (await owner.get("/api/members/workspace")).json()["join_code"]
         await _signup(member, f"m-{uuid.uuid4().hex[:6]}@example.com", join_code=code)
         assert (await member.put("/api/agent/write-tools", json={"enabled": False})).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_tool_arguments_are_validated_against_the_schema(client):
+    """
+    QA: a string `limit` reached min() and answered 500; an empty `query`
+    returned five arbitrary memories; an unknown tool answered 200. Every
+    call is now checked against the tool's declared inputSchema first.
+    """
+    headers = {"Authorization": f"Bearer {settings.MCP_AUTH_TOKEN}"}
+
+    # REST surface: unknown tool 404, bad arguments 422.
+    r = await client.post("/mcp/tools/no_such_tool", json={}, headers=headers)
+    assert r.status_code == 404
+    r = await client.post("/mcp/tools/search_meeting_memory", json={"query": 123, "limit": "lots"}, headers=headers)
+    assert r.status_code == 422
+    assert "'query' must be string" in r.json()["detail"] and "'limit' must be integer" in r.json()["detail"]
+    r = await client.post("/mcp/tools/search_meeting_memory", json={"query": "   "}, headers=headers)
+    assert r.status_code == 422 and "'query' is required" in r.json()["detail"]
+    r = await client.post("/mcp/tools/search_meeting_memory", json={"query": "x", "limit": True}, headers=headers)
+    assert r.status_code == 422  # booleans are not integers
+    r = await client.post("/mcp/tools/search_meeting_memory", json={"query": "anything", "limit": 3}, headers=headers)
+    assert r.status_code == 200 and "results" in r.json()
+
+    # JSON-RPC surface: isError with the same sentence, never a Python message.
+    def call(name, args):
+        return client.post("/mcp", headers=headers, json={
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args},
+        })
+    r = await call("search_meeting_memory", {"query": 123, "limit": "lots"})
+    body = r.json()["result"]
+    assert r.status_code == 200 and body["isError"] is True
+    assert "Invalid arguments" in body["content"][0]["text"] and "not supported between" not in body["content"][0]["text"]
+    r = await call("no_such_tool", {})
+    assert r.json()["result"]["isError"] is True and "Unknown tool" in r.json()["result"]["content"][0]["text"]

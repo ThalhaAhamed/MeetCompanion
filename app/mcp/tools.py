@@ -359,6 +359,63 @@ async def tool_definitions_for(org_id: uuid.UUID) -> List[Dict[str, Any]]:
     return [tool for tool in MCP_TOOL_DEFINITIONS if tool["name"] not in WRITE_TOOLS]
 
 
+_JSON_TYPES = {
+    "string": str,
+    "integer": int,
+    "number": (int, float),
+    "boolean": bool,
+    "array": list,
+    "object": dict,
+}
+
+
+class UnknownTool(KeyError):
+    pass
+
+
+class InvalidArguments(ValueError):
+    pass
+
+
+def validate_arguments(tool_name: str, arguments: Any) -> Dict[str, Any]:
+    """
+    Check a call against the tool's declared inputSchema before dispatch.
+
+    The model (or anything else holding the bearer token) sends whatever it
+    likes; a string where an integer was declared used to reach `min()` and
+    answer 500, and an empty required string was searched for. Returns the
+    arguments to use; raises UnknownTool / InvalidArguments with a message
+    fit to show the caller.
+    """
+    tool = next((t for t in MCP_TOOL_DEFINITIONS if t["name"] == tool_name), None)
+    if tool is None:
+        raise UnknownTool(f"Unknown tool: {tool_name}")
+    if arguments is None:
+        arguments = {}
+    if not isinstance(arguments, dict):
+        raise InvalidArguments("Arguments must be a JSON object.")
+    schema = tool.get("inputSchema") or {}
+    props = schema.get("properties") or {}
+    problems = []
+    for key in schema.get("required", []):
+        value = arguments.get(key)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            problems.append(f"'{key}' is required")
+    for key, value in arguments.items():
+        spec = props.get(key)
+        if spec is None or value is None:
+            continue
+        expected = _JSON_TYPES.get(spec.get("type"))
+        # bool is an int in Python; an integer field must not accept true/false.
+        if expected is not None and (not isinstance(value, expected) or (expected is int and isinstance(value, bool))):
+            problems.append(f"'{key}' must be {spec.get('type')}")
+        elif "enum" in spec and value not in spec["enum"]:
+            problems.append(f"'{key}' must be one of: {', '.join(map(str, spec['enum']))}")
+    if problems:
+        raise InvalidArguments("Invalid arguments: " + "; ".join(problems) + ".")
+    return arguments
+
+
 async def execute_tool(
     org_id: uuid.UUID,
     tool_name: str,
@@ -367,16 +424,25 @@ async def execute_tool(
     """
     Dispatcher for executing MCP tools with strict organization isolation.
     """
+    if not any(t["name"] == tool_name for t in MCP_TOOL_DEFINITIONS):
+        return {"error": f"Unknown tool: {tool_name}"}
+
     if tool_name == "get_current_datetime":
         # No DB needed - skip opening a session/connection for the cheapest,
         # most frequently called tool (every relative-date question needs it).
         return _tool_get_current_datetime()
 
     async with get_db_context() as db:
+        # Policy before shape: an agent whose write tools are off hears that,
+        # whatever it sent.
         if tool_name in WRITE_TOOLS:
             org = await OrganizationRepository(db).get_by_id(org_id)
             if org is not None and not write_tools_enabled(org.settings):
                 return {"error": "This workspace has switched off the agent's write tools."}
+        try:
+            arguments = validate_arguments(tool_name, arguments)
+        except InvalidArguments as exc:
+            return {"error": str(exc)}
 
         if tool_name == "search_meeting_memory":
             return await _tool_search_meeting_memory(db, org_id, arguments)

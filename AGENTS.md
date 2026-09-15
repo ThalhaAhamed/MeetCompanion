@@ -69,8 +69,9 @@ any other way must be restarted to pick up Python changes.
 4. **A new MCP tool touches four places in `app/mcp/tools.py`:** its schema
    in `MCP_TOOL_DEFINITIONS`, its branch in `execute_tool`, its rendering in
    `format_tool_output_text`, and `WRITE_TOOLS` if it changes data (write
-   tools are off unless the owner enables them). Add a case to
-   `tests/test_mcp.py`.
+   tools are on by default; an owner can switch them off in Settings →
+   Meetings). Arguments are validated against the tool's `inputSchema`
+   before dispatch. Add a case to `tests/test_mcp.py`.
 5. **A new LLM provider is one file** in `app/providers/llm/` subclassing
    `LLMProvider` (or `OpenAICompatibleProvider` with a different base URL),
    plus a `ProviderDescriptor` in `app/providers/llm/__init__.py` listing
