@@ -3,7 +3,7 @@ Meeting Management Endpoints.
 Allows creating meetings, triggering MeetStream bot deployment, and retrieving meeting data.
 """
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
@@ -595,6 +595,9 @@ async def stop_meeting_bot(
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
 
-    await meeting_repo.update_status(meeting.id, status="stopped")
+    # Recorded here as well as on the bot.stopped webhook: an install whose
+    # webhooks never arrive (no public URL yet, tunnel down) would otherwise
+    # show every stopped call with no end time.
+    await meeting_repo.update_status(meeting.id, status="stopped", ended_at=datetime.now(timezone.utc))
     await db.commit()
     return result

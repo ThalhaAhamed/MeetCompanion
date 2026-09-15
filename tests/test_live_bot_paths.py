@@ -1,0 +1,87 @@
+"""
+Paths exercised by a real MeetStream bot run on 2026-09-15 whose webhooks
+could not reach the server (no public URL): stopping through the API and
+processing a call MeetStream has no transcript for.
+"""
+import uuid
+
+import httpx
+import pytest
+
+from app.services.processing import transcript_unavailable_message
+
+
+def _status_error(status: int, body) -> httpx.HTTPStatusError:
+    req = httpx.Request("GET", "https://api.meetstream.ai/api/v1/transcript/x/get_transcript")
+    resp = httpx.Response(status, request=req, json=body) if body is not None else httpx.Response(status, request=req, text="boom")
+    return httpx.HTTPStatusError("x", request=req, response=resp)
+
+
+def test_transcript_failure_shows_meetstreams_reason():
+    # Exactly what MeetStream returned for a silent call.
+    msg = transcript_unavailable_message(_status_error(500, {"message": "Transcript processing failed: No details"}))
+    assert "Transcript processing failed: No details" in msg
+    assert "nobody spoke" in msg
+    assert "mozilla" not in msg and "Server error" not in msg
+
+
+def test_transcript_failure_without_json_body_falls_back_to_status():
+    assert "HTTP 502" in transcript_unavailable_message(_status_error(502, None))
+
+
+@pytest.mark.asyncio
+async def test_pipeline_records_readable_error_when_transcript_missing(monkeypatch):
+    from app.database.connection import AsyncSessionLocal
+    from app.database.repositories import MeetingRepository
+    from app.config import settings
+    from app.services.processing import processing_pipeline
+
+    async def failing_get_transcript(*a, **k):
+        raise _status_error(500, {"message": "Transcript processing failed: No details"})
+
+    monkeypatch.setattr(processing_pipeline.meetstream_client, "get_transcript", failing_get_transcript)
+
+    org_id = uuid.UUID(settings.DEFAULT_ORG_ID)
+    async with AsyncSessionLocal() as db:
+        meeting = await MeetingRepository(db).create(
+            org_id=org_id, meeting_url="https://meet.google.com/abc-defg-hij", title="silent", platform="google_meet",
+        )
+        await db.commit()
+        meeting_id = meeting.id
+
+    with pytest.raises(RuntimeError):
+        await processing_pipeline.process_meeting_transcript(meeting_id, transcript_id="t-1")
+
+    async with AsyncSessionLocal() as db:
+        m = await MeetingRepository(db).get_by_id_unscoped(meeting_id)
+    assert m.processing_status == "failed"
+    assert m.processing_error.startswith("MeetStream has no transcript for this call (Transcript processing failed: No details)")
+
+
+@pytest.mark.asyncio
+async def test_stop_sets_ended_at_without_a_webhook(authed_client, monkeypatch):
+    from app.api import meetings as meetings_api
+
+    async def fake_remove_bot(bot_id, api_key=None):
+        return {"bot_id": bot_id, "status": "stopped", "bot_status": "Stopped"}
+
+    monkeypatch.setattr(meetings_api.meetstream_client, "remove_bot", fake_remove_bot)
+
+    r = await authed_client.post("/api/meetings", params={"deploy_bot": "false"}, json={
+        "meeting_url": "https://meet.google.com/abc-defg-hij", "title": "t", "platform": "google_meet",
+    })
+    assert r.status_code == 201, r.text
+    meeting_id = r.json()["id"]
+
+    from app.database.connection import AsyncSessionLocal
+    from app.models.database import Meeting
+    async with AsyncSessionLocal() as db:
+        m = await db.get(Meeting, uuid.UUID(meeting_id))
+        m.meetstream_bot_id = "bot-1"
+        await db.commit()
+
+    r = await authed_client.post(f"/api/meetings/{meeting_id}/stop")
+    assert r.status_code == 200, r.text
+    m = (await authed_client.get(f"/api/meetings/{meeting_id}")).json()
+    assert m["status"] == "stopped"
+    assert m["ended_at"] is not None

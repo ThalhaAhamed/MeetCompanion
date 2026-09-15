@@ -5,6 +5,7 @@ Transcript Retrieval -> Segment Storage -> Memory Extraction -> Action Item Trac
 import uuid
 from datetime import date
 from typing import Optional, List, Dict, Any
+import httpx
 from app.config import settings
 from app.database.connection import get_db_context
 from app.database.repositories import (
@@ -27,6 +28,32 @@ def _parse_due_date(value):
         return date.fromisoformat(value.strip()[:10])
     except ValueError:
         return None
+
+
+def transcript_unavailable_message(exc: httpx.HTTPStatusError) -> str:
+    """
+    What to tell the user when MeetStream will not hand over a transcript.
+
+    httpx's own text is "Server error '500 Internal Server Error' for url
+    ..." plus an MDN link - it hides the one useful part, MeetStream's own
+    reason (e.g. "Transcript processing failed"), which is what a silent
+    call produces: the bot heard no audio, so there was nothing to
+    transcribe.
+    """
+    reason = ""
+    try:
+        body = exc.response.json()
+        if isinstance(body, dict):
+            reason = str(body.get("message") or body.get("detail") or body.get("error") or "").strip()
+    except Exception:
+        pass
+    if not reason:
+        reason = f"HTTP {exc.response.status_code}"
+    return (
+        f"MeetStream has no transcript for this call ({reason}). "
+        "If nobody spoke while the bot was in the meeting there is nothing to process; "
+        "otherwise wait a few minutes and use Reprocess."
+    )
 
 
 class MeetingProcessingPipeline:
@@ -73,7 +100,10 @@ class MeetingProcessingPipeline:
                     if meeting.created_by_user_id:
                         from app.api.agent import get_meetstream_api_key
                         bot_key = await get_meetstream_api_key(db, meeting.created_by_user_id)
-                    t_resp = await self.meetstream_client.get_transcript(transcript_id, api_key=bot_key)
+                    try:
+                        t_resp = await self.meetstream_client.get_transcript(transcript_id, api_key=bot_key)
+                    except httpx.HTTPStatusError as exc:
+                        raise RuntimeError(transcript_unavailable_message(exc)) from exc
                     if isinstance(t_resp, list):
                         # Actual MeetStream get_transcript response: each list item is one
                         # participant's speech for the call, with a "participant" object
