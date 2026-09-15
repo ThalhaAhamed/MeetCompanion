@@ -74,3 +74,62 @@ async def test_device_key_does_not_resurrect_a_deactivated_owner(client):
         await session.commit()
     r = await client.get("/api/notebook/notes", headers={"Cookie": f"{DEVICE_COOKIE_NAME}={device_secret()}"})
     assert r.status_code == 401
+
+
+def test_device_key_exists_before_anything_asks_for_it(tmp_path, monkeypatch):
+    """
+    Start-up must write the file, not wait for first use.
+
+    The desktop shell reads device.key *before* loading the UI, so a lazily
+    created key is one that never exists when it is needed - auto sign-in
+    silently does nothing.
+    """
+    import app.secrets as secrets_module
+
+    monkeypatch.setenv("MEET_COMPANION_CONFIG", str(tmp_path / "config.json"))
+    monkeypatch.setattr(secrets_module, "_device_secret", None)
+
+    key_file = tmp_path / "device.key"
+    assert not key_file.exists()
+
+    value = secrets_module.device_secret()
+    assert key_file.exists(), "device_secret() must persist the key"
+    assert key_file.read_text(encoding="utf-8").strip() == value
+    # Stable across calls, or the desktop cookie would stop matching.
+    monkeypatch.setattr(secrets_module, "_device_secret", None)
+    assert secrets_module.device_secret() == value
+
+
+def test_startup_creates_the_device_key(tmp_path, monkeypatch):
+    """The lifespan calls it, so a fresh install has the file on disk."""
+    import inspect
+
+    import app.main as main_module
+
+    source = inspect.getsource(main_module.lifespan)
+    assert "device_secret()" in source, "startup must create the device key"
+
+
+@pytest.mark.asyncio
+async def test_auth_check_reports_signed_in_with_the_device_key(client):
+    """
+    /api/auth/* skips the gate, so this endpoint needs the device key of its
+    own accord - it is what the UI boots on to decide whether to show the
+    sign-in screen. Without it the app is authenticated for every API call yet
+    still asks you to log in.
+    """
+    await _make_owner("boot@device.test")
+    r = await client.get("/api/auth/check", headers={"Cookie": f"{DEVICE_COOKIE_NAME}={device_secret()}"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["authenticated"] is True
+    assert body["member"]["email"] == "boot@device.test"
+    assert COOKIE_NAME in r.cookies, "it should hand back a real session too"
+
+
+@pytest.mark.asyncio
+async def test_auth_check_still_reports_signed_out_without_a_key(client):
+    await _make_owner("nokey@device.test")
+    assert (await client.get("/api/auth/check")).json()["authenticated"] is False
+    bad = await client.get("/api/auth/check", headers={"Cookie": f"{DEVICE_COOKIE_NAME}=nope"})
+    assert bad.json()["authenticated"] is False

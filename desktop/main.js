@@ -110,7 +110,15 @@ function stopServer() {
  */
 async function attachDeviceKey(port) {
   try {
-    const keyPath = path.join(dataDir(), 'device.key')
+    // The server keeps its state in <data-dir>/data (see desktop_entry.py,
+    // which points MEET_COMPANION_CONFIG there); the older layout put it at
+    // the top, so accept either rather than silently not signing in.
+    const candidates = [
+      path.join(dataDir(), 'data', 'device.key'),
+      path.join(dataDir(), 'device.key'),
+    ]
+    const keyPath = candidates.find((candidate) => fs.existsSync(candidate))
+    if (!keyPath) return
     const key = fs.readFileSync(keyPath, 'utf8').trim()
     if (!key) return
     await session.defaultSession.cookies.set({

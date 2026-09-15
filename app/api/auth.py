@@ -75,11 +75,24 @@ async def logout(request: Request, response: Response):
 
 
 @router.get("/check")
-async def check(request: Request, db: AsyncSession = Depends(get_db)):
+async def check(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     token = request.cookies.get(COOKIE_NAME)
     user_id = decode_session(token) if token else None
     if not user_id:
-        return {"authenticated": False}
+        # /api/auth/* skips the gate (sign-in has to be reachable when signed
+        # out), so the device key has to be honoured here as well. Without
+        # this the desktop app is signed in for every API call yet still shown
+        # the sign-in screen, because this is the endpoint the UI boots on.
+        from app.middleware.auth_gate import _session_from_device_key
+
+        issued = await _session_from_device_key(request)
+        if issued is None:
+            return {"authenticated": False}
+        session_token, user_id = issued
+        response.set_cookie(
+            key=COOKIE_NAME, value=session_token, max_age=SESSION_TTL_SECONDS,
+            httponly=True, **cookie_flags(request),
+        )
 
     result = await db.execute(select(User).where(User.id == user_id, User.is_active.is_(True)))
     user = result.scalar_one_or_none()

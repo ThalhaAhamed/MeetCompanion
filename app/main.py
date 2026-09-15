@@ -41,6 +41,13 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup and shutdown procedures."""
     logger.info("%s starting in %s mode", settings.APP_NAME, settings.APP_ENV)
+    # Create the device key now rather than on first use. The desktop shell
+    # reads this file *before* it loads the UI, so leaving it lazy meant it was
+    # only written once something had already presented it - which never
+    # happened, and auto sign-in silently never worked.
+    from app.secrets import device_secret
+
+    device_secret()
     await bootstrap(current_engine())
     # Load the embedding model now, in a background thread, so the first real
     # search/index request isn't the one paying the multi-second model load
