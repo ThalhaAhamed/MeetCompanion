@@ -649,8 +649,24 @@ class WebhookEventRepository:
             idempotency_key=idempotency_key,
             processed=False,
         )
+        # Two deliveries of the same event can race between the select above
+        # and this insert (MeetStream retries, or a burst); the unique index
+        # then rejects the loser. That is a duplicate, not an error - answer
+        # with the row the winner stored, exactly as the select would have.
+        # Nothing has been written in this session before this point, so
+        # rolling it back loses nothing.
+        from sqlalchemy.exc import IntegrityError
+
         self.session.add(event)
-        await self.session.flush()
+        try:
+            await self.session.flush()
+        except IntegrityError:
+            await self.session.rollback()
+            res = await self.session.execute(stmt)
+            existing = res.scalar_one_or_none()
+            if existing is None:  # pragma: no cover - the conflict must have come from this key
+                raise
+            return existing, False
         return event, True
 
     async def mark_processed(self, event_id: uuid.UUID, error: Optional[str] = None):

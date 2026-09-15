@@ -201,3 +201,40 @@ async def test_signed_webhooks_are_verified_over_http(authed_client, monkeypatch
 
     unsigned = await authed_client.post("/api/webhooks/meetstream", content=body, headers={"Content-Type": "application/json"})
     assert unsigned.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_concurrent_identical_deliveries_never_answer_500(authed_client, monkeypatch):
+    """
+    QA: six parallel POSTs of the same (bot, event, timestamp) stored one row
+    but one request got 500 "UNIQUE constraint failed" - the select-then-
+    insert raced. The loser must answer as a duplicate, not an error.
+    """
+    import asyncio
+
+    from app.database.connection import AsyncSessionLocal
+    from app.database.repositories import WebhookEventRepository
+
+    meeting = await _launch(authed_client, monkeypatch)
+    bot = meeting["meetstream_bot_id"]
+
+    # Force the race deterministically: every session sees "no row yet", then
+    # all of them insert. The repository must survive the unique violation.
+    async def race(n):
+        async with AsyncSessionLocal() as db:
+            repo = WebhookEventRepository(db)
+            result = await repo.create_if_new(bot, "bot.inmeeting", {"bot_id": bot}, f"{bot}:bot.inmeeting:same")
+            await db.commit()
+            return result[1]
+
+    outcomes = await asyncio.gather(*(race(i) for i in range(6)), return_exceptions=True)
+    assert not any(isinstance(o, Exception) for o in outcomes), outcomes
+    assert outcomes.count(True) == 1 and outcomes.count(False) == 5, outcomes
+
+    # And over HTTP the loser is reported as a duplicate.
+    body = _event(bot, "bot.stopped")
+    responses = await asyncio.gather(*(authed_client.post("/api/webhooks/meetstream", json=body) for _ in range(6)))
+    codes = sorted(r.status_code for r in responses)
+    assert codes == [200] * 6, codes
+    statuses = sorted(r.json()["status"] for r in responses)
+    assert statuses.count("accepted") == 1 and statuses.count("ignored") == 5, statuses
