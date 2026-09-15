@@ -35,6 +35,11 @@ EXEMPT_PREFIXES = ("/api/auth/", "/api/members", "/api/agent/chat-relay", "/api/
 #: let anyone reachable on the network read configuration or reset the install.
 FIRST_RUN_PREFIXES = ("/api/setup",)
 
+#: Always reachable: the UI has to ask "is setup done, does anyone have an
+#: account yet?" before it can show sign-in. The endpoint itself strips the
+#: answer down to exactly those bits when nobody is signed in.
+BOOT_PATHS = ("/api/setup/status",)
+
 
 def _key() -> bytes:
     return session_secret().encode("utf-8")
@@ -61,6 +66,31 @@ def decode_session(token: str) -> "uuid.UUID | None":
         return None
 
 
+async def any_account_exists() -> bool:
+    """
+    Whether anyone has an account yet. First-run setup is only open while
+    the answer is no: an install with members but no saved configuration
+    (config.json deleted, data directory moved) must not let an anonymous
+    caller reconfigure the AI provider or reset the install.
+    Safe before the database is configured (returns False).
+    """
+    try:
+        from app.database.connection import get_db_context
+        from app.models.database import User
+
+        async with get_db_context() as db:
+            return (await db.execute(select(User.id).limit(1))).first() is not None
+    except Exception:
+        return False
+
+
+async def first_run_open() -> bool:
+    """Setup endpoints are unauthenticated only on a brand-new install."""
+    from app.runtime_config import is_configured
+
+    return not is_configured() and not await any_account_exists()
+
+
 async def verify_session(token: str) -> bool:
     """Full check: valid signature/expiry AND the member still exists and is active."""
     user_id = decode_session(token)
@@ -80,11 +110,11 @@ class AuthGateMiddleware(BaseHTTPMiddleware):
         if not path.startswith("/api/") or path.startswith(EXEMPT_PREFIXES):
             return await call_next(request)
 
-        if path.startswith(FIRST_RUN_PREFIXES):
-            from app.runtime_config import is_configured
+        if path in BOOT_PATHS:
+            return await call_next(request)
 
-            if not is_configured():
-                return await call_next(request)
+        if path.startswith(FIRST_RUN_PREFIXES) and await first_run_open():
+            return await call_next(request)
 
         token = request.cookies.get(COOKIE_NAME)
         if token and await verify_session(token):

@@ -153,6 +153,43 @@ async def test_member_cannot_change_server_configuration(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_setup_is_not_open_just_because_config_is_missing(tmp_path, monkeypatch):
+    """
+    "Not configured" used to mean "first run, no auth needed" - even with
+    accounts in the database. Delete config.json (or move the data dir) and
+    anyone on the network could repoint the AI provider at their own
+    endpoint, or reset the install. First-run openness needs both: no saved
+    configuration AND no account yet.
+    """
+    monkeypatch.setenv("MEET_COMPANION_CONFIG", str(tmp_path / "config.json"))
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    from app import runtime_config
+
+    runtime_config.load_config(refresh=True)
+    assert runtime_config.is_configured() is False
+
+    async with _client() as owner, _client() as anon:
+        # A brand-new install: setup is open.
+        assert (await anon.get("/api/setup/providers")).status_code == 200
+        assert (await anon.get("/api/setup/status")).json()["needs_setup"] is True
+
+        await _signup(owner, f"o-{uuid.uuid4().hex[:6]}@example.com", workspace="Epsilon")
+
+        # Still unconfigured, but an account exists: locked down.
+        assert (await anon.post("/api/setup/reset")).status_code == 401
+        assert (await anon.post("/api/setup/complete", json={"llm": {"provider": "openai_compatible", "base_url": "https://evil.example.com/v1", "api_key": "x"}})).status_code == 401
+        assert (await anon.get("/api/setup/providers")).status_code == 401
+        status = (await anon.get("/api/setup/status")).json()
+        assert status == {"onboarding_completed": False, "needs_setup": False, "has_members": True}
+        assert runtime_config.load_config(refresh=True).llm.provider != "openai_compatible"
+
+        # The owner configures it from Settings.
+        assert (await owner.post("/api/setup/complete", json={"llm": {"provider": "ollama", "model": "llama3.1"}})).status_code == 200
+    runtime_config.load_config(refresh=True)
+
+
+@pytest.mark.asyncio
 async def test_setup_requires_sign_in_once_configured(tmp_path, monkeypatch):
     monkeypatch.setenv("MEET_COMPANION_CONFIG", str(tmp_path / "config.json"))
     from app import runtime_config

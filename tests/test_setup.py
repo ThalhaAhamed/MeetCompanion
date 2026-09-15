@@ -228,13 +228,24 @@ async def test_test_llm_reports_missing_key_as_a_config_problem(client, clean_en
 
 @pytest.mark.asyncio
 async def test_setup_is_locked_down_once_configured(client, clean_env):
-    """Open during first run, session-gated afterwards."""
+    """Open during first run, session-gated afterwards - except the two
+    booleans the sign-in screen needs, which /status still answers signed
+    out (a fresh install used to log a 401 on every boot for that)."""
     assert (await client.get("/api/setup/status")).status_code == 200
 
-    await client.post("/api/setup/complete", json={"llm": {"provider": "ollama"}})
+    await client.post(
+        "/api/setup/complete",
+        json={"llm": {"provider": "openai", "model": "gpt-4.1-mini", "api_key": "sk-supersecret-value"}},
+    )
 
     locked = await client.get("/api/setup/status")
-    assert locked.status_code == 401
+    assert locked.status_code == 200
+    assert locked.json() == {"onboarding_completed": True, "needs_setup": False, "has_members": False}
+    assert "sk-s" not in locked.text and "openai" not in locked.text
+
+    for path in ("/api/setup/providers", "/api/setup/complete", "/api/setup/reset"):
+        method = client.get if path.endswith("providers") else client.post
+        assert (await method(path, **({} if path.endswith("providers") else {"json": {}}))).status_code == 401, path
 
 
 # ---------------------------------------------------------------------------
@@ -300,3 +311,10 @@ def test_friendly_db_error_translates_common_failures():
     assert "resolve the database host" in generic and "pooler" not in generic
     assert "username or password" in _friendly_db_error(Exception("FATAL: password authentication failed for user \"x\""), "postgresql://x")
     assert _friendly_db_error(Exception("something weird"), "postgresql://x") == "something weird"
+
+
+def test_friendly_db_error_recognises_windows_connection_refused():
+    from app.api.setup import _friendly_db_error
+
+    win = OSError("[WinError 1225] The remote computer refused the network connection")
+    assert _friendly_db_error(win, "postgresql+asyncpg://u:p@127.0.0.1:1/db").startswith("Connection refused")

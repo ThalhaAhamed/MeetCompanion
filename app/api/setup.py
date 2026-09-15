@@ -28,7 +28,6 @@ from app.runtime_config import (
     describe_environment_managed,
     effective_meetstream_api_key,
     effective_webhook_secret,
-    is_configured,
     is_env_managed,
     load_config,
     mask_secret,
@@ -37,7 +36,7 @@ from app.runtime_config import (
 )
 from app.services.llm import build_llm_config
 from app.api.deps import OWNER
-from app.middleware.auth_gate import COOKIE_NAME, decode_session
+from app.middleware.auth_gate import COOKIE_NAME, any_account_exists, decode_session, first_run_open
 
 
 async def require_setup_access(request: Request) -> None:
@@ -47,7 +46,7 @@ async def require_setup_access(request: Request) -> None:
     Enforced here rather than in the middleware so the rule is visible next
     to the endpoints it protects.
     """
-    if not is_configured():
+    if await first_run_open():
         return
     from app.database.connection import get_db_context
     from app.models.database import User
@@ -141,12 +140,21 @@ async def setup_status(request: Request) -> Dict[str, Any]:
 
     Readable by any signed-in member (the UI needs it to boot), but masked
     key previews, hosts and the database URL are only included for owners.
+    Signed out, it answers only whether setup is done and whether any
+    account exists - what the sign-in screen needs - so booting a
+    configured install never has to treat a 401 as the answer.
     """
     full = await _full_status()
     try:
         await require_setup_access(request)
         return full
     except HTTPException as exc:
+        if exc.status_code == status.HTTP_401_UNAUTHORIZED:
+            return {
+                "onboarding_completed": full["onboarding_completed"],
+                "needs_setup": full["needs_setup"],
+                "has_members": full["has_members"],
+            }
         if exc.status_code != status.HTTP_403_FORBIDDEN:
             raise
     return {
@@ -167,16 +175,7 @@ async def _has_any_member() -> bool:
     'Create account' on a brand-new install instead of a sign-in form no
     one can use. Safe before the database is configured (returns False).
     """
-    try:
-        from sqlalchemy import select as _select
-
-        from app.database.connection import get_db_context
-        from app.models.database import User
-
-        async with get_db_context() as db:
-            return (await db.execute(_select(User.id).limit(1))).first() is not None
-    except Exception:
-        return False
+    return await any_account_exists()
 
 
 async def _full_status() -> Dict[str, Any]:
@@ -196,7 +195,10 @@ async def _full_status() -> Dict[str, Any]:
 
     return {
         "onboarding_completed": config.onboarding_completed,
-        "needs_setup": not is_configured(),
+        # Only a brand-new install is sent through onboarding; one that has
+        # accounts but no saved configuration goes to sign-in, and its owner
+        # configures it from Settings.
+        "needs_setup": await first_run_open(),
         "has_members": await _has_any_member(),
         "environment_managed": describe_environment_managed(),
         "llm": llm_summary,
@@ -291,7 +293,9 @@ def _friendly_db_error(exc: Exception, url: str) -> str:
         )
     if "does not exist" in text and "database" in text:
         return "That database name does not exist on the server."
-    if "connection refused" in text:
+    # Windows words it "[WinError 1225] The remote computer refused the
+    # network connection"; POSIX says "connection refused".
+    if "connection refused" in text or "refused the network connection" in text or "winerror 1225" in text:
         return "Connection refused - nothing is listening on that host and port."
     return raw
 
