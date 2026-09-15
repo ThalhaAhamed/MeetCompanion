@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Page, PageHeader } from '../components/AppShell'
 import { useTheme } from '../components/AppShell'
-import { Badge, Card, ErrorMessage, Field, Loading, Spinner } from '../components/ui'
+import { Badge, Card, ConnectionBadge, ErrorMessage, Field, Loading, Spinner } from '../components/ui'
 import { useIsOwner } from '../user'
 import {
   clearMeetstreamApiKey,
@@ -287,13 +287,21 @@ export default function Settings() {
 
               <div className="mb-5 flex flex-wrap items-center gap-2 text-sm">
                 <span style={{ color: 'var(--text-muted)' }}>Currently using</span>
-                <Badge tone="brand">{status.database?.dialect}</Badge>
+                <Badge tone="brand">
+                  {catalog.databases.find((d) => d.name === status.database?.provider)?.label || status.database?.dialect}
+                </Badge>
+                <ConnectionBadge connected={status.database?.connected} />
                 {status.database?.url && (
                   <code className="rounded px-1.5 py-0.5 text-xs" style={{ backgroundColor: 'var(--surface-raised)' }}>
                     {status.database.url}
                   </code>
                 )}
               </div>
+              {status.database?.connected === false && (
+                <div className="mb-5">
+                  <ErrorMessage title="The database is not answering" detail={status.database.error} onRetry={load} />
+                </div>
+              )}
 
               {status.environment_managed?.['database.url'] ? (
                 <EnvManagedNotice />
@@ -303,6 +311,8 @@ export default function Settings() {
                     catalog={catalog.databases}
                     provider={dbProvider}
                     values={dbValues}
+                    current={status.database?.provider}
+                    connected={status.database?.connected}
                     onProviderChange={(name) => {
                       setDbProvider(name)
                       setDbSaved(false)

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ChevronLeftIcon, ChevronRightIcon } from './Icons'
-import { Field, Spinner } from './ui'
+import { ConnectionBadge, Field, Spinner } from './ui'
 import { testDatabase } from '../api'
 
 /**
@@ -36,7 +36,7 @@ function ProviderBadge({ entry }) {
   )
 }
 
-function ProviderCard({ entry, selected, onSelect }) {
+function ProviderCard({ entry, selected, current, connected, onSelect }) {
   const disabled = !entry.available
   return (
     <button
@@ -58,13 +58,18 @@ function ProviderCard({ entry, selected, onSelect }) {
           <span className="font-medium" style={{ color: 'var(--text-strong)' }}>
             {entry.label}
           </span>
-          {entry.recommended && (
-            <span
-              className="mc-badge"
-              style={{ backgroundColor: 'var(--color-peach-200)', color: 'var(--color-peach-700)', borderColor: 'transparent' }}
-            >
-              Recommended
-            </span>
+          {current ? (
+            // The one the app is running on right now, and whether it answers.
+            <ConnectionBadge connected={connected} />
+          ) : (
+            entry.recommended && (
+              <span
+                className="mc-badge"
+                style={{ backgroundColor: 'var(--color-peach-200)', color: 'var(--color-peach-700)', borderColor: 'transparent' }}
+              >
+                Recommended
+              </span>
+            )
           )}
         </div>
         <p className="mt-0.5 text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -125,7 +130,17 @@ export function isDatabaseFormComplete(entry, values) {
     .every((field) => String(values[field.key] ?? field.default ?? '').trim().length > 0)
 }
 
-export default function DatabasePicker({ catalog, provider, values, onProviderChange, onValuesChange, testResult, onTestResult }) {
+export default function DatabasePicker({
+  catalog,
+  provider,
+  values,
+  onProviderChange,
+  onValuesChange,
+  testResult,
+  onTestResult,
+  current = null,
+  connected = null,
+}) {
   const [choosing, setChoosing] = useState(true)
   const entry = useMemo(() => catalog.find((item) => item.name === provider) || null, [catalog, provider])
   const [testing, setTesting] = useState(false)
@@ -158,7 +173,14 @@ export default function DatabasePicker({ catalog, provider, values, onProviderCh
     return (
       <div className="grid gap-2">
         {catalog.map((item) => (
-          <ProviderCard key={item.name} entry={item} selected={item.name === provider} onSelect={choose} />
+          <ProviderCard
+            key={item.name}
+            entry={item}
+            selected={item.name === provider}
+            current={item.name === current}
+            connected={connected}
+            onSelect={choose}
+          />
         ))}
       </div>
     )

@@ -112,6 +112,26 @@ export function Badge({ children, tone = 'neutral' }) {
   )
 }
 
+/** Live state of a connection, as a dot + word: Connected / Not reachable / Checking… */
+export function ConnectionBadge({ connected }) {
+  const state =
+    connected === true
+      ? { label: 'Connected', dot: 'var(--color-brand-800)', tone: 'success' }
+      : connected === false
+        ? { label: 'Not reachable', dot: 'var(--color-rose-700)', tone: 'danger' }
+        : { label: 'Checking…', dot: 'var(--text-faint)', tone: 'neutral' }
+  return (
+    <Badge tone={state.tone}>
+      <span
+        aria-hidden="true"
+        className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle"
+        style={{ backgroundColor: state.dot }}
+      />
+      {state.label}
+    </Badge>
+  )
+}
+
 export function Field({ label, hint, error, children, htmlFor }) {
   return (
     <div className="mb-4">

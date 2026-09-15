@@ -163,7 +163,11 @@ async def setup_status(request: Request) -> Dict[str, Any]:
         "has_members": full["has_members"],
         "environment_managed": full["environment_managed"],
         "llm": {"provider": full["llm"].get("provider"), "model": full["llm"].get("model"), "configured": full["llm"].get("configured", False)},
-        "database": {"dialect": full["database"]["dialect"], "provider": full["database"]["provider"]},
+        "database": {
+            "dialect": full["database"]["dialect"],
+            "provider": full["database"]["provider"],
+            "connected": full["database"]["connected"],
+        },
         "meetstream": {"configured": full["meetstream"]["configured"]},
         "read_only": True,
     }
@@ -176,6 +180,24 @@ async def _has_any_member() -> bool:
     one can use. Safe before the database is configured (returns False).
     """
     return await any_account_exists()
+
+
+async def _database_health() -> Dict[str, Any]:
+    """
+    Whether the database the app is running on answers right now. Cheap
+    (SELECT 1 on the live engine) and the only way the Settings page can
+    say "connected" rather than merely "configured".
+    """
+    from sqlalchemy import text
+
+    from app.database.connection import current_engine
+
+    try:
+        async with current_engine().connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return {"connected": True, "error": None}
+    except Exception as exc:
+        return {"connected": False, "error": _friendly_db_error(exc, current_url())}
 
 
 async def _full_status() -> Dict[str, Any]:
@@ -206,6 +228,7 @@ async def _full_status() -> Dict[str, Any]:
             "dialect": dialect_of(current_url()),
             "provider": provider_for_url(current_url()),
             "url": mask_secret(current_url()),
+            **await _database_health(),
         },
         "meetstream": {
             "configured": bool(effective_meetstream_api_key()),
