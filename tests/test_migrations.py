@@ -10,10 +10,23 @@ import pytest
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.database.bootstrap import BASELINE_REVISION, ensure_schema
+from app.database.bootstrap import ensure_schema
 from app.models.database import Base
 
 APP_TABLES = set(Base.metadata.tables)
+
+
+def _head_revision() -> str:
+    """Whatever the newest revision is, so this file needs no edit per migration."""
+    from pathlib import Path
+
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    root = Path(__file__).resolve().parents[1]
+    cfg = Config(str(root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(root / "app" / "migrations"))
+    return ScriptDirectory.from_config(cfg).get_current_head()
 
 
 def _fresh_url() -> str:
@@ -40,7 +53,7 @@ async def test_fresh_database_is_migrated_to_head():
         await ensure_schema(engine)
         tables = await _tables(engine)
         assert APP_TABLES <= tables, APP_TABLES - tables
-        assert await _version(engine) == BASELINE_REVISION
+        assert await _version(engine) == _head_revision()
     finally:
         await engine.dispose()
 
@@ -54,7 +67,7 @@ async def test_existing_prealembic_database_is_adopted_not_rebuilt():
             await conn.run_sync(Base.metadata.create_all)
         assert await _version(engine) is None
         await ensure_schema(engine)
-        assert await _version(engine) == BASELINE_REVISION  # stamped, not re-run
+        assert await _version(engine) == _head_revision()  # stamped, not re-run
         assert APP_TABLES <= await _tables(engine)
     finally:
         await engine.dispose()
@@ -69,7 +82,7 @@ async def test_dropped_tables_under_stale_version_are_rebuilt():
             await conn.run_sync(Base.metadata.drop_all)  # leaves alembic_version
         await ensure_schema(engine)  # must notice tables gone and rebuild
         assert APP_TABLES <= await _tables(engine)
-        assert await _version(engine) == BASELINE_REVISION
+        assert await _version(engine) == _head_revision()
     finally:
         await engine.dispose()
 

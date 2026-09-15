@@ -11,12 +11,14 @@ in) always adds them to your own current workspace, no code needed.
 import secrets
 import uuid
 from fastapi import APIRouter, HTTPException, Request, Depends
+from typing import Any, Dict
+
 from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.connection import get_db
-from app.models.database import User, Organization
+from app.models.database import Membership, Organization, User
 from app.middleware.auth_gate import COOKIE_NAME, decode_session
 from app.api.deps import OWNER, get_current_org_id, get_current_user, is_owner, require_owner
 from app.security import hash_password, verify_password
@@ -158,12 +160,84 @@ async def add_member(body: CreateMemberRequest, request: Request, db: AsyncSessi
     )
     db.add(user)
     try:
+        await db.flush()
+        # The membership is what actually grants access; organization_id on the
+        # user is only the workspace they are currently looking at.
+        db.add(Membership(user_id=user.id, organization_id=org_id, role=role))
         await db.commit()
     except IntegrityError:
         # Two sign-ups for the same address raced; the database kept one.
         await db.rollback()
         raise HTTPException(status_code=409, detail="A member with that email already exists.")
     return MemberOut(id=str(user.id), name=user.name, email=user.email, role=user.role)
+
+
+# ---------------------------------------------------------------------------
+# Workspaces a person belongs to, and which one they are looking at
+# ---------------------------------------------------------------------------
+
+
+class WorkspaceOut(BaseModel):
+    id: str
+    name: str
+    role: str
+    is_active: bool
+
+
+@router.get("/workspaces")
+async def list_my_workspaces(
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """Every workspace this account belongs to, flagging the current one."""
+    rows = (
+        await db.execute(
+            select(Membership, Organization)
+            .join(Organization, Organization.id == Membership.organization_id)
+            .where(Membership.user_id == user.id)
+            .order_by(Organization.name)
+        )
+    ).all()
+    return {
+        "workspaces": [
+            WorkspaceOut(
+                id=str(org.id),
+                name=org.name,
+                role=membership.role,
+                is_active=org.id == user.organization_id,
+            ).model_dump()
+            for membership, org in rows
+        ]
+    }
+
+
+@router.post("/workspaces/{organization_id}/activate")
+async def activate_workspace(
+    organization_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Switch which workspace this account is looking at.
+
+    Only a workspace the caller is actually a member of - otherwise pointing
+    organization_id at someone else's workspace would hand over all of its
+    data, since every org-scoped query trusts that column.
+    """
+    membership = (
+        await db.execute(
+            select(Membership).where(
+                Membership.user_id == user.id, Membership.organization_id == organization_id
+            )
+        )
+    ).scalar_one_or_none()
+    if membership is None:
+        raise HTTPException(status_code=404, detail="You are not a member of that workspace.")
+
+    user.organization_id = organization_id
+    # Role travels with the workspace: owner of one says nothing about another.
+    user.role = membership.role
+    await db.commit()
+    return {"active_workspace": str(organization_id), "role": membership.role}
 
 
 @router.patch("/me")

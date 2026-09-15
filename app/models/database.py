@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from sqlalchemy import (
     String, Text, Boolean, Integer, Float, Date, DateTime,
-    ForeignKey, Enum as SQLEnum, Index
+    ForeignKey, Enum as SQLEnum, Index, UniqueConstraint
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from app.config import settings
@@ -63,10 +63,17 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    # The workspace this person is currently *looking at*, not the set they
+    # belong to - that lives in Membership. Every org-scoped query reads this
+    # (via get_current_org_id), so switching workspace is a write here.
+    # Always mirrors one of the user's memberships.
     organization_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     # Globally unique: sign-in is by email alone, with no workspace picker.
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Denormalized copy of the role held in the *active* workspace, kept in
+    # step with Membership so the session endpoints stay a single read.
+    # Membership.role is the source of truth.
     role: Mapped[str] = mapped_column(String(50), default="member")
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -79,6 +86,33 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     organization: Mapped["Organization"] = relationship("Organization", back_populates="users")
+    memberships: Mapped[List["Membership"]] = relationship(
+        "Membership", back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class Membership(Base):
+    """
+    A person's place in one workspace.
+
+    One row per (user, workspace), so the same account can belong to several
+    and switch between them. Which one they are currently viewing is
+    User.organization_id; this table is what makes that choice legitimate, and
+    it carries the role, because being an owner of one workspace says nothing
+    about your standing in another.
+    """
+
+    __tablename__ = "memberships"
+    __table_args__ = (UniqueConstraint("user_id", "organization_id", name="ux_membership_user_org"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    organization_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    role: Mapped[str] = mapped_column(String(50), default="member")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    user: Mapped["User"] = relationship("User", back_populates="memberships")
+    organization: Mapped["Organization"] = relationship("Organization")
 
 
 class APIKey(Base):

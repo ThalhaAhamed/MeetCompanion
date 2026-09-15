@@ -79,18 +79,24 @@ async def authed_client():
     from app.config import settings
     from app.database.connection import AsyncSessionLocal
     from app.middleware.auth_gate import COOKIE_NAME, SESSION_TTL_SECONDS, sign_session
-    from app.models.database import User
+    from app.models.database import Membership, User
 
     email = f"tester-{uuid.uuid4().hex[:8]}@example.com"
+    org_id = uuid.UUID(settings.DEFAULT_ORG_ID)
     async with AsyncSessionLocal() as session:
         user = User(
-            organization_id=uuid.UUID(settings.DEFAULT_ORG_ID),
+            organization_id=org_id,
             email=email,
             name="Tester",
+            role="owner",
             is_active=True,
             settings={},
         )
         session.add(user)
+        await session.flush()
+        # Sign-up creates this; the fixture writes rows directly, so it has to
+        # too - without it the account belongs to no workspace at all.
+        session.add(Membership(user_id=user.id, organization_id=org_id, role="owner"))
         await session.commit()
         await session.refresh(user)
         user_id = user.id

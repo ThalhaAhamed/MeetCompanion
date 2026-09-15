@@ -31,14 +31,44 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+#: The tables that existed when this baseline was cut. Pinned by name on
+#: purpose: building from whatever Base.metadata happens to hold today would
+#: make the baseline create tables introduced by *later* revisions, and those
+#: revisions would then fail with "table already exists". A baseline has to
+#: describe history, not follow the models.
+BASELINE_TABLES = (
+    "organizations",
+    "users",
+    "api_keys",
+    "meetings",
+    "participants",
+    "transcript_segments",
+    "memories",
+    "action_items",
+    "notebook_folders",
+    "notes",
+    "company_knowledge_embeddings",
+    "meeting_memory_embeddings",
+    "processing_jobs",
+    "webhook_events",
+)
+
+
+def _baseline_tables():
+    missing = set(BASELINE_TABLES) - set(Base.metadata.tables)
+    if missing:  # pragma: no cover - a rename would have to update this list
+        raise RuntimeError(f"baseline names tables that no longer exist: {sorted(missing)}")
+    return [Base.metadata.tables[name] for name in BASELINE_TABLES]
+
+
 def upgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
         # Inside the migration's own transaction, so it commits with the tables
         # that depend on the vector type.
         op.execute("CREATE EXTENSION IF NOT EXISTS vector")
-    Base.metadata.create_all(bind=bind)
+    Base.metadata.create_all(bind=bind, tables=_baseline_tables())
 
 
 def downgrade() -> None:
-    Base.metadata.drop_all(bind=op.get_bind())
+    Base.metadata.drop_all(bind=op.get_bind(), tables=_baseline_tables())

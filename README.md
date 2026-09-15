@@ -40,6 +40,7 @@ Ask AI — all with a model, database and machine that you choose.
 - [Configuration](#%EF%B8%8F-configuration)
 - [Docker](#-docker)
 - [Live meetings: reaching your server](#-live-meetings-reaching-your-server)
+- [Workspaces](#-workspaces)
 - [Export](#-export)
 - [Privacy and data](#-privacy-and-data)
 - [Security model](#-security-model)
@@ -282,6 +283,19 @@ tool calls (`/mcp`).
    signing secret (the same value on both sides).
 4. Create or activate an agent in **Agent**; Meet Companion wires the MCP
    server URL and your workspace's token into it.
+
+## 🔀 Workspaces
+
+One account can belong to several workspaces and switch between them from the
+picker in the top bar (it only appears when there is more than one).
+
+Everything is scoped to the workspace you currently have open - meetings,
+notes, memory, action items - so switching changes what you see. Your role
+travels with the workspace too: you can own one and be a plain member of
+another.
+
+To put someone in a workspace, share its join code from **Members**. To join a
+second workspace yourself, use that code at sign-up.
 
 ## 📤 Export
 

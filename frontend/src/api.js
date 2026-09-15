@@ -437,3 +437,11 @@ export function exportMeetingUrl(id, format = 'md') {
 export function exportWorkspaceUrl(format = 'json') {
   return `${BASE}/export/workspace?format=${format}`
 }
+
+export function listMyWorkspaces() {
+  return req('/members/workspaces')
+}
+
+export function activateWorkspace(id) {
+  return req(`/members/workspaces/${id}/activate`, { method: 'POST' })
+}

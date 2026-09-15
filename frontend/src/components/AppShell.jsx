@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { activateWorkspace, listMyWorkspaces } from '../api'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import Logo from './Logo'
 import {
   AskAiIcon,
+  ChevronDownIcon,
   DashboardIcon,
   MeetingsIcon,
   MembersIcon,
@@ -98,6 +100,98 @@ function Avatar({ user, size = 34 }) {
   )
 }
 
+
+/**
+ * Workspace switcher.
+ *
+ * Only rendered when the account belongs to more than one workspace - with a
+ * single one there is nothing to switch to and the control is just noise.
+ * Switching reloads, because every page's data is scoped to the active
+ * workspace and stale panels would otherwise show the previous one's content.
+ */
+function WorkspaceSwitcher() {
+  const [workspaces, setWorkspaces] = useState(null)
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const box = useRef(null)
+
+  useEffect(() => {
+    let cancelled = false
+    listMyWorkspaces()
+      .then((data) => !cancelled && setWorkspaces(data.workspaces || []))
+      .catch(() => !cancelled && setWorkspaces([]))
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!open) return undefined
+    const close = (event) => !box.current?.contains(event.target) && setOpen(false)
+    const onKey = (event) => event.key === 'Escape' && setOpen(false)
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  if (!workspaces || workspaces.length < 2) return null
+  const active = workspaces.find((w) => w.is_active) || workspaces[0]
+
+  async function choose(workspace) {
+    if (workspace.is_active || busy) return
+    setBusy(true)
+    try {
+      await activateWorkspace(workspace.id)
+      window.location.reload()
+    } catch {
+      setBusy(false)
+      setOpen(false)
+    }
+  }
+
+  return (
+    <div className="relative" ref={box}>
+      <button
+        type="button"
+        className="mc-btn mc-btn-ghost"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Switch workspace"
+      >
+        <span className="max-w-[10rem] truncate">{active.name}</span>
+        <ChevronDownIcon size={15} />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="mc-panel absolute right-0 z-40 mt-1 min-w-[14rem] overflow-hidden p-1"
+        >
+          {workspaces.map((workspace) => (
+            <button
+              key={workspace.id}
+              type="button"
+              role="menuitemradio"
+              aria-checked={workspace.is_active}
+              disabled={busy}
+              className="mc-nav-item flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm"
+              onClick={() => choose(workspace)}
+            >
+              <span className="truncate">{workspace.name}</span>
+              <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
+                {workspace.is_active ? 'Current' : workspace.role}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function AppShell({ user, onSignOut, children }) {
   const [theme, toggleTheme] = useTheme()
   const [collapsed, setCollapsed] = useState(() => {
@@ -185,6 +279,7 @@ export default function AppShell({ user, onSignOut, children }) {
 
 
           <div className="ml-auto flex items-center gap-2">
+            {user && <WorkspaceSwitcher />}
             <button
               type="button"
               className="mc-btn mc-btn-ghost px-2.5"

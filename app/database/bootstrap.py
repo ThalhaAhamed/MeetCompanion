@@ -119,7 +119,10 @@ async def ensure_schema(engine: AsyncEngine) -> None:
                 await conn.run_sync(Base.metadata.create_all)
             await _patch_action_items(conn, dialect)
             await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_users_email ON users (email)"))
-        await _alembic(engine, "stamp", BASELINE_REVISION)
+        # create_all above built the schema as the models describe it *today*,
+        # which is head - not the baseline. Stamping baseline would leave every
+        # later revision queued to run against tables that already exist.
+        await _alembic(engine, "stamp", "head")
     else:
         # Already migration-managed: apply any new revisions.
         await _alembic(engine, "upgrade", "head")
