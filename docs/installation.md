@@ -55,9 +55,17 @@ under your user data directory:
 
 | OS | Location |
 | --- | --- |
-| Windows | `%APPDATA%\meet-companion\workspace` |
-| macOS | `~/Library/Application Support/meet-companion/workspace` |
-| Linux | `~/.config/meet-companion/workspace` |
+| Windows | `%APPDATA%\Meet Companion\workspace\data` |
+| macOS | `~/Library/Application Support/Meet Companion/workspace/data` |
+| Linux | `~/.config/Meet Companion/workspace/data` |
+
+Inside: `meet-companion.db` (your meetings, notes and memory — only when using
+SQLite), `config.json` (settings, including keys), `device.key` and
+`session.key` (sign-in secrets), and `models/` (the cached embedding model).
+The folders next to `workspace` (`Cache`, `GPUCache`, `Local Storage`, …) are
+Electron's browser cache and hold nothing of yours. To start over with the
+wizard, quit the app and **rename** `workspace` rather than deleting it; your
+data is only in that folder. `MEET_COMPANION_DATA_DIR` overrides the location.
 
 > **Self-hosting instead?** `docker compose up -d` gives you the whole
 > application on <http://localhost:8000> — see [Docker](configuration.md#docker). Or run it
