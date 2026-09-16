@@ -11,266 +11,190 @@
 ![Platforms](https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-3b4873)
 [![License: MIT](https://img.shields.io/badge/license-MIT-e3b1bc)](LICENSE)
 
-[Quick start](#-quick-start) · [Install](#-installation) · [Features](#-features) · [Demo](#-demo) · [Docker](#-getting-started-with-docker) · [Configuration](#%EF%B8%8F-configuration) · [Tests](#-running-tests) · [Troubleshooting](#-troubleshooting) · [FAQ](#-faq) · [Docs](#-documentation)
+[Quick start](#-quick-start) · [Demo](#-demo) · [Architecture](#%EF%B8%8F-architecture) · [Docker](#-docker) · [Configuration](#%EF%B8%8F-configuration) · [Roadmap](#%EF%B8%8F-roadmap) · [FAQ](#-faq)
 
 </div>
 
 <div align="center">
-<img src="docs/media/meeting-to-note.gif" alt="Pasting a meeting transcript, the meeting being processed, then its summary, action items and memories, and the same meeting filed as a note in the notebook" width="900" />
+<img src="docs/media/meeting-to-note.gif" alt="A transcript is pasted, processed, and becomes a summary, action items, memories and a note" width="900" />
 </div>
 
-The bot comes from [MeetStream](https://meetstream.ai) (Google Meet, Zoom, Teams); paste a transcript instead and no account is needed. Everything after the transcript runs here, on infrastructure you own — no SaaS, no per-seat pricing, no vendor lock-in.
-
-Meetings become **Markdown notes with live action-item checkboxes**, searchable **semantically**, answerable with **Ask AI** — and the in-call agent can recall "what did we decide last time?" *during* the next meeting. Built for people who run their own tools and want meeting notes that stay theirs.
+The bot comes from [MeetStream](https://meetstream.ai) (Google Meet, Zoom, Teams); paste a transcript instead and no account is needed. Everything after the transcript runs here, on infrastructure you own. Meetings become **Markdown notes with live action-item checkboxes**, searchable **semantically**, answerable with **Ask AI** — and the in-call agent can recall "what did we decide last time?" *during* the next meeting. Built for people who run their own tools and want meeting notes that stay theirs.
 
 ## 🚀 Quick start
 
-**Desktop app** (Windows, macOS, Linux) — download, open, done:
-
-**[⬇ Download the latest release](https://github.com/ThalhaAhamed/MeetCompanion/releases/latest)**
-
-The first run walks you through five steps — workspace, account, storage, AI model, review — and you are in. Local SQLite and a local Ollama model need no keys at all.
-
-**Self-hosting instead?**
+**[⬇ Download the latest release](https://github.com/ThalhaAhamed/MeetCompanion/releases/latest)** for Windows, macOS or Linux — open it, follow the five-step setup, done. Local SQLite and a local Ollama model need no keys.
 
 ```bash
-docker compose up -d      # → http://localhost:8000
+docker compose up -d      # self-hosted instead → http://localhost:8000
 ```
 
 ## 📥 Installation
 
 | Platform | Get it | First launch |
 |---|---|---|
-| **Windows** | [`MeetCompanion-Windows-Setup.exe`](https://github.com/ThalhaAhamed/MeetCompanion/releases/latest) | SmartScreen: **More info → Run anyway** (unsigned build) |
-| **macOS** | [`…-macOS-arm64.dmg`](https://github.com/ThalhaAhamed/MeetCompanion/releases/latest) (Apple silicon) · [`…-x64.dmg`](https://github.com/ThalhaAhamed/MeetCompanion/releases/latest) (Intel) | Drag to Applications, then **right-click → Open** once |
-| **Linux** | [`…-Linux-x86_64.AppImage`](https://github.com/ThalhaAhamed/MeetCompanion/releases/latest) | `chmod +x`, run |
-| **Docker** | `docker compose up -d` | Open <http://localhost:8000> |
-| **From source** | Python 3.12 + Node 22 — [docs/development.md](docs/development.md) | `python scripts/dev.py` |
+| **Windows** | `MeetCompanion-Windows-Setup.exe` | SmartScreen: **More info → Run anyway** (unsigned build) |
+| **macOS** | `…-macOS-arm64.dmg` (Apple silicon) · `…-x64.dmg` (Intel) | Drag to Applications, **right-click → Open** once |
+| **Linux** | `…-Linux-x86_64.AppImage` | `chmod +x`, run |
+| **Docker** | `docker compose up -d` | <http://localhost:8000> |
+| **Source** | Python 3.12 + Node 22 | `python scripts/dev.py` — [docs/development.md](docs/development.md) |
 
 > [!TIP]
-> No `.env`, no database setup, no migrations to run: the first launch configures everything and the app creates and upgrades its own schema. Where your data lives, per OS: [docs/installation.md](docs/installation.md).
+> No `.env`, no database setup, no migrations: first launch configures everything and the app creates and upgrades its own schema. Data locations per OS: [docs/installation.md](docs/installation.md).
 
 ## 💡 Why Meet Companion?
 
-- **Bring your own AI.** OpenAI, Anthropic, Gemini, Groq, xAI (Grok), a local [Ollama](https://ollama.com) model, or any OpenAI-compatible endpoint. Switch in Settings at any time.
-- **Your data stays where you put it.** A local SQLite file by default; PostgreSQL, Supabase, Neon, Railway or any Postgres host when you want it. Embeddings are computed locally and never leave the machine.
-- **Meetings become notes, not a feed.** Each processed meeting is filed as a Markdown note under `Meetings / year / month`, with live action-item checkboxes — a notebook you would have organised that way yourself.
-- **Fully offline is a real option.** With Ollama and SQLite, no data leaves your computer and no API key is needed — the only outbound call is to [MeetStream](https://meetstream.ai) when you actually send a bot into a call.
+- **Bring your own AI** — OpenAI, Anthropic, Gemini, Groq, xAI, a local [Ollama](https://ollama.com) model, or any OpenAI-compatible endpoint. Switch any time.
+- **Your data stays where you put it** — SQLite by default; PostgreSQL, Supabase, Neon or Railway when you want it. Embeddings are computed locally.
+- **Notes, not a feed** — each meeting is filed as a Markdown note under `Meetings / year / month` with live checkboxes.
+- **Fully offline is real** — Ollama + SQLite means nothing leaves your computer and no API key is needed.
 
 ## ✨ Features
 
-- 🎥 **Meeting capture** — send a bot into Google Meet, Zoom or Teams, paste a transcript from anywhere, or import bots that already ran on your MeetStream account.
-- 🧠 **Memory extraction** — transcripts become decisions, commitments, requirements, concerns, open questions and action items with owners and due dates.
-- 📓 **Notebook** — nested folders, tags, favourites, search and sort; rendered Markdown with an editor behind it.
-- ✅ **Action items that stay in sync** — tick a box in a note and the task completes on the dashboard; write `- [ ] call Bob` in any note and it becomes a real action item.
+- 🎥 **Meeting capture** — a bot in Google Meet, Zoom or Teams; paste a transcript; import past bots.
+- 🧠 **Memory extraction** — decisions, commitments, requirements, concerns, open questions, action items with owners and due dates.
+- 📓 **Notebook** — folders, tags, favourites, search; rendered Markdown with an editor behind it.
+- ✅ **Action items in sync** — tick a box in a note and the task completes; `- [ ] call Bob` in any note becomes a real task.
 - 🔍 **Semantic search** — hybrid vector + keyword search across everything ever said.
-- 💬 **Ask AI** — answers grounded in your notes, meetings and uploaded documents (PDF, Word, Markdown, text, CSV), with sources, and instructed never to invent.
-- 🕸️ **Knowledge graph** — meetings, people, decisions and action items as an explorable graph with filters and force controls.
-- 🎙️ **In-call recall** — a built-in [MCP](https://modelcontextprotocol.io) server lets the in-meeting agent answer from your memory while the call is happening.
-- 👥 **Workspaces** — share one with a join code; owners decide what members may add, edit, delete, export or invite.
-- 🔌 **Provider-agnostic** — LLMs and databases are adapters behind an interface; adding one is a single file.
+- 💬 **Ask AI** — answers grounded in notes, meetings and uploaded documents (PDF, Word, Markdown, CSV), with sources; never invents.
+- 🕸️ **Knowledge graph** — meetings, people, decisions and action items as an explorable graph.
+- 🎙️ **In-call recall** — a built-in [MCP](https://modelcontextprotocol.io) server the in-meeting agent queries live.
+- 👥 **Workspaces** — share by join code; owners decide what members may add, edit, delete, export or invite.
+
+## 📸 Screenshots
+
+<div align="center">
+<img src="docs/screenshots/dashboard.png" alt="Dashboard: open action items, today's meetings, recent notes" width="900" />
+<img src="docs/screenshots/settings-database.png" alt="Database settings: current database shown as Connected, provider picker" width="900" />
+<img src="docs/screenshots/agent.png" alt="Agent configuration: template prompt, provider, model, voice" width="900" />
+</div>
 
 ## 🎬 Demo
 
-### 💬 Ask AI
+**Ask AI** — grounded answer with an owner table and source links:
 
-Ask in plain language; the answer is grounded in your notes, meetings and documents, every source one click away. If the notes do not say, it says so.
+<div align="center"><img src="docs/media/ask-ai.gif" alt="Asking a question and getting an answer with sources" width="900" /></div>
 
-<div align="center">
-<img src="docs/media/ask-ai.gif" alt="Typing a question into Ask AI and receiving an answer with decisions, an owner table and source links to the meetings it came from" width="900" />
-</div>
+**Knowledge graph** — select a meeting, then filter by type:
 
-### 🕸️ Knowledge graph
+<div align="center"><img src="docs/media/knowledge-graph.gif" alt="Selecting a graph node and toggling type filters" width="900" /></div>
 
-Every meeting, person, memory and action item is a node; the edges are who said what where. Click a node and the rest fades back; filter by type, hide orphans, tune the forces.
+**Workspaces** — owner permissions, create a second workspace, switch:
 
-<div align="center">
-<img src="docs/media/knowledge-graph.gif" alt="Clicking a meeting node fades the rest of the graph and shows its summary and connections; then opening graph settings and hiding memory and action-item nodes by type" width="900" />
-</div>
+<div align="center"><img src="docs/media/workspaces.gif" alt="Toggling member permissions and switching workspaces" width="900" /></div>
 
-### 👥 Workspaces and permissions
+First-run wizard: [docs/installation.md](docs/installation.md).
 
-Hand someone the join code and the workspace is shared. Owners decide what members may do, from the same page. One account can belong to several workspaces and switch from the top bar.
-
-<div align="center">
-<img src="docs/media/workspaces.gif" alt="On the Members page an owner switches on Delete content and Invite people for members, then opens the workspace picker, creates a second workspace and switches back" width="900" />
-</div>
-
-### 🗄️ Pick any database
-
-Local SQLite out of the box, or PostgreSQL, Supabase, Neon, Railway or any Postgres host. Test the connection, save, and the app switches over live — no restart.
-
-<div align="center">
-<img src="docs/screenshots/settings-database.png" alt="Database settings showing the current database as Connected and the provider picker: Local SQLite, PostgreSQL, Supabase, Neon, Railway" width="900" />
-</div>
-
-### 🤖 Your agent, your template
-
-A template agent holds the starting system prompt, first message, provider, model and voice. New agents are created from it.
-
-<div align="center">
-<img src="docs/screenshots/agent.png" alt="Agent configuration page with the template agent's prompt, provider, model and voice" width="900" />
-</div>
-
-## 🏗️ How it works
-
-[MeetStream](https://meetstream.ai) provides the bot that joins Google Meet, Zoom and Teams and produces the transcript. **Everything after that — extraction, memory, notes, search, the in-call agent's recall — runs in this project, on infrastructure you own.** The desktop app and the self-hosted web app are the same code.
+## 🏗️ Architecture
 
 ```
-                    UI  (React + Vite + Tailwind)
-                     │
-                    API  (FastAPI)
-                     │
-        Services / domain logic
-                     │
-            Provider abstractions
-        ┌────────────┼─────────────┐
-       LLM        Database      MeetStream
-        │             │
-  OpenAI            pgvector  (PostgreSQL)
-  Anthropic         in-process cosine  (SQLite)
-  Gemini
-  Ollama
-  Groq
-  xAI (Grok)
-  OpenAI-compatible
+  Desktop (Electron)  ──┐
+  Browser             ──┼──▶  React UI  ──▶  FastAPI  ──▶  Services  ──▶  Providers
+  MeetStream agent  ──▶  MCP server  ─┘        (auth gate, permissions)      ├─ LLM: OpenAI · Anthropic · Gemini · Groq · xAI · Ollama · compatible
+  MeetStream webhooks ─▶ /api/webhooks (HMAC)                                 ├─ Database: SQLite (numpy search) · PostgreSQL (pgvector + tsvector)
+                                                                               └─ MeetStream API (bots, transcripts)
 ```
 
-**Providers are interfaces, not conditionals.** Adding an LLM vendor is one adapter in `app/providers/llm/` plus a registry entry; the adapter's declared fields *are* the settings form. **The database is swapped, not abstracted away** — only similarity and keyword search differ between databases, and those live in `app/providers/database/`. The full picture: [docs/architecture.md](docs/architecture.md).
+**Request flow.** Every request passes an auth gate (signed session cookie, or the desktop device key) and, for anything that changes data, a per-workspace permission check. Every query is scoped to the caller's workspace (`organization_id`) in the repository layer — there is no path that reads a row by id alone.
+
+**Data flow for a meeting.** Transcript (webhook or upload) → segments stored → participants → LLM extraction into memories and action items (structured JSON, validated; rule-based fallback if the provider fails) → chunked and embedded locally with `all-MiniLM-L6-v2` (384-d) → a Markdown note is written and filed → everything is searchable (reciprocal-rank fusion of vector and keyword hits) and answerable by Ask AI and by the MCP tools.
+
+**Providers are interfaces, not conditionals.** A new LLM vendor is one adapter in `app/providers/llm/` plus a registry entry; the adapter's declared fields *are* the settings form. **The database is swapped, not abstracted away** — only similarity and keyword search differ, and those live in `app/providers/database/`, chosen from the live connection's dialect. Schema is Alembic-managed and upgraded at startup. Full detail: [docs/architecture.md](docs/architecture.md).
 
 ## 🗂️ Project structure
 
 ```
-app/            FastAPI backend
-  api/          one router per UI page (meetings, notebook, members, …)
-  services/     the post-call pipeline, extraction, MeetStream client
-  providers/    swappable adapters: llm/<vendor>.py, database/<dialect>.py
-  database/     org-scoped repositories, startup bootstrap
-  models/       SQLAlchemy models, Pydantic schemas, portable column types
-  migrations/   Alembic revisions (the schema's source of truth)
-  mcp/          the MCP server the in-call agent talks to
-  rag/          chunking, embeddings, hybrid retrieval
-frontend/src/   React app: pages/ (one per route), components/, api.js
+app/            FastAPI backend — api/ (one router per page) · services/ (pipeline) · providers/ (llm/, database/)
+                database/ (org-scoped repositories, bootstrap) · models/ · migrations/ (Alembic) · mcp/ · rag/
+frontend/src/   React app — pages/ (one per route) · components/ · api.js (all HTTP calls)
 desktop/        Electron shell + PyInstaller spec
-tests/          pytest (hermetic, SQLite), frontend/src/__tests__ (vitest)
-docs/           documentation and media
+tests/          pytest (hermetic SQLite) · frontend/src/__tests__ (vitest)
+docs/           documentation, screenshots, demo media
 ```
 
-## 🐳 Getting started with Docker
+## 🐳 Docker
 
 ```bash
-git clone https://github.com/ThalhaAhamed/MeetCompanion.git && cd MeetCompanion
 docker compose up -d                      # app on http://localhost:8000, SQLite in a volume
-docker compose --profile postgres up -d   # same, plus a pgvector Postgres the app is pointed at
+docker compose --profile postgres up -d   # plus a pgvector Postgres the app is pointed at
 ```
 
-- **First visit** walks through onboarding; configuration, the database and the embedding model all live in the `data` volume.
-- **Skip onboarding** by setting `LLM_PROVIDER`, `LLM_API_KEY` and `DATABASE_URL` in `docker-compose.yml`.
-- **Production mode** in the image (`/docs` off); built and booted in CI on every push.
+- **First visit** walks through onboarding; configuration, database and embedding model live in the `data` volume.
+- **Skip onboarding** by setting `LLM_PROVIDER`, `LLM_API_KEY`, `DATABASE_URL` in `docker-compose.yml`.
+- **Production mode** in the image (`/docs` off); the image is built and booted in CI on every push.
 
 > [!IMPORTANT]
-> To send bots into calls, MeetStream must be able to reach your server — a public host or a tunnel. Upload and Ask AI work without it. See [docs/live-meetings.md](docs/live-meetings.md).
-
-More: [docs/configuration.md#docker](docs/configuration.md#docker).
+> To send bots into calls, MeetStream must reach your server — a public host or a tunnel ([docs/live-meetings.md](docs/live-meetings.md)). Upload and Ask AI work without it.
 
 ## ⚙️ Configuration
 
-Everything is set from **Settings** in the app and saved to `data/config.json`. An **environment variable that is set always wins** over the saved value, so containers stay reproducible — the UI shows those fields as read-only.
+Set from **Settings** in the app, saved to `data/config.json`. An **environment variable that is set always wins** (the UI shows those fields read-only), so containers stay reproducible.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY` | from Settings | Which AI runs extraction and Ask AI |
+| `LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY` | from Settings | The AI for extraction and Ask AI |
 | `DATABASE_URL` | local SQLite | `postgresql://…` for a shared or hosted database |
-| `MEETSTREAM_API_KEY` | per member, in Settings | Lets the app send bots into calls |
-| `MCP_SERVER_URL` | — | The public URL MeetStream reaches your server on |
+| `MEETSTREAM_API_KEY` | per member | Lets the app send bots into calls |
+| `MCP_SERVER_URL` | — | Public URL MeetStream reaches your server on |
 | `ALLOW_SELF_SIGNUP` | `true` | `false` on a public server: only owners add members |
 
-The full list, precedence rules and Docker notes: [docs/configuration.md](docs/configuration.md).
+Every variable: [docs/configuration.md](docs/configuration.md).
 
 ## 🧰 Technology stack
 
-**Backend** Python 3.12 · FastAPI · SQLAlchemy 2 (async) · Alembic · SQLite / PostgreSQL + pgvector **·** **AI** adapters over `httpx` for OpenAI, Anthropic, Gemini, Groq, xAI, Ollama and OpenAI-compatible endpoints; local embeddings with `all-MiniLM-L6-v2` on ONNX **·** **Frontend** React 19 · Vite · Tailwind CSS 4 **·** **Desktop** Electron around a PyInstaller-frozen server **·** **Integration** MeetStream bots, HMAC-signed webhooks, a built-in MCP server **·** **Quality** 246 backend + 15 frontend tests, CI on SQLite and Postgres, Docker build on every push.
-
-Why each was chosen: [docs/development.md#tech-stack](docs/development.md#tech-stack).
+**Backend** Python 3.12 · FastAPI · SQLAlchemy 2 (async) · Alembic · SQLite / PostgreSQL + pgvector · **AI** adapters over `httpx`, local ONNX embeddings · **Frontend** React 19 · Vite · Tailwind CSS 4 · **Desktop** Electron + PyInstaller · **Integration** MeetStream bots, HMAC-signed webhooks, MCP server. Why each: [docs/development.md#tech-stack](docs/development.md#tech-stack).
 
 ## 📦 Dependencies
 
-Pinned in [`requirements.txt`](requirements.txt) (Python) and [`frontend/package.json`](frontend/package.json) / [`desktop/package.json`](desktop/package.json) (Node). No vendor SDKs — every LLM adapter is plain `httpx`. `pip-audit` runs in CI; the local embedding model (~90 MB) downloads on first use and is cached in the data directory. Postgres drivers and pgvector are only used when you point the app at Postgres.
+Pinned in [`requirements.txt`](requirements.txt), [`frontend/package.json`](frontend/package.json) and [`desktop/package.json`](desktop/package.json). No vendor SDKs; `pip-audit` runs in CI. The 90 MB embedding model downloads on first use; Postgres drivers are only exercised when you use Postgres.
 
 ## 🧪 Running tests
 
 ```bash
-.venv/Scripts/python -m pytest           # 246 backend tests: throwaway SQLite, no Postgres, no network (~3 min)
-npm --prefix frontend test               # 15 vitest page and unit tests
-npm --prefix frontend run lint           # oxlint, must be 0 errors
+.venv/Scripts/python -m pytest      # 246 backend tests, throwaway SQLite, no network (~3 min)
+npm --prefix frontend test          # 15 vitest tests
+npm --prefix frontend run lint      # oxlint, 0 errors
 ```
-
-Fixtures and conventions: [docs/development.md](docs/development.md) and [AGENTS.md](AGENTS.md#tests).
 
 ## 🔁 CI/CD
 
-- **On every push and pull request** ([`ci.yml`](.github/workflows/ci.yml)): the backend suite on **SQLite and PostgreSQL + pgvector**, frontend lint/tests/build, `pip-audit`, and a Docker image build that is booted and probed on `/health`.
-- **On a `v*` tag** ([`release.yml`](.github/workflows/release.yml)): the version is stamped from the tag, the server is frozen with PyInstaller, and Windows, macOS (arm64 + x64) and Linux installers are built and attached to a GitHub release — about 40 minutes from tag to published.
+- **Every push / PR** ([`ci.yml`](.github/workflows/ci.yml)): backend suite on **SQLite and PostgreSQL + pgvector**, frontend lint/tests/build, `pip-audit`, Docker image built and booted.
+- **Every `v*` tag** ([`release.yml`](.github/workflows/release.yml)): version stamped from the tag, server frozen with PyInstaller, Windows/macOS/Linux installers built and attached to a GitHub release — ~40 min from tag to published.
+
+## 🗺️ Roadmap
+
+- [ ] Code-signed Windows and macOS builds
+- [ ] MySQL / MariaDB support
+- [ ] Re-indexing after changing embedding models
+- [ ] Desktop auto-update
 
 ## 🩺 Troubleshooting
 
-| Symptom | Usual cause | Fix |
+| Symptom | Cause | Fix |
 |---|---|---|
-| Meeting sits at *Extracting…* / *joining* | MeetStream cannot reach your server | Public URL or tunnel in `MCP_SERVER_URL`, re-activate the agent — [live meetings](docs/live-meetings.md) |
-| *Processed without AI (…)* on a meeting | Provider failed; the bracket has its reason | Fix the provider in Settings (e.g. `ollama pull <model>`), then **Reprocess** |
-| Database shows *Not reachable* | Host, credentials or SSL | The banner carries the driver's message; Neon/Supabase strings paste as-is |
+| Meeting stuck at *Extracting…* | MeetStream cannot reach your server | Public URL or tunnel in `MCP_SERVER_URL`, re-activate the agent |
+| *Processed without AI (…)* | Provider failed; the bracket says why | Fix it in Settings (e.g. `ollama pull <model>`), then **Reprocess** |
+| Database *Not reachable* | Host, credentials or SSL | The banner carries the driver's message; Neon/Supabase strings paste as-is |
 | Blank page after upgrading from v0.2 | Accounts predating workspaces | Fixed in v0.3.1 — upgrade |
 
-More cases: [docs/troubleshooting.md](docs/troubleshooting.md).
+More: [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ## ❓ FAQ
 
-**Does my data leave my machine?**
-Only where you point it. With SQLite and Ollama, nothing leaves. A hosted Postgres or a cloud LLM sees exactly what you would expect; embeddings are always computed locally — [docs/security.md](docs/security.md).
-
-**Do I need MeetStream?**
-Only to send a bot into a call. Pasting a transcript, uploading documents, search and Ask AI all work without it.
-
-**Which meeting platforms?**
-Google Meet, Zoom and Microsoft Teams, via MeetStream bots.
-
-**Which AI models?**
-OpenAI, Anthropic, Google Gemini, Groq, xAI (Grok), Ollama (local), and any OpenAI-compatible endpoint. *Test connection* checks the key **and** that the model exists.
-
-**Which databases?**
-SQLite (default, zero setup), PostgreSQL with pgvector — Supabase, Neon, Railway or your own server. Switching is live, no restart.
-
-**Can my team share one workspace?**
-Yes: one shared Postgres, a join code from the Members page, and owner-controlled permissions. [docs/workspaces.md](docs/workspaces.md).
-
-**Why does the in-call agent need my server to be reachable?**
-MeetStream calls your server for memory lookups and webhooks. A tunnel or a public host works; see [docs/live-meetings.md](docs/live-meetings.md).
-
-**Is it free?**
-MIT-licensed, no accounts, no telemetry. You pay only whichever AI or database provider you choose to use — or nothing, with Ollama and SQLite.
+**Does my data leave my machine?** Only where you point it: SQLite + Ollama, nothing leaves; embeddings are always local — [docs/security.md](docs/security.md).
+**Do I need MeetStream?** Only to send a bot into a call. Upload, search and Ask AI work without it.
+**Which AI models?** OpenAI, Anthropic, Gemini, Groq, xAI, Ollama, any OpenAI-compatible endpoint. *Test connection* checks the key **and** the model.
+**Can my team share one workspace?** Yes — one shared Postgres, a join code, owner-set permissions — [docs/workspaces.md](docs/workspaces.md).
+**Is it free?** MIT, no accounts, no telemetry. You pay only the AI or database provider you choose, or nothing with Ollama + SQLite.
 
 ## 📚 Documentation
 
-| | |
-|---|---|
-| [Installation](docs/installation.md) | Per-OS installer notes, first launch, where data lives |
-| [Configuration](docs/configuration.md) | Every setting and environment variable; Docker |
-| [Live meetings](docs/live-meetings.md) | Making your server reachable by MeetStream (tunnels, hosting) |
-| [Workspaces and export](docs/workspaces.md) | Sharing, roles, permissions, Markdown/JSON export |
-| [Security and privacy](docs/security.md) | What is stored where, the security model, how sign-in works |
-| [Troubleshooting](docs/troubleshooting.md) | Stuck at *Extracting…*, provider errors, ports, databases |
-| [For developers](docs/development.md) | Run from source, tests, building the desktop app, tech stack |
-| [Architecture](docs/architecture.md) | Layers, provider contracts, retrieval, tenancy |
-| [Contributing](CONTRIBUTING.md) · [Agent guide](AGENTS.md) · [Security policy](SECURITY.md) | |
+[Installation](docs/installation.md) · [Configuration](docs/configuration.md) · [Live meetings](docs/live-meetings.md) · [Workspaces & export](docs/workspaces.md) · [Security & privacy](docs/security.md) · [Troubleshooting](docs/troubleshooting.md) · [For developers](docs/development.md) · [Architecture](docs/architecture.md) · [Agent guide](AGENTS.md) · [Security policy](SECURITY.md)
 
 ## 🤝 Contributing
 
-Issues, pull requests, providers and docs are all welcome — start with [CONTRIBUTING.md](CONTRIBUTING.md). A new LLM provider is one file in `app/providers/llm/` (`ollama.py` is the smallest example). Run the tests before opening a pull request; commits follow [Conventional Commits](https://www.conventionalcommits.org/).
-
-**Roadmap:** code-signed Windows and macOS builds · MySQL / MariaDB · re-indexing after changing embedding models · desktop auto-update.
+Issues, pull requests, providers and docs are welcome — start with [CONTRIBUTING.md](CONTRIBUTING.md). A new LLM provider is one file in `app/providers/llm/`. Run the tests before opening a pull request; commits follow [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## 📄 License
 
-[MIT](LICENSE) — use it, change it, ship it. Attribution appreciated.
-
-Built on [MeetStream](https://meetstream.ai) for meeting bots, [`all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) via [fastembed](https://github.com/qdrant/fastembed) for local embeddings, and FastAPI, SQLAlchemy, React, Vite, Tailwind and Electron.
+[MIT](LICENSE). Built on [MeetStream](https://meetstream.ai), [`all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) via [fastembed](https://github.com/qdrant/fastembed), FastAPI, SQLAlchemy, React, Vite, Tailwind and Electron.
