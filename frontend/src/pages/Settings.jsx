@@ -336,9 +336,10 @@ export default function Settings() {
                         try {
                           setStatus(await completeSetup({ database: { provider: dbProvider, values: dbValues } }))
                           setDbSaved(true)
-                          // The new database may not know this account; the
-                          // boot sequence sorts out sign-in or carries on.
-                          setTimeout(() => window.location.reload(), 1200)
+                          // An empty database gets this account recreated in
+                          // it (same email and password) and a fresh session;
+                          // one that already has people in it shows sign-in.
+                          setTimeout(() => window.location.reload(), 1600)
                         } catch (err) {
                           setError(err.message)
                         } finally {
@@ -350,7 +351,7 @@ export default function Settings() {
                     </button>
                     {dbSaved && (
                       <span className="text-sm" style={{ color: 'var(--color-brand-600)' }}>
-                        Switched. Existing data is not migrated — reloading…
+                        Switched. Your account was carried over; meetings and notes stay in the previous database — reloading…
                       </span>
                     )}
                   </div>

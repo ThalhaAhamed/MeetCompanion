@@ -8,11 +8,18 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+import logging
+import time
+import uuid
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
 from app.config import settings
-from app.database.connection import current_url, dialect_of, normalize_database_url, switch_database
+
+logger = logging.getLogger(__name__)
+from sqlalchemy import select
+
+from app.database.connection import current_url, dialect_of, get_db_context, normalize_database_url, switch_database
 from app.providers.database import build_database_url, describe_databases, provider_for_url
 from app.providers.llm import (
     DESCRIPTORS,
@@ -377,8 +384,56 @@ def _environment_conflicts(payload: CompleteSetupPayload) -> list[str]:
     return conflicts
 
 
+async def _account_snapshot(request: Request) -> Optional[Dict[str, Any]]:
+    """The signed-in account, read from the database we are about to leave."""
+    from app.models.database import Organization, User
+
+    user_id = decode_session(request.cookies.get(COOKIE_NAME) or "")
+    if not user_id:
+        return None
+    async with get_db_context() as db:
+        user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if user is None:
+            return None
+        org = (await db.execute(select(Organization).where(Organization.id == user.organization_id))).scalar_one_or_none()
+        return {
+            "email": user.email, "name": user.name, "password_hash": user.password_hash,
+            "workspace": org.name if org else "My Workspace",
+        }
+
+
+async def _carry_account_over(snapshot: Dict[str, Any]) -> Optional[uuid.UUID]:
+    """
+    After switching to a database that has no accounts, recreate the person
+    who switched - same email, name and password - as owner of a workspace
+    with the same name, so they stay signed in instead of being told their
+    own password is wrong. A database that already has accounts is someone
+    else's; nothing is added there.
+    """
+    from sqlalchemy import func
+
+    from app.api.deps import OWNER
+    from app.api.members import _create_workspace
+    from app.models.database import Membership, User
+
+    async with get_db_context() as db:
+        if (await db.execute(select(func.count(User.id)))).scalar_one() > 0:
+            return None
+        org = await _create_workspace(db, snapshot["workspace"])
+        user = User(
+            organization_id=org.id, email=snapshot["email"], name=snapshot["name"],
+            password_hash=snapshot["password_hash"], role=OWNER, is_active=True,
+        )
+        db.add(user)
+        await db.flush()
+        db.add(Membership(user_id=user.id, organization_id=org.id, role=OWNER))
+        await db.commit()
+        logger.info("Carried account %s over to the new database as owner of '%s'", snapshot["email"], snapshot["workspace"])
+        return user.id
+
+
 @router.post("/complete", dependencies=[Depends(require_setup_access)])
-async def complete_setup(payload: CompleteSetupPayload) -> Dict[str, Any]:
+async def complete_setup(payload: CompleteSetupPayload, request: Request, response: Response) -> Dict[str, Any]:
     """Persist the chosen configuration and leave first-run onboarding."""
     current = load_config()
 
@@ -423,6 +478,7 @@ async def complete_setup(payload: CompleteSetupPayload) -> Dict[str, Any]:
                 )
             # Switched before anything is saved: a database that cannot be
             # reached or prepared must not end up in the config either.
+            snapshot = await _account_snapshot(request)
             try:
                 await switch_database(resolved)
             except Exception as exc:
@@ -431,6 +487,18 @@ async def complete_setup(payload: CompleteSetupPayload) -> Dict[str, Any]:
                     detail=f"Could not switch database: {exc}",
                 )
             database = DatabaseSettings(url=resolved)
+            if snapshot:
+                carried = await _carry_account_over(snapshot)
+                if carried:
+                    # The session named a row in the old database; sign the
+                    # same person in on the new one.
+                    from app.api.auth import cookie_flags
+                    from app.middleware.auth_gate import SESSION_TTL_SECONDS, sign_session
+
+                    response.set_cookie(
+                        key=COOKIE_NAME, value=sign_session(str(carried), int(time.time()) + SESSION_TTL_SECONDS),
+                        max_age=SESSION_TTL_SECONDS, httponly=True, **cookie_flags(request),
+                    )
 
     meetstream = current.meetstream
     if payload.meetstream is not None:

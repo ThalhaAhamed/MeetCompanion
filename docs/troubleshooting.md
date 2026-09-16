@@ -33,3 +33,11 @@ network without IPv6 → use the pooler connection string instead.
 **The desktop app shows the sign-in screen although it used to sign itself in.**
 That happens only when the workspace has more than one owner - the device key
 signs in *the* owner and refuses to guess between several. Sign in normally.
+
+**"Incorrect email or password" right after switching databases.** Accounts
+live in the database, so on a database that already has people in it your
+old account does not exist — sign in with an account from *that* database,
+or ask its owner to add you. On an *empty* database (a fresh Postgres) your
+account is carried over automatically as of v0.4.3 and you stay signed in;
+your meetings and notes are not copied — they remain in the previous
+database. To bring them across, see `scripts/import_from_postgres.py`.

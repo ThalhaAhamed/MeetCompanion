@@ -341,3 +341,73 @@ async def test_unknown_api_path_is_a_json_404_not_the_app_shell(authed_client):
     r = await authed_client.get("/api/definitely-not-a-route")
     assert r.status_code == 404
     assert "text/html" not in r.headers.get("content-type", "")
+
+
+@pytest.mark.asyncio
+async def test_switching_to_an_empty_database_carries_the_owner_over(authed_client, tmp_path, monkeypatch):
+    """
+    Seen live: an owner switched their app to a fresh Postgres and was
+    shown the sign-in page - their own password "incorrect", because the
+    account lived in the database they had just left. Switching to a
+    database with no accounts now recreates the switcher there (same
+    email, name, password) as owner of a workspace of the same name, and
+    re-issues the session, so they carry on signed in.
+    """
+    from app.database.connection import current_url, switch_database
+    from tests.test_security import _client, _signup
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)  # conftest pins it; here nothing must override
+    old_url = current_url()
+    new_url = f"sqlite+aiosqlite:///{(tmp_path / 'fresh.db').as_posix()}"
+    authed_client = _client()
+    await _signup(authed_client, "switcher@example.com", workspace="Switchers Inc")  # a real owner with a password
+    me_before = (await authed_client.get("/api/auth/check")).json()["member"]
+    try:
+        r = await authed_client.post("/api/setup/complete", json={"database": {"url": new_url}})
+        assert r.status_code == 200, r.text
+        assert "hub_session" in r.headers.get("set-cookie", "")  # a new session for the new row
+
+        me_after = (await authed_client.get("/api/auth/check")).json()
+        assert me_after["authenticated"] is True
+        assert me_after["member"]["email"] == me_before["email"]
+        assert me_after["member"]["role"] == "owner"
+        assert me_after["member"]["id"] != me_before["id"]  # a new row, in the new database
+
+        ws = (await authed_client.get("/api/members/workspaces")).json()["workspaces"]
+        assert len(ws) == 1 and ws[0]["is_active"] and ws[0]["name"] == "Switchers Inc"
+        # Same password works on the new database.
+        r = await authed_client.post("/api/auth/login", json={"email": me_before["email"], "password": "correct-horse-battery"})
+        assert r.status_code == 200, r.text
+        # Content is not copied - the new database is empty apart from the account.
+        assert (await authed_client.get("/api/meetings", params={"limit": 5})).json() == []
+    finally:
+        await authed_client.aclose()
+        await switch_database(old_url)
+
+
+@pytest.mark.asyncio
+async def test_switching_to_a_database_that_has_accounts_adds_nothing(authed_client, tmp_path, monkeypatch):
+    """A database with people in it is someone else's; the switcher is not injected into it."""
+    from sqlalchemy import func, select
+
+    from app.database.connection import AsyncSessionLocal, current_url, switch_database
+    from app.models.database import User
+    from tests.test_security import _client, _signup
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    old_url = current_url()
+    other_url = f"sqlite+aiosqlite:///{(tmp_path / 'theirs.db').as_posix()}"
+    try:
+        await switch_database(other_url)
+        async with _client() as c:
+            await _signup(c, "theirs@example.com", workspace="Theirs")
+        await switch_database(old_url)
+
+        r = await authed_client.post("/api/setup/complete", json={"database": {"url": other_url}})
+        assert r.status_code == 200, r.text
+        async with AsyncSessionLocal() as db:
+            n = (await db.execute(select(func.count(User.id)))).scalar_one()
+        assert n == 1  # only theirs
+        assert (await authed_client.get("/api/auth/check")).json() == {"authenticated": False}
+    finally:
+        await switch_database(old_url)
