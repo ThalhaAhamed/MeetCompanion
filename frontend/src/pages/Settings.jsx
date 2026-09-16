@@ -160,7 +160,7 @@ export default function Settings() {
   }
 
   async function handleReset() {
-    if (!window.confirm('Reset configuration and return to first-run setup? Your notes and meetings are not deleted.')) {
+    if (!window.confirm('Clear the saved AI, database and MeetStream settings? Accounts, meetings and notes are kept; you will sign in and configure again from Settings.')) {
       return
     }
     await resetSetup().catch((err) => setError(err.message))
@@ -531,8 +531,9 @@ export default function Settings() {
               <Card>
                 <h2 className="mb-1 text-base font-semibold">Data management</h2>
                 <p className="mb-4 text-sm" style={{ color: 'var(--text-muted)' }}>
-                  Resetting configuration returns you to first-run setup. Your meetings and notes
-                  are left untouched.
+                  Clears the saved AI provider, database and MeetStream settings. Accounts, meetings
+                  and notes are kept, so this does not reopen the first-run wizard — you sign in and
+                  configure again from here. For a truly fresh start, delete the data directory.
                 </p>
                 <button type="button" className="mc-btn mc-btn-danger" onClick={handleReset}>
                   Reset configuration
