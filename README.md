@@ -11,7 +11,7 @@
 ![Platforms](https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-3b4873)
 [![License: MIT](https://img.shields.io/badge/license-MIT-e3b1bc)](LICENSE)
 
-[Quick start](#-quick-start) · [Install](#-installation) · [Features](#-features) · [See it work](#-see-it-work) · [Configuration](#%EF%B8%8F-configuration) · [FAQ](#-faq) · [Docs](#-documentation)
+[Quick start](#-quick-start) · [Install](#-installation) · [Features](#-features) · [See it work](#-see-it-work) · [Docker](#-getting-started-with-docker) · [Configuration](#%EF%B8%8F-configuration) · [Tests](#-running-tests) · [FAQ](#-faq) · [Docs](#-documentation)
 
 </div>
 
@@ -142,6 +142,16 @@ A template agent holds the starting system prompt, first message, provider, mode
 
 **Providers are interfaces, not conditionals.** Adding an LLM vendor is one adapter in `app/providers/llm/` plus a registry entry; the adapter's declared fields *are* the settings form. **The database is swapped, not abstracted away** — only similarity and keyword search differ between databases, and those live in `app/providers/database/`. The full picture: [docs/architecture.md](docs/architecture.md).
 
+## 🐳 Getting started with Docker
+
+```bash
+git clone https://github.com/ThalhaAhamed/MeetCompanion.git && cd MeetCompanion
+docker compose up -d                      # app on http://localhost:8000, SQLite in a volume
+docker compose --profile postgres up -d   # same, plus a pgvector Postgres the app is pointed at
+```
+
+The first visit walks through onboarding; configuration, the database and the embedding model all live in the `data` volume. Set `LLM_PROVIDER`, `LLM_API_KEY` and `DATABASE_URL` in `docker-compose.yml` to skip onboarding entirely. The image runs in production mode (`/docs` off, unauthenticated) and is built and booted in CI on every push. More: [docs/configuration.md#docker](docs/configuration.md#docker).
+
 ## ⚙️ Configuration
 
 Everything is set from **Settings** in the app and saved to `data/config.json`. An **environment variable that is set always wins** over the saved value, so containers stay reproducible — the UI shows those fields as read-only.
@@ -161,6 +171,16 @@ The full list, precedence rules and Docker notes: [docs/configuration.md](docs/c
 **Backend** Python 3.12 · FastAPI · SQLAlchemy 2 (async) · Alembic · SQLite / PostgreSQL + pgvector **·** **AI** adapters over `httpx` for OpenAI, Anthropic, Gemini, Groq, xAI, Ollama and OpenAI-compatible endpoints; local embeddings with `all-MiniLM-L6-v2` on ONNX **·** **Frontend** React 19 · Vite · Tailwind CSS 4 **·** **Desktop** Electron around a PyInstaller-frozen server **·** **Integration** MeetStream bots, HMAC-signed webhooks, a built-in MCP server **·** **Quality** 246 backend + 15 frontend tests, CI on SQLite and Postgres, Docker build on every push.
 
 Why each was chosen: [docs/development.md#tech-stack](docs/development.md#tech-stack).
+
+## 🧪 Running tests
+
+```bash
+.venv/Scripts/python -m pytest           # 246 backend tests: throwaway SQLite, no Postgres, no network (~3 min)
+npm --prefix frontend test               # 15 vitest page and unit tests
+npm --prefix frontend run lint           # oxlint, must be 0 errors
+```
+
+CI runs the backend suite on **SQLite and PostgreSQL + pgvector**, the frontend checks, `pip-audit`, and builds and boots the Docker image on every push. Fixtures and conventions: [docs/development.md](docs/development.md) and [AGENTS.md](AGENTS.md#tests).
 
 ## ❓ FAQ
 
