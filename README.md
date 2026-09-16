@@ -11,7 +11,7 @@
 ![Platforms](https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-3b4873)
 [![License: MIT](https://img.shields.io/badge/license-MIT-e3b1bc)](LICENSE)
 
-[Quick start](#-quick-start) · [Features](#-features) · [See it work](#-see-it-work) · [FAQ](#-faq) · [Docs](#-documentation)
+[Quick start](#-quick-start) · [Install](#-installation) · [Features](#-features) · [See it work](#-see-it-work) · [Configuration](#%EF%B8%8F-configuration) · [FAQ](#-faq) · [Docs](#-documentation)
 
 </div>
 
@@ -35,8 +35,18 @@ The first run walks you through five steps — workspace, account, storage, AI m
 docker compose up -d      # → http://localhost:8000
 ```
 
+## 📥 Installation
+
+| Platform | Get it | First launch |
+|---|---|---|
+| **Windows** | [`MeetCompanion-Windows-Setup.exe`](https://github.com/ThalhaAhamed/MeetCompanion/releases/latest) | SmartScreen: **More info → Run anyway** (unsigned build) |
+| **macOS** | [`…-macOS-arm64.dmg`](https://github.com/ThalhaAhamed/MeetCompanion/releases/latest) (Apple silicon) · [`…-x64.dmg`](https://github.com/ThalhaAhamed/MeetCompanion/releases/latest) (Intel) | Drag to Applications, then **right-click → Open** once |
+| **Linux** | [`…-Linux-x86_64.AppImage`](https://github.com/ThalhaAhamed/MeetCompanion/releases/latest) | `chmod +x`, run |
+| **Docker** | `docker compose up -d` | Open <http://localhost:8000> |
+| **From source** | Python 3.12 + Node 22 — [docs/development.md](docs/development.md) | `python scripts/dev.py` |
+
 > [!TIP]
-> Unsigned builds: on Windows click **More info → Run anyway**; on macOS **right-click → Open** the first time. Details and per-OS notes: [docs/installation.md](docs/installation.md).
+> No `.env`, no database setup, no migrations to run: the first launch configures everything and the app creates and upgrades its own schema. Where your data lives, per OS: [docs/installation.md](docs/installation.md).
 
 ## 💡 Why Meet Companion?
 
@@ -131,6 +141,26 @@ A template agent holds the starting system prompt, first message, provider, mode
 ```
 
 **Providers are interfaces, not conditionals.** Adding an LLM vendor is one adapter in `app/providers/llm/` plus a registry entry; the adapter's declared fields *are* the settings form. **The database is swapped, not abstracted away** — only similarity and keyword search differ between databases, and those live in `app/providers/database/`. The full picture: [docs/architecture.md](docs/architecture.md).
+
+## ⚙️ Configuration
+
+Everything is set from **Settings** in the app and saved to `data/config.json`. An **environment variable that is set always wins** over the saved value, so containers stay reproducible — the UI shows those fields as read-only.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY` | from Settings | Which AI runs extraction and Ask AI |
+| `DATABASE_URL` | local SQLite | `postgresql://…` for a shared or hosted database |
+| `MEETSTREAM_API_KEY` | per member, in Settings | Lets the app send bots into calls |
+| `MCP_SERVER_URL` | — | The public URL MeetStream reaches your server on |
+| `ALLOW_SELF_SIGNUP` | `true` | `false` on a public server: only owners add members |
+
+The full list, precedence rules and Docker notes: [docs/configuration.md](docs/configuration.md).
+
+## 🧰 Technology stack
+
+**Backend** Python 3.12 · FastAPI · SQLAlchemy 2 (async) · Alembic · SQLite / PostgreSQL + pgvector **·** **AI** adapters over `httpx` for OpenAI, Anthropic, Gemini, Groq, xAI, Ollama and OpenAI-compatible endpoints; local embeddings with `all-MiniLM-L6-v2` on ONNX **·** **Frontend** React 19 · Vite · Tailwind CSS 4 **·** **Desktop** Electron around a PyInstaller-frozen server **·** **Integration** MeetStream bots, HMAC-signed webhooks, a built-in MCP server **·** **Quality** 246 backend + 15 frontend tests, CI on SQLite and Postgres, Docker build on every push.
+
+Why each was chosen: [docs/development.md#tech-stack](docs/development.md#tech-stack).
 
 ## ❓ FAQ
 
