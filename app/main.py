@@ -24,6 +24,7 @@ from app.api.graph import router as graph_router
 from app.api.auth import router as auth_router
 from app.api.members import router as members_router
 from app.api.setup import router as setup_router
+from app.api.connections import router as connections_router
 from app.api.notebook import router as notebook_router
 from app.api.export import router as export_router
 from app.mcp.server import router as mcp_router
@@ -94,6 +95,7 @@ app.add_middleware(
 # Routers
 app.include_router(health_router)
 app.include_router(setup_router)
+app.include_router(connections_router)
 app.include_router(webhooks_router)
 app.include_router(auth_router)
 app.include_router(members_router)

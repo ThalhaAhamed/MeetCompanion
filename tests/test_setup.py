@@ -20,15 +20,6 @@ from app.runtime_config import (
 )
 
 
-@pytest.fixture(autouse=True)
-def isolated_config(tmp_path, monkeypatch):
-    """Point the config store at a temp file so tests never touch a real one."""
-    monkeypatch.setenv("MEET_COMPANION_CONFIG", str(tmp_path / "config.json"))
-    reset_config()
-    yield
-    reset_config()
-
-
 @pytest.fixture
 def clean_env(monkeypatch):
     for name in ("LLM_PROVIDER", "LLM_MODEL", "LLM_API_KEY", "LLM_BASE_URL"):

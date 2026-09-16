@@ -62,7 +62,26 @@ async def login(body: LoginRequest, request: Request, response: Response, db: As
 
     token = sign_session(str(user.id), int(time.time()) + SESSION_TTL_SECONDS)
     response.set_cookie(key=COOKIE_NAME, value=token, max_age=SESSION_TTL_SECONDS, httponly=True, **cookie_flags(request))
+    _remember_if_this_machine(request, user.id)
     return {"authenticated": True, "member": await member_payload(user, db)}
+
+
+def _remember_if_this_machine(request: Request, user_id) -> None:
+    """
+    On the desktop app (device key present), note that this account is who
+    this machine is on the live database, so the workspace picker can offer
+    its workspaces later without another password prompt.
+    """
+    import hmac as _hmac
+
+    from app.middleware.auth_gate import DEVICE_COOKIE_NAME
+    from app.secrets import device_secret
+
+    presented = request.cookies.get(DEVICE_COOKIE_NAME) or ""
+    if presented and _hmac.compare_digest(presented, device_secret()):
+        from app.services.connections import remember_user_for_current_connection
+
+        remember_user_for_current_connection(user_id)
 
 
 @router.post("/logout")
@@ -101,6 +120,7 @@ async def check(request: Request, response: Response, db: AsyncSession = Depends
         user = await _active_user(db, user_id)
         if not user:
             return {"authenticated": False}
+        _remember_if_this_machine(request, user.id)
     return {"authenticated": True, "member": await member_payload(user, db)}
 
 

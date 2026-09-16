@@ -17,7 +17,7 @@ import os
 import tempfile
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from app.config import settings
 import logging
@@ -44,6 +44,25 @@ class LLMSettings:
 @dataclass
 class DatabaseSettings:
     url: Optional[str] = None
+
+
+@dataclass
+class ConnectionSettings:
+    """
+    A database this install knows how to reach, and who this machine's
+    person is inside it.
+
+    Accounts live inside a database, so someone with a workspace of their
+    own on Supabase and their team's on Railway has two accounts. The
+    desktop app keeps one entry per database and the id of their account
+    there, so the workspace picker can offer every workspace across all of
+    them and switching signs them in without a password prompt - the same
+    trust as device.key: this machine, this data directory.
+    """
+    id: str = ""
+    label: str = ""
+    url: str = ""
+    user_id: Optional[str] = None
 
 
 @dataclass
@@ -81,6 +100,7 @@ class RuntimeConfig:
     database: DatabaseSettings = field(default_factory=DatabaseSettings)
     meetstream: MeetStreamSettings = field(default_factory=MeetStreamSettings)
     agent_template: AgentTemplateSettings = field(default_factory=AgentTemplateSettings)
+    connections: List[ConnectionSettings] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -93,6 +113,11 @@ class RuntimeConfig:
             database=DatabaseSettings(**_section(raw, "database", DatabaseSettings)),
             meetstream=MeetStreamSettings(**_section(raw, "meetstream", MeetStreamSettings)),
             agent_template=AgentTemplateSettings(**_section(raw, "agent_template", AgentTemplateSettings)),
+            connections=[
+                ConnectionSettings(**{k: v for k, v in item.items() if k in ConnectionSettings.__dataclass_fields__})
+                for item in (raw.get("connections") or [])
+                if isinstance(item, dict) and item.get("url")
+            ],
         )
 
 

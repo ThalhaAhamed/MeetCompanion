@@ -454,6 +454,26 @@ export function activateWorkspace(id) {
   return req(`/members/workspaces/${id}/activate`, { method: 'POST' })
 }
 
+// Saved database connections (desktop only; 404 elsewhere).
+export function listConnections() {
+  return req('/connections')
+}
+
+export function addConnection(body) {
+  return req('/connections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+}
+
+export function removeConnection(id) {
+  return req(`/connections/${id}`, { method: 'DELETE' })
+}
+
+export function activateConnection(id, organization_id) {
+  return req(`/connections/${id}/activate`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ organization_id: organization_id || null }),
+  })
+}
+
 export function joinWorkspace(joinCode) {
   return req('/members/workspaces/join', {
     method: 'POST',

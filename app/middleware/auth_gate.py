@@ -171,6 +171,7 @@ async def _session_from_device_key(request: Request):
     """
     import hmac as _hmac
     import time as _time
+    import uuid as _uuid
 
     presented = request.cookies.get(DEVICE_COOKIE_NAME)
     if not presented:
@@ -181,9 +182,32 @@ async def _session_from_device_key(request: Request):
     if not _hmac.compare_digest(presented, device_secret()):
         return None
 
-    from app.database.connection import get_db_context
+    from app.database.connection import current_url, get_db_context
     from app.models.database import User
 
+    # If this database is a saved connection, the connection record - not a
+    # guess - says who this machine is on it. A connection with no remembered
+    # account (switched to but not yet signed in, e.g. a team's database
+    # before joining) must NOT fall back to "the sole owner": that would sign
+    # the local person in as whoever happens to own that database.
+    from app.runtime_config import load_config
+
+    entry = next((c for c in load_config().connections if c.url == current_url()), None)
+    if entry is not None:
+        if not entry.user_id:
+            return None
+        async with get_db_context() as db:
+            known = (
+                await db.execute(
+                    select(User.id).where(User.id == _uuid.UUID(entry.user_id), User.is_active.is_(True))
+                )
+            ).scalar_one_or_none()
+        if known is None:
+            return None
+        return sign_session(str(known), int(_time.time()) + SESSION_TTL_SECONDS), known
+
+    # Legacy single-database install (no connections recorded): the device key
+    # signs in the sole owner, and only when there is exactly one.
     async with get_db_context() as db:
         owners = (
             await db.execute(

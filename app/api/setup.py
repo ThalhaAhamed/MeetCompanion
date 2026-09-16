@@ -338,6 +338,11 @@ async def test_database(payload: DatabaseConfigPayload) -> Dict[str, Any]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="A database URL is required."
         )
+    ok, detail = await _test_database_url(url)
+    return {"ok": ok, "detail": detail, "dialect": dialect_of(url)}
+
+
+async def _test_database_url(url: str) -> tuple[bool, str]:
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -349,9 +354,9 @@ async def test_database(payload: DatabaseConfigPayload) -> Dict[str, Any]:
         engine = create_async_engine(url, connect_args=connect_args)
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
-        return {"ok": True, "detail": "Connected.", "dialect": dialect_of(url)}
+        return True, "Connected."
     except Exception as exc:
-        return {"ok": False, "detail": _friendly_db_error(exc, url), "dialect": dialect_of(url)}
+        return False, _friendly_db_error(exc, url)
     finally:
         if engine is not None:
             await engine.dispose()
@@ -487,9 +492,15 @@ async def complete_setup(payload: CompleteSetupPayload, request: Request, respon
                     detail=f"Could not switch database: {exc}",
                 )
             database = DatabaseSettings(url=resolved)
+            from app.services.connections import remember_connection
+
+            remember_connection(resolved)
             if snapshot:
                 carried = await _carry_account_over(snapshot)
                 if carried:
+                    from app.services.connections import remember_user_for_current_connection
+
+                    remember_user_for_current_connection(carried)
                     # The session named a row in the old database; sign the
                     # same person in on the new one.
                     from app.api.auth import cookie_flags

@@ -1,4 +1,4 @@
-import { activateWorkspace, createWorkspace, joinWorkspace, listMyWorkspaces } from '../api'
+import { activateConnection, activateWorkspace, createWorkspace, joinWorkspace, listConnections, listMyWorkspaces } from '../api'
 import { useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import Logo from './Logo'
@@ -111,6 +111,9 @@ function Avatar({ user, size = 34 }) {
  */
 function WorkspaceSwitcher() {
   const [workspaces, setWorkspaces] = useState(null)
+  // Present only on the desktop app: the databases this machine knows, each
+  // with the workspaces this person has on it. null = single-database mode.
+  const [connections, setConnections] = useState(null)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [mode, setMode] = useState(null)  // 'join' | 'create'
@@ -122,6 +125,11 @@ function WorkspaceSwitcher() {
     listMyWorkspaces()
       .then((data) => !cancelled && setWorkspaces(data.workspaces || []))
       .catch(() => !cancelled && setWorkspaces([]))
+    // Endpoint is 404 unless this is the desktop app; the catch keeps us in
+    // single-database mode there.
+    listConnections()
+      .then((data) => !cancelled && setConnections(data.connections || null))
+      .catch(() => !cancelled && setConnections(null))
     return () => {
       cancelled = true
     }
@@ -144,17 +152,26 @@ function WorkspaceSwitcher() {
   if (!workspaces || workspaces.length === 0) return null
   const active = workspaces.find((w) => w.is_active) || workspaces[0]
 
-  async function choose(workspace) {
-    if (workspace.is_active || busy) return
+  async function choose(workspace, connectionId) {
+    if (busy) return
     setBusy(true)
     try {
-      await activateWorkspace(workspace.id)
+      if (connectionId) {
+        await activateConnection(connectionId, workspace.id)
+      } else {
+        if (workspace.is_active) { setBusy(false); return }
+        await activateWorkspace(workspace.id)
+      }
       window.location.reload()
-    } catch {
+    } catch (err) {
+      setError(err.message)
       setBusy(false)
-      setOpen(false)
     }
   }
+
+  // Desktop app with more than one database, or any workspace on a
+  // non-active database: show the grouped, cross-connection picker.
+  const multiDb = Array.isArray(connections) && (connections.length > 1 || connections.some((c) => !c.active && c.workspaces.length))
 
   return (
     <div className="relative" ref={box}>
@@ -174,22 +191,59 @@ function WorkspaceSwitcher() {
           role="menu"
           className="mc-panel absolute right-0 z-40 mt-1 min-w-[14rem] overflow-hidden p-1"
         >
-          {workspaces.map((workspace) => (
-            <button
-              key={workspace.id}
-              type="button"
-              role="menuitemradio"
-              aria-checked={workspace.is_active}
-              disabled={busy}
-              className="mc-nav-item flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm"
-              onClick={() => choose(workspace)}
-            >
-              <span className="truncate">{workspace.name}</span>
-              <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
-                {workspace.is_active ? 'Current' : workspace.role}
-              </span>
-            </button>
-          ))}
+          {multiDb
+            ? connections.map((conn) => (
+                <div key={conn.id} className="mb-1">
+                  <div className="flex items-center justify-between px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-faint)' }}>
+                    <span className="truncate">{conn.label}</span>
+                    {!conn.reachable && conn.reachable !== null && <span title="Not reachable">⚠</span>}
+                  </div>
+                  {conn.signed_in && conn.workspaces.length
+                    ? conn.workspaces.map((workspace) => (
+                        <button
+                          key={workspace.id}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={conn.active && workspace.is_active}
+                          disabled={busy}
+                          className="mc-nav-item flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm"
+                          onClick={() => choose(workspace, conn.active ? null : conn.id)}
+                        >
+                          <span className="truncate">{workspace.name}</span>
+                          <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
+                            {conn.active && workspace.is_active ? 'Current' : workspace.role}
+                          </span>
+                        </button>
+                      ))
+                    : (
+                      <button
+                        type="button"
+                        disabled={busy || conn.reachable === false}
+                        className="mc-nav-item w-full px-3 py-2 text-left text-sm"
+                        style={{ color: 'var(--text-muted)' }}
+                        onClick={() => choose({ id: null }, conn.id)}
+                      >
+                        {conn.reachable === false ? 'Unreachable' : 'Sign in on this database…'}
+                      </button>
+                    )}
+                </div>
+              ))
+            : workspaces.map((workspace) => (
+                <button
+                  key={workspace.id}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={workspace.is_active}
+                  disabled={busy}
+                  className="mc-nav-item flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm"
+                  onClick={() => choose(workspace)}
+                >
+                  <span className="truncate">{workspace.name}</span>
+                  <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
+                    {workspace.is_active ? 'Current' : workspace.role}
+                  </span>
+                </button>
+              ))}
           <div style={{ borderTop: '1px solid var(--border-subtle)' }} className="mt-1 pt-1">
             {mode ? (
               <form

@@ -31,6 +31,21 @@ from app.main import app  # noqa: E402
 from app.models.database import Base  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def isolated_config(tmp_path, monkeypatch):
+    """
+    Every test gets its own config file. Without this a test that saves
+    configuration - a database switch, a saved connection - writes into the
+    developer's real data/config.json; it happened once.
+    """
+    from app.runtime_config import reset_config
+
+    monkeypatch.setenv("MEET_COMPANION_CONFIG", str(tmp_path / "config.json"))
+    reset_config()
+    yield
+    reset_config()
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def database_schema():
     """
