@@ -19,7 +19,9 @@
 <img src="docs/media/meeting-to-note.gif" alt="Pasting a meeting transcript, the meeting being processed, then its summary, action items and memories, and the same meeting filed as a note in the notebook" width="900" />
 </div>
 
-No SaaS, no per-seat pricing, no vendor lock-in. Meetings become **Markdown notes with live action-item checkboxes**, searchable **semantically**, answerable with **Ask AI** — and the in-call agent can recall "what did we decide last time?" *during* the next meeting.
+The bot comes from [MeetStream](https://meetstream.ai) (Google Meet, Zoom, Teams); paste a transcript instead and no account is needed. Everything after the transcript runs here, on infrastructure you own — no SaaS, no per-seat pricing, no vendor lock-in.
+
+Meetings become **Markdown notes with live action-item checkboxes**, searchable **semantically**, answerable with **Ask AI** — and the in-call agent can recall "what did we decide last time?" *during* the next meeting. Built for people who run their own tools and want meeting notes that stay theirs.
 
 ## 🚀 Quick start
 
@@ -110,12 +112,6 @@ A template agent holds the starting system prompt, first message, provider, mode
 <img src="docs/screenshots/agent.png" alt="Agent configuration page with the template agent's prompt, provider, model and voice" width="900" />
 </div>
 
-### ⚡ First run
-
-<div align="center">
-<img src="docs/media/onboarding.gif" alt="First-run setup: naming a workspace, creating the owner account, choosing local SQLite and a local AI model, then landing on the dashboard" width="900" />
-</div>
-
 ## 🏗️ How it works
 
 [MeetStream](https://meetstream.ai) provides the bot that joins Google Meet, Zoom and Teams and produces the transcript. **Everything after that — extraction, memory, notes, search, the in-call agent's recall — runs in this project, on infrastructure you own.** The desktop app and the self-hosted web app are the same code.
@@ -150,7 +146,14 @@ docker compose up -d                      # app on http://localhost:8000, SQLite
 docker compose --profile postgres up -d   # same, plus a pgvector Postgres the app is pointed at
 ```
 
-The first visit walks through onboarding; configuration, the database and the embedding model all live in the `data` volume. Set `LLM_PROVIDER`, `LLM_API_KEY` and `DATABASE_URL` in `docker-compose.yml` to skip onboarding entirely. The image runs in production mode (`/docs` off, unauthenticated) and is built and booted in CI on every push. More: [docs/configuration.md#docker](docs/configuration.md#docker).
+- **First visit** walks through onboarding; configuration, the database and the embedding model all live in the `data` volume.
+- **Skip onboarding** by setting `LLM_PROVIDER`, `LLM_API_KEY` and `DATABASE_URL` in `docker-compose.yml`.
+- **Production mode** in the image (`/docs` off); built and booted in CI on every push.
+
+> [!IMPORTANT]
+> To send bots into calls, MeetStream must be able to reach your server — a public host or a tunnel. Upload and Ask AI work without it. See [docs/live-meetings.md](docs/live-meetings.md).
+
+More: [docs/configuration.md#docker](docs/configuration.md#docker).
 
 ## ⚙️ Configuration
 
@@ -185,7 +188,7 @@ CI runs the backend suite on **SQLite and PostgreSQL + pgvector**, the frontend 
 ## ❓ FAQ
 
 **Does my data leave my machine?**
-Only where you point it. With SQLite and Ollama, nothing leaves. A hosted Postgres or a cloud LLM sees exactly what you would expect them to; embeddings are always computed locally. Details: [docs/security.md](docs/security.md).
+Only where you point it. With SQLite and Ollama, nothing leaves. A hosted Postgres or a cloud LLM sees exactly what you would expect; embeddings are always computed locally — [docs/security.md](docs/security.md).
 
 **Do I need MeetStream?**
 Only to send a bot into a call. Pasting a transcript, uploading documents, search and Ask AI all work without it.
