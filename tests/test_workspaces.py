@@ -8,6 +8,8 @@ actually a member of, and that what you can see changes with it.
 import uuid
 
 import pytest
+
+from tests.test_security import _fresh_rate_limits  # noqa: F401 - autouse: reset per-address limits
 from sqlalchemy import select
 
 from app.database.connection import AsyncSessionLocal
@@ -212,3 +214,83 @@ async def test_create_workspace_rejects_an_empty_name(authed_client):
 @pytest.mark.asyncio
 async def test_create_workspace_needs_a_session(client):
     assert (await client.post("/api/members/workspaces", json={"name": "Nope"})).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_member_admin_follows_membership_not_the_workspace_someone_has_open():
+    """
+    Membership admin used to key on users.organization_id - the workspace a
+    person currently has open. A teammate looking at another of their
+    workspaces vanished from the Members list, a promotion was written to
+    users.role only and undone by their next switch, and Remove deleted the
+    whole account, taking their other workspaces with it.
+    """
+    from tests.test_security import _client, _signup
+
+    async with _client() as owner_a, _client() as owner_b, _client() as dana:
+        await _signup(owner_a, "a-owner@example.com", workspace="Alpha")
+        await _signup(owner_b, "b-owner@example.com", workspace="Beta")
+        code_a = (await owner_a.get("/api/members/workspace")).json()["join_code"]
+        code_b = (await owner_b.get("/api/members/workspace")).json()["join_code"]
+        await _signup(dana, "dana@example.com", join_code=code_a)
+        assert (await dana.post("/api/members/workspaces/join", json={"join_code": code_b})).status_code == 200
+        # Dana now has Beta open. Alpha's owner must still see and manage her.
+        assert (await dana.get("/api/auth/check")).json()["member"]["role"] == "member"
+
+        listed = (await owner_a.get("/api/members")).json()["members"]
+        dana_row = next((m for m in listed if m["email"] == "dana@example.com"), None)
+        assert dana_row is not None, [m["email"] for m in listed]
+        assert dana_row["role"] == "member"
+
+        # Promote in Alpha: sticks, and does not leak into Beta.
+        r = await owner_a.post(f"/api/members/{dana_row['id']}/role", json={"role": "owner"})
+        assert r.status_code == 200 and r.json()["role"] == "owner"
+        beta_list = (await owner_b.get("/api/members")).json()["members"]
+        assert next(m for m in beta_list if m["email"] == "dana@example.com")["role"] == "member"
+        ws = (await dana.get("/api/members/workspaces")).json()["workspaces"]
+        alpha_id = next(w["id"] for w in ws if w["name"] == "Alpha")
+        beta_id = next(w["id"] for w in ws if w["name"] == "Beta")
+        await dana.post(f"/api/members/workspaces/{alpha_id}/activate")
+        assert (await dana.get("/api/auth/check")).json()["member"]["role"] == "owner"
+        await dana.post(f"/api/members/workspaces/{beta_id}/activate")
+        assert (await dana.get("/api/auth/check")).json()["member"]["role"] == "member"
+
+        # Owner-count guards use memberships: Alpha now has two owners, so its
+        # original owner may step down.
+        await owner_a.post(f"/api/members/{dana_row['id']}/role", json={"role": "member"})
+        me_a = (await owner_a.get("/api/auth/check")).json()["member"]
+        assert (await owner_a.post(f"/api/members/{me_a['id']}/role", json={"role": "member"})).status_code == 400
+
+        # Password reset works while Dana has Beta open.
+        assert (await owner_a.post(f"/api/members/{dana_row['id']}/reset-password", json={"new_password": "reset-by-alpha-1"})).status_code == 200
+
+        # Remove from Alpha: Dana keeps Beta and her account.
+        r = await owner_a.delete(f"/api/members/{dana_row['id']}")
+        assert r.status_code == 200 and r.json()["account_deleted"] is False
+        assert all(m["email"] != "dana@example.com" for m in (await owner_a.get("/api/members")).json()["members"])
+        assert any(m["email"] == "dana@example.com" for m in (await owner_b.get("/api/members")).json()["members"])
+        assert (await dana.get("/api/auth/check")).json()["authenticated"] is True
+        assert [w["name"] for w in (await dana.get("/api/members/workspaces")).json()["workspaces"]] == ["Beta"]
+
+        # Removing from the last workspace deletes the account.
+        r = await owner_b.delete(f"/api/members/{dana_row['id']}")
+        assert r.status_code == 200 and r.json()["account_deleted"] is True
+        assert (await dana.get("/api/auth/check")).json() == {"authenticated": False}
+
+
+@pytest.mark.asyncio
+async def test_removing_someone_from_their_open_workspace_moves_them_to_another():
+    from tests.test_security import _client, _signup
+
+    async with _client() as owner_a, _client() as owner_b, _client() as kim:
+        await _signup(owner_a, "ka@example.com", workspace="Alpha")
+        await _signup(owner_b, "kb@example.com", workspace="Beta")
+        code_a = (await owner_a.get("/api/members/workspace")).json()["join_code"]
+        code_b = (await owner_b.get("/api/members/workspace")).json()["join_code"]
+        await _signup(kim, "kim@example.com", join_code=code_b)
+        await kim.post("/api/members/workspaces/join", json={"join_code": code_a})  # Alpha is now open
+        kim_id = next(m["id"] for m in (await owner_a.get("/api/members")).json()["members"] if m["email"] == "kim@example.com")
+        assert (await owner_a.delete(f"/api/members/{kim_id}")).status_code == 200
+        ws = (await kim.get("/api/members/workspaces")).json()["workspaces"]
+        assert [(w["name"], w["is_active"]) for w in ws] == [("Beta", True)]
+        assert (await kim.get("/api/notebook/notes")).status_code == 200  # still a working session

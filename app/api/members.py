@@ -142,10 +142,41 @@ async def set_workspace_permissions(
 
 @router.get("")
 async def list_members(org_id: uuid.UUID = Depends(get_current_org_id), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(User).where(User.organization_id == org_id, User.is_active.is_(True)).order_by(User.created_at)
-    )
-    return {"members": [MemberOut(id=str(u.id), name=u.name, email=u.email, role=u.role) for u in result.scalars().all()]}
+    """
+    Everyone who belongs to this workspace, with their role *here*.
+
+    Membership, not users.organization_id: that column is only the
+    workspace a person currently has open. Keying on it made a teammate who
+    was looking at another of their workspaces vanish from this list, and
+    showed the role they hold over there.
+    """
+    rows = (
+        await db.execute(
+            select(User, Membership.role)
+            .join(Membership, Membership.user_id == User.id)
+            .where(Membership.organization_id == org_id, User.is_active.is_(True))
+            .order_by(Membership.created_at)
+        )
+    ).all()
+    return {"members": [MemberOut(id=str(u.id), name=u.name, email=u.email, role=role) for u, role in rows]}
+
+
+async def _membership(db: AsyncSession, member_id: str, org_id: uuid.UUID) -> tuple[User, Membership]:
+    """The target account and its membership row in this workspace, or 404."""
+    try:
+        target_id = uuid.UUID(member_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid member id")
+    row = (
+        await db.execute(
+            select(User, Membership)
+            .join(Membership, Membership.user_id == User.id)
+            .where(User.id == target_id, Membership.organization_id == org_id, User.is_active.is_(True))
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Member not found.")
+    return row[0], row[1]
 
 
 @router.post("")
@@ -427,18 +458,7 @@ async def reset_member_password(
     if len(body.new_password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
 
-    try:
-        target_id = uuid.UUID(member_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid member id")
-
-    result = await db.execute(
-        select(User).where(User.id == target_id, User.organization_id == org_id, User.is_active.is_(True))
-    )
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="Member not found.")
-
+    user, _ = await _membership(db, member_id, org_id)
     user.password_hash = hash_password(body.new_password)
     await db.commit()
     return {"reset": True}
@@ -458,27 +478,24 @@ async def set_member_role(
     """Promote a teammate to owner or demote them to member. A workspace always keeps at least one owner."""
     if body.role not in (OWNER, "member"):
         raise HTTPException(status_code=400, detail="Role must be 'owner' or 'member'.")
-    try:
-        target_id = uuid.UUID(member_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid member id")
-    result = await db.execute(
-        select(User).where(User.id == target_id, User.organization_id == owner.organization_id, User.is_active.is_(True))
-    )
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="Member not found.")
-    if body.role != OWNER and user.role == OWNER and await _owner_count(db, owner.organization_id) <= 1:
+    org_id = owner.organization_id
+    user, membership = await _membership(db, member_id, org_id)
+    if body.role != OWNER and membership.role == OWNER and await _owner_count(db, org_id) <= 1:
         raise HTTPException(status_code=400, detail="A workspace needs at least one owner.")
-    user.role = body.role
+    # The role lives on the membership; users.role only mirrors it for the
+    # workspace the person has open right now. Writing users.role alone was
+    # undone the next time they switched workspaces.
+    membership.role = body.role
+    if user.organization_id == org_id:
+        user.role = body.role
     await db.commit()
-    return MemberOut(id=str(user.id), name=user.name, email=user.email, role=user.role)
+    return MemberOut(id=str(user.id), name=user.name, email=user.email, role=membership.role)
 
 
 async def _owner_count(db: AsyncSession, org_id: uuid.UUID) -> int:
     result = await db.execute(
-        select(func.count()).select_from(User).where(
-            User.organization_id == org_id, User.role == OWNER, User.is_active.is_(True)
+        select(func.count()).select_from(Membership).join(User, User.id == Membership.user_id).where(
+            Membership.organization_id == org_id, Membership.role == OWNER, User.is_active.is_(True)
         )
     )
     return result.scalar_one()
@@ -495,26 +512,34 @@ async def remove_member(member_id: str, current: User = Depends(get_current_user
     if not is_owner(current) and target_id != current.id:
         raise HTTPException(status_code=403, detail="Only a workspace owner can remove other members.")
 
-    result = await db.execute(
-        select(User).where(User.id == target_id, User.organization_id == org_id, User.is_active.is_(True))
-    )
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="Member not found.")
+    user, membership = await _membership(db, member_id, org_id)
 
-    count_result = await db.execute(
-        select(func.count()).select_from(User).where(User.organization_id == org_id, User.is_active.is_(True))
-    )
-    if count_result.scalar_one() <= 1:
+    member_count = (
+        await db.execute(
+            select(func.count()).select_from(Membership).join(User, User.id == Membership.user_id).where(
+                Membership.organization_id == org_id, User.is_active.is_(True)
+            )
+        )
+    ).scalar_one()
+    if member_count <= 1:
         raise HTTPException(status_code=400, detail="Can't remove the last remaining member.")
-    if user.role == OWNER and await _owner_count(db, org_id) <= 1:
+    if membership.role == OWNER and await _owner_count(db, org_id) <= 1:
         raise HTTPException(status_code=400, detail="Promote another member to owner before removing the last one.")
 
-    # Hard delete, not a soft is_active=False flag: the (organization_id, email)
-    # DB constraint means a deactivated-but-still-present row permanently blocks
-    # that email from ever signing up again in this workspace, which is
-    # confusing ("that email is already a member" for an email nobody can
-    # actually use). A removed member should just be gone.
-    await db.delete(user)
+    # Removing someone from *this* workspace must not touch the others they
+    # belong to. Drop the membership; if this was the workspace they had
+    # open, move them to another of theirs. Only an account left with no
+    # workspace at all is deleted outright - hard, not is_active=False, since
+    # a lingering row would block that email from ever signing up again.
+    await db.delete(membership)
+    await db.flush()
+    remaining = (
+        await db.execute(select(Membership).where(Membership.user_id == user.id).order_by(Membership.created_at))
+    ).scalars().all()
+    if not remaining:
+        await db.delete(user)
+    elif user.organization_id == org_id:
+        user.organization_id = remaining[0].organization_id
+        user.role = remaining[0].role
     await db.commit()
-    return {"removed": True}
+    return {"removed": True, "account_deleted": not remaining}
