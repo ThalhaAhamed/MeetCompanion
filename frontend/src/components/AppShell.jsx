@@ -1,4 +1,5 @@
-import { activateConnection, activateWorkspace, createWorkspace, joinWorkspace, listConnections, listMyWorkspaces } from '../api'
+import { activateConnection, addConnection, activateWorkspace, createWorkspace, joinWorkspace, listConnections, listMyWorkspaces } from '../api'
+import { PENDING_JOIN_KEY } from '../pendingJoin'
 import { useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import Logo from './Logo'
@@ -247,15 +248,38 @@ function WorkspaceSwitcher() {
           <div style={{ borderTop: '1px solid var(--border-subtle)' }} className="mt-1 pt-1">
             {mode ? (
               <form
-                className="flex items-center gap-1 p-1"
+                className="flex flex-col gap-1 p-1"
                 onSubmit={async (event) => {
                   event.preventDefault()
                   const value = event.target.elements.value.value.trim()
                   if (!value) return
+                  const dburl = (event.target.elements.dburl?.value || '').trim()
                   setBusy(true)
                   setError(null)
                   try {
-                    await (mode === 'join' ? joinWorkspace(value) : createWorkspace(value))
+                    if (mode === 'create') {
+                      await createWorkspace(value)
+                    } else if (!dburl) {
+                      // A workspace on the database we are already on: the
+                      // code is looked up here and becomes a membership.
+                      await joinWorkspace(value)
+                    } else {
+                      // Another database. Save it, switch to it, and then
+                      // either join straight away (we already have an account
+                      // there) or hand the code to account creation, which is
+                      // where a first visit to someone else's database goes.
+                      const conn = await addConnection({ url: dburl })
+                      const result = await activateConnection(conn.id, null)
+                      if (result.signed_in) {
+                        await joinWorkspace(value)
+                      } else {
+                        try {
+                          window.sessionStorage.setItem(PENDING_JOIN_KEY, value)
+                        } catch {
+                          // Private mode: the code just has to be typed again.
+                        }
+                      }
+                    }
                     window.location.reload()
                   } catch (err) {
                     setError(err.message)
@@ -263,6 +287,7 @@ function WorkspaceSwitcher() {
                   }
                 }}
               >
+                <div className="flex items-center gap-1">
                 <input
                   name="value"
                   className="mc-input py-1 text-xs"
@@ -274,6 +299,22 @@ function WorkspaceSwitcher() {
                 <button type="submit" className="mc-btn mc-btn-primary px-2 py-1 text-xs" disabled={busy}>
                   {mode === 'join' ? 'Join' : 'Create'}
                 </button>
+                </div>
+                {mode === 'join' && Array.isArray(connections) && (
+                  <>
+                    <input
+                      name="dburl"
+                      className="mc-input py-1 text-xs"
+                      placeholder="Database connection string (another database)"
+                      aria-label="Database connection string"
+                      disabled={busy}
+                    />
+                    <p className="px-1 text-[0.65rem]" style={{ color: 'var(--text-faint)' }}>
+                      Leave blank for a workspace on this database. A workspace lives in one
+                      database - to join your team's, paste the connection string they shared.
+                    </p>
+                  </>
+                )}
               </form>
             ) : (
               <>

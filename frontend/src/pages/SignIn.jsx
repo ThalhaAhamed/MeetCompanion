@@ -2,17 +2,22 @@ import { useState } from 'react'
 import Logo from '../components/Logo'
 import { Card, ErrorMessage, Field, Spinner } from '../components/ui'
 import { addMember, login } from '../api'
+import { takePendingJoin } from '../pendingJoin'
 
 export default function SignIn({ onSignedIn, hasMembers = true }) {
-  // Fresh install (no account yet): open on Create account, not a sign-in
-  // form nobody can use.
-  const [mode, setMode] = useState(hasMembers ? 'signin' : 'create')
+  // A join code carried over from the workspace picker: the person asked to
+  // join a workspace on another database, we switched to it, and they have no
+  // account here yet. Read once, so a later visit is an ordinary sign-in.
+  const [carriedJoinCode] = useState(takePendingJoin)
+  // Fresh install (no account yet), or arriving with a join code: open on
+  // Create account, not a sign-in form nobody can use.
+  const [mode, setMode] = useState(hasMembers && !carriedJoinCode ? 'signin' : 'create')
   const [form, setForm] = useState({
     name: '',
     email: '',
     password: '',
     workspace_name: '',
-    join_code: '',
+    join_code: carriedJoinCode,
   })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -88,6 +93,15 @@ export default function SignIn({ onSignedIn, hasMembers = true }) {
           </div>
 
           <form onSubmit={submit}>
+            {carriedJoinCode && mode === 'create' && (
+              <p
+                className="mb-4 rounded-lg px-3 py-2 text-xs"
+                style={{ backgroundColor: 'var(--brand-soft)', color: 'var(--brand-soft-text)' }}
+              >
+                Connected to that database. Create your account on it to join the workspace -
+                the join code is filled in below.
+              </p>
+            )}
             {mode === 'create' && (
               <Field label="Your name" htmlFor="name">
                 <input
