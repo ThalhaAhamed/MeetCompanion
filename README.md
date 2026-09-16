@@ -11,7 +11,7 @@
 ![Platforms](https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-3b4873)
 [![License: MIT](https://img.shields.io/badge/license-MIT-e3b1bc)](LICENSE)
 
-[Quick start](#-quick-start) · [Install](#-installation) · [Features](#-features) · [See it work](#-see-it-work) · [Docker](#-getting-started-with-docker) · [Configuration](#%EF%B8%8F-configuration) · [Tests](#-running-tests) · [FAQ](#-faq) · [Docs](#-documentation)
+[Quick start](#-quick-start) · [Install](#-installation) · [Features](#-features) · [Demo](#-demo) · [Docker](#-getting-started-with-docker) · [Configuration](#%EF%B8%8F-configuration) · [Tests](#-running-tests) · [Troubleshooting](#-troubleshooting) · [FAQ](#-faq) · [Docs](#-documentation)
 
 </div>
 
@@ -70,7 +70,7 @@ docker compose up -d      # → http://localhost:8000
 - 👥 **Workspaces** — share one with a join code; owners decide what members may add, edit, delete, export or invite.
 - 🔌 **Provider-agnostic** — LLMs and databases are adapters behind an interface; adding one is a single file.
 
-## 🎯 See it work
+## 🎬 Demo
 
 ### 💬 Ask AI
 
@@ -138,6 +138,24 @@ A template agent holds the starting system prompt, first message, provider, mode
 
 **Providers are interfaces, not conditionals.** Adding an LLM vendor is one adapter in `app/providers/llm/` plus a registry entry; the adapter's declared fields *are* the settings form. **The database is swapped, not abstracted away** — only similarity and keyword search differ between databases, and those live in `app/providers/database/`. The full picture: [docs/architecture.md](docs/architecture.md).
 
+## 🗂️ Project structure
+
+```
+app/            FastAPI backend
+  api/          one router per UI page (meetings, notebook, members, …)
+  services/     the post-call pipeline, extraction, MeetStream client
+  providers/    swappable adapters: llm/<vendor>.py, database/<dialect>.py
+  database/     org-scoped repositories, startup bootstrap
+  models/       SQLAlchemy models, Pydantic schemas, portable column types
+  migrations/   Alembic revisions (the schema's source of truth)
+  mcp/          the MCP server the in-call agent talks to
+  rag/          chunking, embeddings, hybrid retrieval
+frontend/src/   React app: pages/ (one per route), components/, api.js
+desktop/        Electron shell + PyInstaller spec
+tests/          pytest (hermetic, SQLite), frontend/src/__tests__ (vitest)
+docs/           documentation and media
+```
+
 ## 🐳 Getting started with Docker
 
 ```bash
@@ -175,6 +193,10 @@ The full list, precedence rules and Docker notes: [docs/configuration.md](docs/c
 
 Why each was chosen: [docs/development.md#tech-stack](docs/development.md#tech-stack).
 
+## 📦 Dependencies
+
+Pinned in [`requirements.txt`](requirements.txt) (Python) and [`frontend/package.json`](frontend/package.json) / [`desktop/package.json`](desktop/package.json) (Node). No vendor SDKs — every LLM adapter is plain `httpx`. `pip-audit` runs in CI; the local embedding model (~90 MB) downloads on first use and is cached in the data directory. Postgres drivers and pgvector are only used when you point the app at Postgres.
+
 ## 🧪 Running tests
 
 ```bash
@@ -183,7 +205,23 @@ npm --prefix frontend test               # 15 vitest page and unit tests
 npm --prefix frontend run lint           # oxlint, must be 0 errors
 ```
 
-CI runs the backend suite on **SQLite and PostgreSQL + pgvector**, the frontend checks, `pip-audit`, and builds and boots the Docker image on every push. Fixtures and conventions: [docs/development.md](docs/development.md) and [AGENTS.md](AGENTS.md#tests).
+Fixtures and conventions: [docs/development.md](docs/development.md) and [AGENTS.md](AGENTS.md#tests).
+
+## 🔁 CI/CD
+
+- **On every push and pull request** ([`ci.yml`](.github/workflows/ci.yml)): the backend suite on **SQLite and PostgreSQL + pgvector**, frontend lint/tests/build, `pip-audit`, and a Docker image build that is booted and probed on `/health`.
+- **On a `v*` tag** ([`release.yml`](.github/workflows/release.yml)): the version is stamped from the tag, the server is frozen with PyInstaller, and Windows, macOS (arm64 + x64) and Linux installers are built and attached to a GitHub release — about 40 minutes from tag to published.
+
+## 🩺 Troubleshooting
+
+| Symptom | Usual cause | Fix |
+|---|---|---|
+| Meeting sits at *Extracting…* / *joining* | MeetStream cannot reach your server | Public URL or tunnel in `MCP_SERVER_URL`, re-activate the agent — [live meetings](docs/live-meetings.md) |
+| *Processed without AI (…)* on a meeting | Provider failed; the bracket has its reason | Fix the provider in Settings (e.g. `ollama pull <model>`), then **Reprocess** |
+| Database shows *Not reachable* | Host, credentials or SSL | The banner carries the driver's message; Neon/Supabase strings paste as-is |
+| Blank page after upgrading from v0.2 | Accounts predating workspaces | Fixed in v0.3.1 — upgrade |
+
+More cases: [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ## ❓ FAQ
 
