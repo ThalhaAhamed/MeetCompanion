@@ -103,7 +103,7 @@ describe('Onboarding wizard', () => {
     expect(screen.getByText('Joining with code zzz')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Finish setup' }))
-    expect(await screen.findByText(/No workspace found with that join code/)).toBeInTheDocument()
+    expect(await screen.findByText(/No workspace with that join code exists in the database you connected to/)).toBeInTheDocument()
     expect(addMember).toHaveBeenCalledWith(expect.objectContaining({ join_code: 'zzz', workspace_name: undefined }))
     expect(completeSetup).toHaveBeenCalledTimes(1)
 

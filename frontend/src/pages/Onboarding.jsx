@@ -248,7 +248,15 @@ export default function Onboarding({ onComplete }) {
       }
       onComplete?.()
     } catch (error) {
-      setSaveError(error.message)
+      // In the join flow the code is looked up in the database just
+      // connected to. "Not found" is at least as likely to mean the wrong
+      // database as a mistyped code, so say both.
+      const notFound = mode === 'join' && /No workspace found with that join code/i.test(error.message)
+      setSaveError(
+        notFound
+          ? 'No workspace with that join code exists in the database you connected to. Check the code, and that the connection string is the one your workspace owner shared - a workspace lives in one database, and every member must use that one.'
+          : error.message,
+      )
     } finally {
       setSaving(false)
     }
