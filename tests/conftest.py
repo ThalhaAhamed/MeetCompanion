@@ -6,6 +6,7 @@ no Postgres server, no Docker and no network. DATABASE_URL is set before any
 application module is imported, because the engine is constructed at import
 time from settings.
 """
+import asyncio
 import os
 import tempfile
 from pathlib import Path
@@ -55,11 +56,34 @@ async def database_schema():
     written by one test cannot leak into the next and make assertions about
     counts or ordering depend on execution order.
     """
-    async with current_engine().begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+    engine = current_engine()
+    # A background task from the previous test (embedding a note, say) can
+    # still hold a connection with a lock on a table we are about to drop;
+    # DROP TABLE then deadlocks against it. Only Postgres has that problem -
+    # SQLite serialises writers - so there we close every other session on
+    # the database first. Those tasks belong to a test that is already over.
+    postgres = engine.dialect.name == "postgresql"
+    if postgres:
+        from sqlalchemy import text
+
+        await engine.dispose()
+        async with engine.begin() as conn:
+            await conn.execute(text(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+            ))
+    for attempt in range(3):
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.drop_all)
+            break
+        except Exception as exc:  # noqa: BLE001 - only a Postgres deadlock is retried
+            if not postgres or "deadlock" not in str(exc).lower() or attempt == 2:
+                raise
+            await asyncio.sleep(0.2 * (attempt + 1))
     # The same bootstrap the server runs: on Postgres that also enables
     # pgvector and creates the vector indexes, which create_all alone cannot.
-    await bootstrap(current_engine())
+    await bootstrap(engine)
     yield
 
 
