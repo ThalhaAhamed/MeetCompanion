@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Logo from '../components/Logo'
 import { Card, ErrorMessage, Field, Spinner } from '../components/ui'
-import { addMember, login } from '../api'
+import { activateConnection, addConnection, addMember, checkJoin, joinWorkspace, listConnections, login } from '../api'
 import { takePendingJoin } from '../pendingJoin'
 
 export default function SignIn({ onSignedIn, hasMembers = true }) {
@@ -12,15 +12,35 @@ export default function SignIn({ onSignedIn, hasMembers = true }) {
   // Fresh install (no account yet), or arriving with a join code: open on
   // Create account, not a sign-in form nobody can use.
   const [mode, setMode] = useState(hasMembers && !carriedJoinCode ? 'signin' : 'create')
+  // Creating an account either starts a workspace or joins one - never
+  // "leave a field blank to mean the other". With a code in hand, or other
+  // accounts already here, joining is the likely reason to be on this form.
+  const [intent, setIntent] = useState(carriedJoinCode || hasMembers ? 'join' : 'new')
   const [form, setForm] = useState({
     name: '',
     email: '',
     password: '',
     workspace_name: '',
     join_code: carriedJoinCode,
+    dburl: '',
   })
+  // Desktop app only (the endpoint is 404 anywhere else): the workspace a
+  // code names lives in one database, and on the desktop that is not
+  // necessarily the one this app is on, so joining asks which. On a shared
+  // server everyone is on the same database and a code is enough.
+  const [desktop, setDesktop] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    listConnections()
+      .then(() => !cancelled && setDesktop(true))
+      .catch(() => !cancelled && setDesktop(false))
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   function update(key, value) {
     setForm((current) => ({ ...current, [key]: value }))
@@ -34,14 +54,35 @@ export default function SignIn({ onSignedIn, hasMembers = true }) {
       if (mode === 'signin') {
         await login(form.email.trim(), form.password)
       } else {
+        const joining = intent === 'join'
+        const dburl = joining && desktop && !carriedJoinCode ? form.dburl.trim() : ''
+        if (dburl) {
+          // The workspace is on another database. Confirm the code is on it
+          // before anything moves, then save it, switch to it, and create
+          // the account there. If this machine already has an account on it,
+          // the switch signs us in and the code just adds a membership.
+          await checkJoin({ url: dburl, join_code: form.join_code.trim() })
+          const conn = await addConnection({ url: dburl })
+          const result = await activateConnection(conn.id, null)
+          if (result.signed_in) {
+            await joinWorkspace(form.join_code.trim())
+            window.location.reload()
+            return
+          }
+        }
         await addMember({
           name: form.name.trim(),
           email: form.email.trim(),
           password: form.password,
-          workspace_name: form.workspace_name.trim() || undefined,
-          join_code: form.join_code.trim() || undefined,
+          workspace_name: joining ? undefined : form.workspace_name.trim(),
+          join_code: joining ? form.join_code.trim() : undefined,
         })
         await login(form.email.trim(), form.password)
+        if (dburl) {
+          // The database changed underneath the app; start clean on it.
+          window.location.reload()
+          return
+        }
       }
       onSignedIn?.()
     } catch (err) {
@@ -140,26 +181,76 @@ export default function SignIn({ onSignedIn, hasMembers = true }) {
 
             {mode === 'create' && (
               <>
-                <Field
-                  label="Workspace name"
-                  hint="Leave blank to join an existing workspace with a code."
-                  htmlFor="workspace"
+                <div className="mc-label">Workspace</div>
+                <div
+                  className="mb-4 grid grid-cols-2 gap-1 rounded-xl p-1"
+                  role="radiogroup"
+                  aria-label="Workspace"
+                  style={{ backgroundColor: 'var(--surface-raised)' }}
                 >
-                  <input
-                    id="workspace"
-                    className="mc-input"
-                    value={form.workspace_name}
-                    onChange={(event) => update('workspace_name', event.target.value)}
-                  />
-                </Field>
-                <Field label="Join code" hint="Optional — to join a teammate's workspace." htmlFor="join">
-                  <input
-                    id="join"
-                    className="mc-input"
-                    value={form.join_code}
-                    onChange={(event) => update('join_code', event.target.value)}
-                  />
-                </Field>
+                  {[
+                    ['new', 'Start a new one'],
+                    ['join', "Join my team's workspace"],
+                  ].map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      role="radio"
+                      aria-checked={intent === value}
+                      className="rounded-lg py-1.5 text-sm font-medium transition-colors"
+                      style={{
+                        backgroundColor: intent === value ? 'var(--surface-panel)' : 'transparent',
+                        color: intent === value ? 'var(--text-strong)' : 'var(--text-muted)',
+                      }}
+                      onClick={() => {
+                        setIntent(value)
+                        setError(null)
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {intent === 'new' ? (
+                  <Field label="Workspace name" hint="You will be its owner." htmlFor="workspace">
+                    <input
+                      id="workspace"
+                      className="mc-input"
+                      required
+                      value={form.workspace_name}
+                      onChange={(event) => update('workspace_name', event.target.value)}
+                    />
+                  </Field>
+                ) : (
+                  <>
+                    {desktop && !carriedJoinCode && (
+                      <Field
+                        label="Team's database"
+                        hint="A workspace lives in one database, and the code only means something there. Paste the connection string your team shared; leave blank only if the workspace is on the database this app already uses."
+                        htmlFor="dburl"
+                      >
+                        <input
+                          id="dburl"
+                          className="mc-input"
+                          placeholder="postgresql://..."
+                          autoComplete="off"
+                          value={form.dburl}
+                          onChange={(event) => update('dburl', event.target.value)}
+                        />
+                      </Field>
+                    )}
+                    <Field label="Join code" hint="Ask a workspace owner - it is on their Members page. They approve your request before you can get in." htmlFor="join">
+                      <input
+                        id="join"
+                        className="mc-input"
+                        required
+                        value={form.join_code}
+                        onChange={(event) => update('join_code', event.target.value)}
+                      />
+                    </Field>
+                  </>
+                )}
               </>
             )}
 

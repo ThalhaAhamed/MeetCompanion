@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Page, PageHeader } from '../components/AppShell'
 import { useTheme } from '../components/AppShell'
 import { Badge, Card, ConnectionBadge, ErrorMessage, Field, Loading, Spinner } from '../components/ui'
-import { useCan, useIsOwner } from '../user'
+import { useCan, useIsOwner, useUser } from '../user'
 import {
   clearMeetstreamApiKey,
   completeSetup,
@@ -39,6 +39,7 @@ function EnvManagedNotice() {
 }
 
 export default function Settings() {
+  const user = useUser()
   const isOwner = useIsOwner()
   const canExport = useCan('export_workspace')
   const [section, setSection] = useState('ai')
@@ -203,6 +204,17 @@ export default function Settings() {
                 The AI provider ({status.llm?.provider || 'not set'}
                 {status.llm?.model ? ` · ${status.llm.model}` : ''}) and database ({status.database?.provider}) are
                 shared by everyone on this server. Ask an owner of your workspace to change them.
+              </p>
+            </Card>
+          )}
+
+          {section === 'ai' && user?.workspace_ai?.mode === 'workspace' && (
+            <Card className="mb-4">
+              <h2 className="mb-1 text-base font-semibold">This workspace uses one provider for everyone</h2>
+              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                An owner set {user.workspace_ai.provider}
+                {user.workspace_ai.model ? ` (${user.workspace_ai.model})` : ''} for the whole workspace, so the
+                settings below are not used here. They still apply to your other workspaces.
               </p>
             </Card>
           )}

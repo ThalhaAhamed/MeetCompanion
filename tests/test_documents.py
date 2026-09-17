@@ -39,7 +39,10 @@ async def test_upload_index_ask_and_delete(authed_client, monkeypatch):
     from app.providers.llm import LLMConfig
     import app.api.notebook as notebook
 
-    monkeypatch.setattr(notebook, "get_llm_provider", lambda: _EchoProvider(LLMConfig(provider="echo", model="m")))
+    async def _echo(org_id, db):
+        return _EchoProvider(LLMConfig(provider="echo", model="m"))
+
+    monkeypatch.setattr(notebook, "provider_for_workspace", _echo)
 
     md = b"# Refund policy\n\nRefunds are issued within 14 days of purchase for annual plans.\n"
     up = await authed_client.post("/api/documents/upload", files={"file": ("policy.md", md, "text/markdown")})

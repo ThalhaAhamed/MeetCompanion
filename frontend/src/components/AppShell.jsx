@@ -1,4 +1,4 @@
-import { activateConnection, addConnection, activateWorkspace, createWorkspace, joinWorkspace, listConnections, listMyWorkspaces } from '../api'
+import { activateConnection, addConnection, activateWorkspace, checkJoin, createWorkspace, joinWorkspace, listConnections, listMyWorkspaces } from '../api'
 import { PENDING_JOIN_KEY } from '../pendingJoin'
 import { useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
@@ -119,6 +119,9 @@ function WorkspaceSwitcher() {
   const [busy, setBusy] = useState(false)
   const [mode, setMode] = useState(null)  // 'join' | 'create'
   const [error, setError] = useState(null)
+  // "Request sent" after a join: nothing switches until an owner approves,
+  // so a reload would look like nothing happened.
+  const [notice, setNotice] = useState(null)
   const box = useRef(null)
 
   useEffect(() => {
@@ -154,7 +157,7 @@ function WorkspaceSwitcher() {
   const active = workspaces.find((w) => w.is_active) || workspaces[0]
 
   async function choose(workspace, connectionId) {
-    if (busy) return
+    if (busy || workspace.status === 'pending') return
     setBusy(true)
     try {
       if (connectionId) {
@@ -206,13 +209,16 @@ function WorkspaceSwitcher() {
                           type="button"
                           role="menuitemradio"
                           aria-checked={conn.active && workspace.is_active}
+                          aria-disabled={workspace.status === 'pending' || undefined}
                           disabled={busy}
                           className="mc-nav-item flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm"
+                          style={workspace.status === 'pending' ? { color: 'var(--text-muted)', cursor: 'default' } : undefined}
+                          title={workspace.status === 'pending' ? 'Waiting for an owner to approve your request' : undefined}
                           onClick={() => choose(workspace, conn.active ? null : conn.id)}
                         >
                           <span className="truncate">{workspace.name}</span>
                           <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
-                            {conn.active && workspace.is_active ? 'Current' : workspace.role}
+                            {workspace.status === 'pending' ? 'Pending approval' : conn.active && workspace.is_active ? 'Current' : workspace.role}
                           </span>
                         </button>
                       ))
@@ -235,13 +241,16 @@ function WorkspaceSwitcher() {
                   type="button"
                   role="menuitemradio"
                   aria-checked={workspace.is_active}
+                  aria-disabled={workspace.status === 'pending' || undefined}
                   disabled={busy}
                   className="mc-nav-item flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm"
+                  style={workspace.status === 'pending' ? { color: 'var(--text-muted)', cursor: 'default' } : undefined}
+                  title={workspace.status === 'pending' ? 'Waiting for an owner to approve your request' : undefined}
                   onClick={() => choose(workspace)}
                 >
                   <span className="truncate">{workspace.name}</span>
                   <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
-                    {workspace.is_active ? 'Current' : workspace.role}
+                    {workspace.status === 'pending' ? 'Pending approval' : workspace.is_active ? 'Current' : workspace.role}
                   </span>
                 </button>
               ))}
@@ -256,18 +265,32 @@ function WorkspaceSwitcher() {
                   const dburl = (event.target.elements.dburl?.value || '').trim()
                   setBusy(true)
                   setError(null)
+                  setNotice(null)
                   try {
                     if (mode === 'create') {
                       await createWorkspace(value)
                     } else if (!dburl) {
                       // A workspace on the database we are already on: the
-                      // code is looked up here and becomes a membership.
-                      await joinWorkspace(value)
+                      // code is looked up here and becomes a request, which
+                      // an owner of that workspace has to approve.
+                      const result = await joinWorkspace(value)
+                      if (result.pending) {
+                        const data = await listMyWorkspaces().catch(() => null)
+                        if (data) setWorkspaces(data.workspaces || [])
+                        setNotice(`Request sent. An owner of ${result.name} has to approve it before you can open it.`)
+                        setMode(null)
+                        setBusy(false)
+                        return
+                      }
                     } else {
-                      // Another database. Save it, switch to it, and then
-                      // either join straight away (we already have an account
-                      // there) or hand the code to account creation, which is
-                      // where a first visit to someone else's database goes.
+                      // Another database. Make sure the code is actually on
+                      // it *before* switching - a wrong code used to leave
+                      // the app pointed at a database with no account on it.
+                      // Then save it, switch to it, and either join straight
+                      // away (we already have an account there) or hand the
+                      // code to account creation, which is where a first
+                      // visit to someone else's database goes.
+                      await checkJoin({ url: dburl, join_code: value })
                       const conn = await addConnection({ url: dburl })
                       const result = await activateConnection(conn.id, null)
                       if (result.signed_in) {
@@ -287,34 +310,36 @@ function WorkspaceSwitcher() {
                   }
                 }}
               >
+                {mode === 'join' && Array.isArray(connections) && (
+                  <>
+                    {/* The database comes first: a code only means something on one. */}
+                    <input
+                      name="dburl"
+                      className="mc-input py-1 text-xs"
+                      placeholder="Team's database connection string"
+                      aria-label="Database connection string"
+                      autoFocus
+                      disabled={busy}
+                    />
+                    <p className="px-1 text-[0.65rem]" style={{ color: 'var(--text-faint)' }}>
+                      A workspace lives in one database. Paste the connection string your team
+                      shared, or leave blank for a workspace on this database.
+                    </p>
+                  </>
+                )}
                 <div className="flex items-center gap-1">
                 <input
                   name="value"
                   className="mc-input py-1 text-xs"
                   placeholder={mode === 'join' ? 'Join code' : 'Workspace name'}
                   aria-label={mode === 'join' ? 'Workspace join code' : 'New workspace name'}
-                  autoFocus
+                  autoFocus={mode !== 'join' || !Array.isArray(connections)}
                   disabled={busy}
                 />
                 <button type="submit" className="mc-btn mc-btn-primary px-2 py-1 text-xs" disabled={busy}>
                   {mode === 'join' ? 'Join' : 'Create'}
                 </button>
                 </div>
-                {mode === 'join' && Array.isArray(connections) && (
-                  <>
-                    <input
-                      name="dburl"
-                      className="mc-input py-1 text-xs"
-                      placeholder="Database connection string (another database)"
-                      aria-label="Database connection string"
-                      disabled={busy}
-                    />
-                    <p className="px-1 text-[0.65rem]" style={{ color: 'var(--text-faint)' }}>
-                      Leave blank for a workspace on this database. A workspace lives in one
-                      database - to join your team's, paste the connection string they shared.
-                    </p>
-                  </>
-                )}
               </form>
             ) : (
               <>
@@ -337,6 +362,11 @@ function WorkspaceSwitcher() {
             {error && (
               <div className="px-3 py-1 text-xs" style={{ color: 'var(--color-danger-500, #e5484d)' }}>
                 {error}
+              </div>
+            )}
+            {notice && (
+              <div role="status" className="px-3 py-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                {notice}
               </div>
             )}
           </div>

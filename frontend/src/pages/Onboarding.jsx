@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Logo from '../components/Logo'
 import { CheckIcon, ChevronRightIcon } from '../components/Icons'
 import { Card, ErrorMessage, Field, Loading, Spinner } from '../components/ui'
-import { addMember, completeSetup, getProviderCatalog, login, setMeetstreamApiKey, testLlmProvider } from '../api'
+import { addMember, checkJoin, completeSetup, getProviderCatalog, login, setMeetstreamApiKey, testLlmProvider } from '../api'
 import DatabasePicker, { isDatabaseFormComplete } from '../components/DatabasePicker'
 import ProviderFields from '../components/ProviderFields'
 
@@ -128,6 +128,10 @@ export default function Onboarding({ onComplete }) {
   const [storage, setStorage] = useState('sqlite') // the Recommended default
   const [dbValues, setDbValues] = useState({})
   const [dbTest, setDbTest] = useState(null)
+  // Join path: the code is checked against the database *with* it, before
+  // either is applied, so "wrong code" or "wrong database" is caught here
+  // rather than after the app has already been pointed at that database.
+  const [joinCheck, setJoinCheck] = useState({ busy: false, error: null, workspace: null })
 
   // Step 3 - AI
   const [provider, setProvider] = useState('ollama')
@@ -278,11 +282,27 @@ export default function Onboarding({ onComplete }) {
     return <Loading label="Preparing setup…" />
   }
 
-  const canLeaveWorkspace = mode === 'start' ? workspaceName.trim().length > 0 : joinCode.trim().length > 0
+  const canLeaveWorkspace = mode === 'start' ? workspaceName.trim().length > 0 : true
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account.email.trim())
   const canLeaveAccount = account.name.trim().length > 0 && emailOk && account.password.length >= 8
   const dbEntry = databases.find((item) => item.name === storage)
-  const canLeaveStorage = Boolean(dbEntry) && isDatabaseFormComplete(dbEntry, dbValues)
+  const canLeaveStorage =
+    Boolean(dbEntry) && isDatabaseFormComplete(dbEntry, dbValues) && (mode === 'start' || joinCode.trim().length > 0)
+
+  async function leaveStorage() {
+    if (mode !== 'join') {
+      setStep(3)
+      return
+    }
+    setJoinCheck({ busy: true, error: null, workspace: null })
+    try {
+      const result = await checkJoin({ provider: storage, values: dbValues, join_code: joinCode.trim() })
+      setJoinCheck({ busy: false, error: null, workspace: result.workspace })
+      setStep(3)
+    } catch (error) {
+      setJoinCheck({ busy: false, error: error.message, workspace: null })
+    }
+  }
   const canLeaveProvider =
     Boolean(values.model) &&
     Boolean(descriptor) &&
@@ -315,7 +335,7 @@ export default function Onboarding({ onComplete }) {
                 Just you, or you are setting it up for your team. You will be its owner.
               </OptionCard>
               <OptionCard selected={mode === 'join'} onSelect={() => chooseMode('join')} title="Join my team's workspace">
-                Someone gave you a join code. You will connect to the team's shared database.
+                Someone gave you a join code. Next you connect to the team's database and enter the code there.
               </OptionCard>
             </div>
 
@@ -332,20 +352,11 @@ export default function Onboarding({ onComplete }) {
                   />
                 </Field>
               ) : (
-                <Field
-                  label="Join code"
-                  htmlFor="ob-join"
-                  hint="From your workspace owner's Members page. You will also need the connection string of the team's database, two steps from now."
-                >
-                  <input
-                    id="ob-join"
-                    className="mc-input font-mono"
-                    value={joinCode}
-                    onChange={(e) => setJoinCode(e.target.value)}
-                    placeholder="e.g. 646f1536"
-                    autoFocus
-                  />
-                </Field>
+                <p className="text-sm" style={muted}>
+                  You will need two things from your workspace owner: the connection string of the
+                  team's database, and the join code from their Members page. An owner approves your
+                  request before you can get in.
+                </p>
               )}
             </div>
 
@@ -413,7 +424,29 @@ export default function Onboarding({ onComplete }) {
               onTestResult={setDbTest}
             />
 
-            <StepButtons onBack={() => setStep(1)} onNext={() => setStep(3)} nextDisabled={!canLeaveStorage} />
+            {mode === 'join' && (
+              <div className="mt-6 border-t pt-5" style={{ borderColor: 'var(--border-subtle)' }}>
+                <Field
+                  label="Join code"
+                  htmlFor="ob-join"
+                  hint="From your workspace owner's Members page. It is checked against this database when you continue."
+                  error={joinCheck.error}
+                >
+                  <input
+                    id="ob-join"
+                    className="mc-input font-mono"
+                    value={joinCode}
+                    onChange={(e) => {
+                      setJoinCode(e.target.value)
+                      if (joinCheck.error) setJoinCheck({ busy: false, error: null, workspace: null })
+                    }}
+                    placeholder="e.g. 646f1536"
+                  />
+                </Field>
+              </div>
+            )}
+
+            <StepButtons onBack={() => setStep(1)} onNext={leaveStorage} nextDisabled={!canLeaveStorage} busy={joinCheck.busy} />
           </Card>
         )}
 
@@ -466,7 +499,7 @@ export default function Onboarding({ onComplete }) {
             </p>
 
             <dl className="divide-y" style={{ borderColor: 'var(--border-subtle)' }}>
-              <Row label="Workspace">{mode === 'start' ? `${workspaceName.trim()} (new - you own it)` : `Joining with code ${joinCode.trim()}`}</Row>
+              <Row label="Workspace">{mode === 'start' ? `${workspaceName.trim()} (new - you own it)` : `Joining ${joinCheck.workspace || 'with code ' + joinCode.trim()} - an owner approves your request`}</Row>
               <Row label="Account">{account.name.trim()} · {account.email.trim()}</Row>
               <Row label="MeetStream">{account.meetstream_api_key.trim() ? 'API key provided' : 'Not now'}</Row>
               <Row label="Storage">{dbEntry?.label || storage}</Row>

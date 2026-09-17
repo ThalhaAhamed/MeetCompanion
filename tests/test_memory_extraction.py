@@ -9,7 +9,7 @@ from app.models.database import MemoryType
 @pytest.mark.asyncio
 async def test_heuristic_memory_extraction(monkeypatch):
     # Exercise the rule-based parser itself, whatever provider is configured.
-    monkeypatch.setattr("app.services.memory.try_get_llm_provider", lambda: None)
+    monkeypatch.setattr("app.services.memory.try_get_llm_provider", lambda workspace=None: None)
     service = MemoryExtractionService()
     transcript = """John: Acme requires SSO integration before launch.
 Sarah: I will send the SOC 2 compliance documentation by tomorrow.
@@ -113,7 +113,7 @@ async def test_fallback_keeps_the_providers_actual_error(monkeypatch):
     async def boom(*a, **k):
         raise LLMError('Ollama (local) request failed (500): {"error":"cudaMalloc failed: out of memory"}')
 
-    monkeypatch.setattr("app.services.memory.try_get_llm_provider", lambda: Broken())
+    monkeypatch.setattr("app.services.memory.try_get_llm_provider", lambda workspace=None: Broken())
     service = MemoryExtractionService()
     monkeypatch.setattr(service, "_extract_with_provider", boom)
 
@@ -122,6 +122,6 @@ async def test_fallback_keeps_the_providers_actual_error(monkeypatch):
     assert "out of memory" in result["ai_error"]
     assert result["ai_error"].startswith("Ollama (local): ")
 
-    monkeypatch.setattr("app.services.memory.try_get_llm_provider", lambda: None)
+    monkeypatch.setattr("app.services.memory.try_get_llm_provider", lambda workspace=None: None)
     result = await service.extract_memories(transcript_text="A: we ship on Friday.", meeting_title="t")
     assert result["ai_error"] == "No AI provider is configured."

@@ -17,7 +17,7 @@ Priya: Decision - we keep Stripe as the only payment provider this quarter."""
 async def _processed_meeting(client, monkeypatch, title="Q3 sync"):
     from app.services.processing import processing_pipeline
 
-    monkeypatch.setattr("app.services.memory.try_get_llm_provider", lambda: None)
+    monkeypatch.setattr("app.services.memory.try_get_llm_provider", lambda workspace=None: None)
     r = await client.post("/api/meetings/upload", json={"title": title, "transcript": TRANSCRIPT, "project_name": "Atlas"})
     assert r.status_code == 202, r.text
     meeting_id = uuid.UUID(r.json()["id"])

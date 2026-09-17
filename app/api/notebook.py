@@ -30,7 +30,7 @@ from app import permissions as perms
 from app.providers.database import get_search_backend
 from app.providers.llm import ChatMessage, LLMConfigError, LLMError
 from app.services.embedding import embedding_service
-from app.services.llm import get_llm_provider
+from app.services.llm import provider_for_workspace
 import logging
 
 logger = logging.getLogger(__name__)
@@ -538,7 +538,7 @@ async def ask_notebook(
     notebook never has to fit in the model's context.
     """
     try:
-        provider = get_llm_provider()
+        provider = await provider_for_workspace(org_id, db)
     except LLMConfigError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

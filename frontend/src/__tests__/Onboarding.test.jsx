@@ -9,8 +9,9 @@ vi.mock('../api', () => ({
   setMeetstreamApiKey: vi.fn(),
   testLlmProvider: vi.fn(),
   testDatabase: vi.fn(),
+  checkJoin: vi.fn(),
 }))
-import { addMember, completeSetup, getProviderCatalog, login, setMeetstreamApiKey } from '../api'
+import { addMember, checkJoin, completeSetup, getProviderCatalog, login, setMeetstreamApiKey } from '../api'
 import Onboarding from '../pages/Onboarding'
 
 const catalog = {
@@ -80,12 +81,13 @@ describe('Onboarding wizard', () => {
     expect(order).toEqual([...order].sort((a, b) => a - b))
   })
 
-  it('Join: hides SQLite, sends the join code, and does not resend setup after a failed account step', async () => {
+  it('Join: hides SQLite, checks the code against the database before moving on, and does not resend setup after a failed account step', async () => {
     addMember.mockRejectedValueOnce(new Error('No workspace found with that join code.'))
     render(<Onboarding onComplete={vi.fn()} />)
     await screen.findByText('Welcome to Meet Companion')
     fireEvent.click(screen.getByText("Join my team's workspace"))
-    fireEvent.change(screen.getByLabelText('Join code'), { target: { value: 'zzz' } })
+    // The code is not asked for here: it only means something on a database.
+    expect(screen.queryByLabelText('Join code')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
 
     await screen.findByText('Your account')
@@ -95,12 +97,26 @@ describe('Onboarding wizard', () => {
     expect(screen.queryByText('Local SQLite')).toBeNull()
     fireEvent.click(screen.getByText('Other PostgreSQL'))
     fireEvent.change(await screen.findByLabelText('Connection string'), { target: { value: 'postgresql://u:p@h/db' } })
+    // Database filled in, but no code yet: cannot continue.
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled()
+
+    // A wrong code is caught right here, against that database, before anything is applied.
+    checkJoin.mockRejectedValueOnce(new Error('No workspace with that join code exists on that database.'))
+    fireEvent.change(screen.getByLabelText('Join code'), { target: { value: 'bad' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(await screen.findByText(/No workspace with that join code exists on that database/)).toBeInTheDocument()
+    expect(checkJoin).toHaveBeenCalledWith({ provider: 'postgres-url', values: { url: 'postgresql://u:p@h/db' }, join_code: 'bad' })
+    expect(completeSetup).not.toHaveBeenCalled()
+    expect(screen.getByText("Connect to your team's database")).toBeInTheDocument()
+
+    checkJoin.mockResolvedValueOnce({ workspace: 'Team Co', same_database: false })
+    fireEvent.change(screen.getByLabelText('Join code'), { target: { value: 'zzz' } })
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
 
     await screen.findByText('Choose your AI model')
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     await screen.findByRole('heading', { name: 'Review' })
-    expect(screen.getByText('Joining with code zzz')).toBeInTheDocument()
+    expect(screen.getByText(/Joining Team Co/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Finish setup' }))
     expect(await screen.findByText(/No workspace with that join code exists in the database you connected to/)).toBeInTheDocument()

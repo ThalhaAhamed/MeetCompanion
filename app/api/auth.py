@@ -136,12 +136,37 @@ async def member_payload(user: User, db: AsyncSession) -> dict:
     server enforces every one of these again on the endpoint itself.
     """
     from app import permissions as perms
+    from app.models.database import Membership
 
     org = await perms.load_org(user.organization_id, db)
+    # Joining by code sets organization_id while the membership is still a
+    # request. Until an owner approves, every org-scoped call answers 403;
+    # the UI needs to know that up front to show a waiting screen instead.
+    membership = (
+        await db.execute(
+            select(Membership).where(
+                Membership.user_id == user.id, Membership.organization_id == user.organization_id
+            )
+        )
+    ).scalar_one_or_none()
+    waiting = membership is not None and membership.status != "active"
     return {
         "id": str(user.id),
         "name": user.name,
         "email": user.email,
         "role": user.role,
         "permissions": perms.effective_permissions(user, org),
+        "pending_approval": {"workspace": org.name if org else None} if waiting else None,
+        # So Settings can say when the workspace's owner chose the AI for
+        # everyone and this person's own AI settings do not apply here.
+        "workspace_ai": _workspace_ai_summary(org),
     }
+
+
+def _workspace_ai_summary(org) -> dict | None:
+    from app.services.llm import workspace_llm
+
+    chosen = workspace_llm(org) if org else None
+    if chosen is None:
+        return {"mode": "member"}
+    return {"mode": "workspace", "provider": chosen.get("provider"), "model": chosen.get("model")}

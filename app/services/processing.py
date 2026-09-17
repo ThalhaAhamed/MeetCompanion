@@ -174,12 +174,19 @@ class MeetingProcessingPipeline:
                 # transaction is closed first: this call can take minutes and
                 # must not hold the SQLite write lock / a Postgres row lock.
                 await db.commit()
+                # The workspace may have its own AI provider, chosen by its
+                # owner for every member; it lives with the workspace row.
+                from app import permissions as perms
+                from app.services.llm import workspace_llm
+
+                org = await perms.load_org(meeting.organization_id, db)
                 extraction_result = await self.memory_extractor.extract_memories(
                     transcript_text=transcript_text,
                     meeting_title=meeting.title,
                     customer_name=meeting.customer_name,
                     project_name=meeting.project_name,
                     meeting_date=meeting.started_at or meeting.created_at,
+                    workspace_llm=workspace_llm(org),
                 )
 
                 extracted_memories_data = extraction_result.get("memories", [])

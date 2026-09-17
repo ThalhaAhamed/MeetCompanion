@@ -10,8 +10,9 @@ vi.mock('../api', () => ({
   createWorkspace: vi.fn(),
   addConnection: vi.fn(),
   joinWorkspace: vi.fn(),
+  checkJoin: vi.fn(),
 }))
-import { activateConnection, addConnection, activateWorkspace, joinWorkspace, listConnections, listMyWorkspaces } from '../api'
+import { activateConnection, addConnection, activateWorkspace, checkJoin, joinWorkspace, listConnections, listMyWorkspaces } from '../api'
 import AppShell from '../components/AppShell'
 
 function renderShell() {
@@ -28,6 +29,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   // Reload is called after a switch; stub it so jsdom does not complain.
   Object.defineProperty(window, 'location', { value: { reload: vi.fn(), pathname: '/' }, writable: true })
+  checkJoin.mockResolvedValue({ workspace: 'Team Co', same_database: false })
 })
 
 describe('workspace switcher across databases', () => {
@@ -116,9 +118,24 @@ describe('joining a workspace from the picker', () => {
     fireEvent.change(screen.getByLabelText('Database connection string'), { target: { value: 'postgresql://u:p@h/db' } })
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
     await waitFor(() => expect(addConnection).toHaveBeenCalledWith({ url: 'postgresql://u:p@h/db' }))
+    expect(checkJoin).toHaveBeenCalledWith({ url: 'postgresql://u:p@h/db', join_code: 'abc123' })
+    expect(checkJoin.mock.invocationCallOrder[0]).toBeLessThan(addConnection.mock.invocationCallOrder[0])
     expect(activateConnection).toHaveBeenCalledWith('c2', null)
     await waitFor(() => expect(joinWorkspace).toHaveBeenCalledWith('abc123'))
     expect(window.sessionStorage.getItem('meet-companion:pending-join')).toBeNull()
+  })
+
+  it('a code that is not on that database is refused before the app switches to it', async () => {
+    listConnections.mockResolvedValue(oneDb)
+    checkJoin.mockRejectedValue(new Error('No workspace with that join code exists on that database.'))
+    await openJoinForm()
+    fireEvent.change(await screen.findByLabelText('Workspace join code'), { target: { value: 'nope' } })
+    fireEvent.change(screen.getByLabelText('Database connection string'), { target: { value: 'postgresql://u:p@h/db' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+    expect(await screen.findByText(/No workspace with that join code exists on that database/)).toBeInTheDocument()
+    expect(addConnection).not.toHaveBeenCalled()
+    expect(activateConnection).not.toHaveBeenCalled()
+    expect(window.location.reload).not.toHaveBeenCalled()
   })
 
   it('with no account on that database the code is carried to account creation', async () => {
@@ -131,6 +148,29 @@ describe('joining a workspace from the picker', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
     await waitFor(() => expect(window.sessionStorage.getItem('meet-companion:pending-join')).toBe('abc123'))
     expect(joinWorkspace).not.toHaveBeenCalled()  // no account there to add a membership to
+  })
+
+  it('a join is a request: the picker says so instead of reloading, and lists it as pending', async () => {
+    listConnections.mockResolvedValue(oneDb)
+    joinWorkspace.mockResolvedValue({ id: 'w7', name: 'Team Co', role: 'member', pending: true, activated: false })
+    listMyWorkspaces
+      .mockResolvedValueOnce({ workspaces: [{ id: 'w1', name: 'Mine', role: 'owner', is_active: true, status: 'active' }] })
+      .mockResolvedValueOnce({ workspaces: [
+        { id: 'w1', name: 'Mine', role: 'owner', is_active: true, status: 'active' },
+        { id: 'w7', name: 'Team Co', role: 'member', is_active: false, status: 'pending' },
+      ] })
+    await openJoinForm()
+    fireEvent.change(await screen.findByLabelText('Workspace join code'), { target: { value: 'abc123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/Request sent. An owner of Team Co has to approve it/)
+    expect(window.location.reload).not.toHaveBeenCalled()
+    const pending = await screen.findByRole('menuitemradio', { name: /Team Co/ })
+    expect(pending).toHaveTextContent('Pending approval')
+    expect(pending).toHaveAttribute('aria-disabled', 'true')
+    // Clicking a request does nothing - it cannot be opened yet.
+    fireEvent.click(pending)
+    expect(activateWorkspace).not.toHaveBeenCalled()
   })
 
   it('a failed join surfaces the message instead of reloading', async () => {

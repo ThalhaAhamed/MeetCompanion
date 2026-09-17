@@ -202,8 +202,11 @@ class MemoryExtractionService:
         customer_name: Optional[str] = None,
         project_name: Optional[str] = None,
         meeting_date: Optional[datetime] = None,
+        workspace_llm: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        provider = try_get_llm_provider()
+        # workspace_llm: the workspace's own provider settings when its owner
+        # unified them (see services.llm.workspace_llm); None = this install's.
+        provider = try_get_llm_provider(workspace_llm)
         ai_error = "No AI provider is configured."
         if provider is not None:
             try:

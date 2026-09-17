@@ -123,7 +123,7 @@ async def _launch(authed_client, monkeypatch):
     monkeypatch.setattr(agent_api.meetstream_client, "list_mia_agents", list_mia_agents)
     monkeypatch.setattr(meetings_api.meetstream_client, "create_bot", create_bot)
     monkeypatch.setattr("app.services.processing.processing_pipeline.meetstream_client.get_transcript", get_transcript)
-    monkeypatch.setattr("app.services.memory.try_get_llm_provider", lambda: None)  # rule-based extraction
+    monkeypatch.setattr("app.services.memory.try_get_llm_provider", lambda workspace=None: None)  # rule-based extraction
     monkeypatch.setattr(webhooks_api, "effective_webhook_secret", lambda: None)
 
     assert (await authed_client.put("/api/agent/api-key", json={"meetstream_api_key": "ms_test"})).status_code == 200

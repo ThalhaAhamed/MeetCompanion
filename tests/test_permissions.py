@@ -9,7 +9,7 @@ import uuid
 import pytest
 
 from app import permissions as perms
-from tests.test_security import _client, _fresh_rate_limits, _signup  # noqa: F401
+from tests.test_security import _approve, _client, _fresh_rate_limits, _pending_id, _signup  # noqa: F401
 
 
 def _email(tag):
@@ -24,7 +24,7 @@ async def _workspace_with_member():
     async with _client() as owner, _client() as member:
         await _signup(owner, _email("owner"), workspace="Perm Co")
         code = (await owner.get("/api/members/workspace")).json()["join_code"]
-        await _signup(member, _email("member"), join_code=code)
+        await _signup(member, _email("member"), join_code=code, approve_by=owner)
         yield owner, member
 
 
@@ -125,13 +125,18 @@ async def test_permissions_are_per_workspace():
         await _signup(owner_b, _email("b"), workspace="B")
         code_a = (await owner_a.get("/api/members/workspace")).json()["join_code"]
         code_b = (await owner_b.get("/api/members/workspace")).json()["join_code"]
-        await _signup(person, _email("p"), join_code=code_a)
+        p_email = _email("p")
+        await _signup(person, p_email, join_code=code_a, approve_by=owner_a)
         joined = await person.post("/api/members/workspaces/join", json={"join_code": code_b})
-        assert joined.status_code == 200, joined.text
+        assert joined.status_code == 200 and joined.json()["pending"] is True, joined.text
+        await _approve(owner_b, await _pending_id(owner_b, p_email))
 
         await owner_b.put("/api/members/workspace/permissions", json={"member_permissions": {"delete_content": True}})
 
-        # Active workspace is now B (joining switches to it): may delete.
+        # Switch to B: may delete there.
+        ws = (await person.get("/api/members/workspaces")).json()["workspaces"]
+        b_id = next(w["id"] for w in ws if w["name"] == "B")
+        assert (await person.post(f"/api/members/workspaces/{b_id}/activate")).status_code == 200
         nb = (await person.post("/api/notebook/notes", json={"title": "b", "content": "b"})).json()
         assert (await person.delete(f"/api/notebook/notes/{nb['id']}")).status_code == 200
 

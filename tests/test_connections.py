@@ -72,6 +72,10 @@ async def test_two_databases_one_picker(tmp_path, monkeypatch):
         # Join the team there with the code; the sign-in is remembered for this connection.
         r = await me.post("/api/members", json={"name": "Me", "email": "me@home.example", "password": "correct-horse-battery", "join_code": team_code})
         assert r.status_code == 200, r.text
+        # The team's owner, from their own machine, lets me in.
+        async with _client() as owner:
+            assert (await owner.post("/api/auth/login", json={"email": "owner@team.example", "password": "correct-horse-battery"})).status_code == 200
+            assert (await owner.post(f"/api/members/{r.json()['id']}/approve")).status_code == 200
         assert (await me.post("/api/auth/login", json={"email": "me@home.example", "password": "correct-horse-battery"})).status_code == 200
 
         # 4. The picker now shows both databases and my workspaces on each.
@@ -123,3 +127,72 @@ async def test_an_unreachable_saved_connection_does_not_break_the_picker(tmp_pat
         listing = {c["label"]: c for c in (await me.get("/api/connections")).json()["connections"]}
         assert listing["Old laptop"]["workspaces"] == [] and listing["Old laptop"]["signed_in"] in (True, False)
         assert any(c["active"] for c in listing.values())
+
+
+# ---------------------------------------------------------------------------
+# Checking a join code against a database before switching to it
+
+
+@pytest.mark.asyncio
+async def test_check_join_answers_without_switching_or_saving(tmp_path, monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    home_url = current_url()
+    team_url = f"sqlite+aiosqlite:///{(tmp_path / 'team.db').as_posix()}"
+
+    await switch_database(team_url)
+    async with _client() as owner:
+        await _signup(owner, "owner@team.example", workspace="Team Co")
+        team_code = (await owner.get("/api/members/workspace")).json()["join_code"]
+    await switch_database(home_url)
+
+    async with _desktop_client() as me:
+        await _signup(me, "me@home.example", workspace="Mine")
+        saved_before = len((await me.get("/api/connections")).json()["connections"])
+
+        # Right code on the right database: named, and nothing moved.
+        r = await me.post("/api/connections/check-join", json={"url": team_url, "join_code": team_code})
+        assert r.status_code == 200, r.text
+        assert r.json() == {"workspace": "Team Co", "same_database": False}
+        assert current_url() == home_url
+        assert len((await me.get("/api/connections")).json()["connections"]) == saved_before
+
+        # Right code, wrong database (it lives on the team's, not mine).
+        r = await me.post("/api/connections/check-join", json={"join_code": team_code})
+        assert r.status_code == 404 and "not on" not in r.text and "that database" in r.json()["detail"]
+        # Wrong code on the right database.
+        r = await me.post("/api/connections/check-join", json={"url": team_url, "join_code": "nope1234"})
+        assert r.status_code == 404
+        # My own workspace's code, no database given: means the one I am on.
+        my_code = (await me.get("/api/members/workspace")).json()["join_code"]
+        r = await me.post("/api/connections/check-join", json={"join_code": my_code})
+        assert r.status_code == 200 and r.json() == {"workspace": "Mine", "same_database": True}
+
+        # A database that cannot be reached is a 400 with a readable reason.
+        r = await me.post("/api/connections/check-join", json={"url": "postgresql://u:p@nohost.invalid/db", "join_code": team_code})
+        assert r.status_code == 400 and "Could not connect" in r.json()["detail"]
+        assert (await me.post("/api/connections/check-join", json={"url": team_url, "join_code": "  "})).status_code == 400
+        assert current_url() == home_url
+
+
+@pytest.mark.asyncio
+async def test_check_join_is_for_the_desktop_or_a_fresh_install(authed_client):
+    # Accounts exist and there is no device key: the endpoint does not exist.
+    assert (await authed_client.post("/api/connections/check-join", json={"join_code": "x"})).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_check_join_is_open_during_first_run_setup(client):
+    """The wizard's Join path needs it before any account or device exists."""
+    # A 400 (unreachable database) proves the gate let the request through; a
+    # gated call would be a 404 like any other unknown endpoint.
+    r = await client.post("/api/connections/check-join", json={"url": "postgresql://u:p@nohost.invalid/db", "join_code": "abc"})
+    assert r.status_code == 400, r.text
+
+@pytest.mark.asyncio
+async def test_connections_need_the_device_key_not_a_session(client):
+    """Signed out, no device key: 404. The key alone, no session: works."""
+    async with _client() as owner:
+        await _signup(owner, "gate-owner@example.com", workspace="Gate Co")
+    assert (await client.get("/api/connections")).status_code == 404
+    async with _desktop_client() as me:
+        assert (await me.get("/api/connections")).status_code == 200

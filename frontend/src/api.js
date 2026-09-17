@@ -18,7 +18,7 @@ function extractMessage(body, status, statusText) {
     const parsed = JSON.parse(body)
     detail = typeof parsed === 'string' ? parsed : parsed.detail
   } catch {
-    return body.length > 300 ? `${body.slice(0, 300)}…` : body
+    return body.length > 300 ? `${body.slice(0, 300)}â€¦` : body
   }
 
   if (Array.isArray(detail)) {
@@ -96,12 +96,48 @@ export function getWorkspace() {
   return req('/members/workspace')
 }
 
+export function setWorkspaceAI(config) {
+  return req('/members/workspace/ai', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  })
+}
+
+export function testWorkspaceAI(config) {
+  return req('/members/workspace/ai/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  })
+}
+
+export function renameWorkspace(name) {
+  return req('/members/workspace', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+}
+
+export function regenerateJoinCode() {
+  return req('/members/workspace/join-code', { method: 'POST' })
+}
+
+export function deleteWorkspace() {
+  return req('/members/workspace', { method: 'DELETE' })
+}
+
 export function setWorkspacePermissions(member_permissions) {
   return req('/members/workspace/permissions', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ member_permissions }),
   })
+}
+
+export function approveMember(id) {
+  return req(`/members/${id}/approve`, { method: 'POST' })
 }
 
 export function removeMember(id) {
@@ -471,6 +507,15 @@ export function activateConnection(id, organization_id) {
   return req(`/connections/${id}/activate`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ organization_id: organization_id || null }),
+  })
+}
+
+/** Does this code name a workspace on that database? Nothing is saved or switched. */
+export function checkJoin({ url, provider, values, join_code }) {
+  return req('/connections/check-join', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: url || undefined, provider, values, join_code }),
   })
 }
 

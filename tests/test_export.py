@@ -59,7 +59,7 @@ async def test_export_cannot_reach_another_workspace(authed_client):
     from app.config import settings
     from app.database.connection import AsyncSessionLocal
     from app.middleware.auth_gate import COOKIE_NAME, SESSION_TTL_SECONDS, sign_session
-    from app.models.database import Organization, User
+    from app.models.database import Membership, Organization, User
     from app.security import hash_password
 
     org_id = uuid.uuid4()
@@ -70,6 +70,7 @@ async def test_export_cannot_reach_another_workspace(authed_client):
                     email=f"other-{org_id.hex[:6]}@example.com",
                     password_hash=hash_password("x" * 12), role="owner", is_active=True)
         session.add(user)
+        session.add(Membership(user_id=user.id, organization_id=org_id, role="owner"))
         await session.commit()
         token = sign_session(str(user.id), int(time.time()) + SESSION_TTL_SECONDS)
 

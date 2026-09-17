@@ -32,11 +32,57 @@ async def require_device(request: Request) -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
 
+async def require_device_or_first_run(request: Request) -> None:
+    """
+    The desktop app, or a fresh install still in its setup wizard - the two
+    places a person picks a database *and* a join code at the same time.
+    """
+    from app.middleware.auth_gate import first_run_open
+
+    try:
+        await require_device(request)
+    except HTTPException:
+        if not await first_run_open():
+            raise
+
+
 class ConnectionIn(BaseModel):
     label: Optional[str] = None
     provider: Optional[str] = None
     values: Optional[Dict[str, Any]] = None
     url: Optional[str] = None
+
+
+class CheckJoinIn(ConnectionIn):
+    join_code: str
+
+
+@router.post("/check-join", dependencies=[Depends(require_device_or_first_run)])
+async def check_join(body: CheckJoinIn) -> Dict[str, Any]:
+    """
+    Does this join code name a workspace on that database? Answered without
+    saving the connection or switching to it, so a wrong code - or the right
+    code on the wrong database - is caught while there is still nothing to
+    undo. No database given means the one the app is on now.
+    """
+    from app.api.setup import DatabaseConfigPayload, _friendly_db_error
+    from app.database.connection import current_url
+
+    code = (body.join_code or "").strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="A join code is required.")
+    url = DatabaseConfigPayload(provider=body.provider, values=body.values, url=body.url).resolve_url()
+    try:
+        name = await svc.workspace_for_code(url, code)
+    except Exception as exc:  # noqa: BLE001 - reported to the person, nothing changed
+        raise HTTPException(status_code=400, detail=f"Could not connect to that database: {_friendly_db_error(exc, url or current_url())}")
+    if name is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No workspace with that join code exists on that database. Check the code, and that the "
+                   "connection string is the one your workspace owner shared - a workspace lives in one database.",
+        )
+    return {"workspace": name, "same_database": url is None or url == current_url()}
 
 
 class ActivateIn(BaseModel):

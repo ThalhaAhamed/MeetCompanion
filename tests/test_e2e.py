@@ -14,7 +14,7 @@ from app.models.database import MemoryType
 @pytest.mark.asyncio
 async def test_acme_sso_e2e_scenario(monkeypatch):
     # Deterministic: the rule-based extractor, not whichever LLM is configured.
-    monkeypatch.setattr("app.services.memory.try_get_llm_provider", lambda: None)
+    monkeypatch.setattr("app.services.memory.try_get_llm_provider", lambda workspace=None: None)
     """
     Simulates Meeting #1:
     - John: "Acme requires SSO integration before launch."

@@ -59,7 +59,7 @@ docker compose up -d      # self-hosted instead → http://localhost:8000
 - 💬 **Ask AI** — answers grounded in notes, meetings and uploaded documents (PDF, Word, Markdown, CSV), with sources; never invents.
 - 🕸️ **Knowledge graph** — meetings, people, decisions and action items as an explorable graph.
 - 🎙️ **In-call recall** — a built-in [MCP](https://modelcontextprotocol.io) server the in-meeting agent queries live.
-- 👥 **Workspaces** — share by join code; owners decide what members may add, edit, delete, export or invite.
+- 👥 **Workspaces** — share by join code, owners approve who gets in and decide what members may add, edit, delete, export or invite.
 
 ## 📸 Screenshots
 

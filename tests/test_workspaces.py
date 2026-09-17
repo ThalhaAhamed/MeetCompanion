@@ -125,20 +125,27 @@ async def test_workspace_endpoints_need_a_session(client):
 
 
 @pytest.mark.asyncio
-async def test_join_another_workspace_with_a_code_keeps_one_account(authed_client):
-    """Joining by code must extend this account, not create a second one."""
+async def test_join_another_workspace_with_a_code_is_a_request_on_this_account(authed_client):
+    """
+    Joining by code must extend this account, not create a second one - and
+    it is a request: listed as pending, not switched to, until approved.
+    """
     me = (await authed_client.get("/api/auth/check")).json()["member"]
     other_id, code = await _second_workspace(authed_client, "Invited")
 
     r = await authed_client.post("/api/members/workspaces/join", json={"join_code": code})
     assert r.status_code == 200, r.text
     assert r.json()["name"] == "Invited" and r.json()["role"] == "member"
+    assert r.json()["pending"] is True and r.json()["activated"] is False
 
-    # Same account, now in two workspaces, looking at the new one.
+    # Same account; the request shows in the list, but the view did not move.
     assert (await authed_client.get("/api/auth/check")).json()["member"]["id"] == me["id"]
-    names = {w["name"] for w in await _workspaces(authed_client)}
-    assert len(names) == 2 and "Invited" in names
-    assert next(w for w in await _workspaces(authed_client) if w["is_active"])["name"] == "Invited"
+    ws = await _workspaces(authed_client)
+    invited = next(w for w in ws if w["name"] == "Invited")
+    assert invited["status"] == "pending" and invited["is_active"] is False
+    assert next(w for w in ws if w["is_active"])["name"] != "Invited"
+    # And cannot be switched to by hand either.
+    assert (await authed_client.post(f"/api/members/workspaces/{other_id}/activate")).status_code == 403
 
 
 @pytest.mark.asyncio
@@ -146,7 +153,7 @@ async def test_joining_by_code_never_grants_ownership(authed_client):
     _, code = await _second_workspace(authed_client, "Someone else's")
     r = await authed_client.post("/api/members/workspaces/join", json={"join_code": code})
     assert r.json()["role"] == "member"
-    assert (await authed_client.get("/api/auth/check")).json()["member"]["role"] == "member"
+    assert (await authed_client.get("/api/auth/check")).json()["member"]["role"] == "owner"  # still my own
 
 
 @pytest.mark.asyncio
@@ -159,9 +166,9 @@ async def test_bad_and_repeated_join_codes(authed_client):
     _, code = await _second_workspace(authed_client, "Twice")
     first = await authed_client.post("/api/members/workspaces/join", json={"join_code": code})
     again = await authed_client.post("/api/members/workspaces/join", json={"join_code": code})
-    assert first.status_code == 200 and again.status_code == 200
-    assert again.json()["already_member"] is True
-    # Still exactly one membership for it.
+    assert first.status_code == 200 and again.status_code == 409, again.text
+    assert "already asked" in again.json()["detail"]
+    # Still exactly one (pending) membership for it.
     assert len([w for w in await _workspaces(authed_client) if w["name"] == "Twice"]) == 1
 
 
@@ -225,15 +232,18 @@ async def test_member_admin_follows_membership_not_the_workspace_someone_has_ope
     users.role only and undone by their next switch, and Remove deleted the
     whole account, taking their other workspaces with it.
     """
-    from tests.test_security import _client, _signup
+    from tests.test_security import _approve, _client, _pending_id, _signup
 
     async with _client() as owner_a, _client() as owner_b, _client() as dana:
         await _signup(owner_a, "a-owner@example.com", workspace="Alpha")
         await _signup(owner_b, "b-owner@example.com", workspace="Beta")
         code_a = (await owner_a.get("/api/members/workspace")).json()["join_code"]
         code_b = (await owner_b.get("/api/members/workspace")).json()["join_code"]
-        await _signup(dana, "dana@example.com", join_code=code_a)
+        await _signup(dana, "dana@example.com", join_code=code_a, approve_by=owner_a)
         assert (await dana.post("/api/members/workspaces/join", json={"join_code": code_b})).status_code == 200
+        await _approve(owner_b, await _pending_id(owner_b, "dana@example.com"))
+        ws = (await dana.get("/api/members/workspaces")).json()["workspaces"]
+        await dana.post(f"/api/members/workspaces/{next(w['id'] for w in ws if w['name'] == 'Beta')}/activate")
         # Dana now has Beta open. Alpha's owner must still see and manage her.
         assert (await dana.get("/api/auth/check")).json()["member"]["role"] == "member"
 
@@ -280,17 +290,152 @@ async def test_member_admin_follows_membership_not_the_workspace_someone_has_ope
 
 @pytest.mark.asyncio
 async def test_removing_someone_from_their_open_workspace_moves_them_to_another():
-    from tests.test_security import _client, _signup
+    from tests.test_security import _approve, _client, _pending_id, _signup
 
     async with _client() as owner_a, _client() as owner_b, _client() as kim:
         await _signup(owner_a, "ka@example.com", workspace="Alpha")
         await _signup(owner_b, "kb@example.com", workspace="Beta")
         code_a = (await owner_a.get("/api/members/workspace")).json()["join_code"]
         code_b = (await owner_b.get("/api/members/workspace")).json()["join_code"]
-        await _signup(kim, "kim@example.com", join_code=code_b)
-        await kim.post("/api/members/workspaces/join", json={"join_code": code_a})  # Alpha is now open
+        await _signup(kim, "kim@example.com", join_code=code_b, approve_by=owner_b)
+        await kim.post("/api/members/workspaces/join", json={"join_code": code_a})
+        await _approve(owner_a, await _pending_id(owner_a, "kim@example.com"))
+        ws = (await kim.get("/api/members/workspaces")).json()["workspaces"]
+        await kim.post(f"/api/members/workspaces/{next(w['id'] for w in ws if w['name'] == 'Alpha')}/activate")  # Alpha is now open
         kim_id = next(m["id"] for m in (await owner_a.get("/api/members")).json()["members"] if m["email"] == "kim@example.com")
         assert (await owner_a.delete(f"/api/members/{kim_id}")).status_code == 200
         ws = (await kim.get("/api/members/workspaces")).json()["workspaces"]
         assert [(w["name"], w["is_active"]) for w in ws] == [("Beta", True)]
         assert (await kim.get("/api/notebook/notes")).status_code == 200  # still a working session
+
+
+# ---------------------------------------------------------------------------
+# Workspace lifecycle: the slug-retry crash, rename, join-code rotation, delete
+
+
+@pytest.mark.asyncio
+async def test_create_workspace_survives_a_retried_insert(authed_client, monkeypatch):
+    """
+    _create_workspace rolls the session back when its insert loses a race,
+    which expires the signed-in User the route already holds. Touching
+    user.id after that raised MissingGreenlet and the request died with a
+    500 - under load, only the first of N same-named creations succeeded.
+    Force one collision (a join code already in use) to walk that path.
+    """
+    from app.api import members as members_api
+
+    taken = uuid.uuid4().hex[:8]
+    async with AsyncSessionLocal() as session:
+        session.add(Organization(name="Holder", slug=f"h-{taken}", mcp_token=uuid.uuid4().hex, join_code=taken))
+        await session.commit()
+
+    real = members_api._new_join_code
+    calls = {"n": 0}
+
+    def collide_once():
+        calls["n"] += 1
+        return taken if calls["n"] == 1 else real()
+
+    monkeypatch.setattr(members_api, "_new_join_code", collide_once)
+    r = await authed_client.post("/api/members/workspaces", json={"name": "Raced"})
+    assert r.status_code == 200, r.text
+    assert calls["n"] >= 2, "the collision must have been retried, not swallowed"
+    ws = await _workspaces(authed_client)
+    assert next(w for w in ws if w["name"] == "Raced")["is_active"] is True
+    assert (await authed_client.get("/api/auth/check")).json()["member"]["role"] == "owner"
+
+
+@pytest.mark.asyncio
+async def test_owner_can_rename_the_workspace(authed_client):
+    r = await authed_client.patch("/api/members/workspace", json={"name": "  Renamed Co  "})
+    assert r.status_code == 200 and r.json()["name"] == "Renamed Co"
+    assert (await authed_client.get("/api/members/workspace")).json()["name"] == "Renamed Co"
+    assert (await authed_client.patch("/api/members/workspace", json={"name": " "})).status_code == 400
+    assert (await authed_client.patch("/api/members/workspace", json={"name": "x" * 300})).status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_regenerating_the_join_code_retires_the_old_one():
+    from tests.test_security import _client, _signup
+
+    async with _client() as owner, _client() as early, _client() as late:
+        await _signup(owner, "rot-owner@example.com", workspace="Rotate")
+        old = (await owner.get("/api/members/workspace")).json()["join_code"]
+        await _signup(early, "early@example.com", join_code=old, approve_by=owner)
+
+        r = await owner.post("/api/members/workspace/join-code")
+        assert r.status_code == 200, r.text
+        new = r.json()["join_code"]
+        assert new and new != old
+        assert (await owner.get("/api/members/workspace")).json()["join_code"] == new
+
+        # The old code is dead; the new one works; whoever already joined stays.
+        r = await late.post("/api/members", json={"name": "late", "email": "late@example.com",
+                                                   "password": "correct-horse-battery", "join_code": old})
+        assert r.status_code == 404, r.text
+        await _signup(late, "late@example.com", join_code=new, approve_by=owner)
+        emails = {m["email"] for m in (await owner.get("/api/members")).json()["members"]}
+        assert emails == {"rot-owner@example.com", "early@example.com", "late@example.com"}
+
+
+@pytest.mark.asyncio
+async def test_rename_rotate_and_delete_are_owner_only():
+    from tests.test_security import _client, _signup
+
+    async with _client() as owner, _client() as member:
+        await _signup(owner, "ro-owner@example.com", workspace="Locked")
+        code = (await owner.get("/api/members/workspace")).json()["join_code"]
+        await _signup(member, "ro-member@example.com", join_code=code, approve_by=owner)
+        assert (await member.patch("/api/members/workspace", json={"name": "Hijacked"})).status_code == 403
+        assert (await member.post("/api/members/workspace/join-code")).status_code == 403
+        assert (await member.delete("/api/members/workspace")).status_code == 403
+        assert (await owner.get("/api/members/workspace")).json()["join_code"] == code
+
+
+@pytest.mark.asyncio
+async def test_delete_workspace_refuses_while_others_remain_or_it_is_the_only_one():
+    from tests.test_security import _client, _signup
+
+    async with _client() as owner, _client() as member:
+        await _signup(owner, "del-owner@example.com", workspace="Doomed")
+        # Only workspace: nowhere to land, so the cascade would take the account.
+        r = await owner.delete("/api/members/workspace")
+        assert r.status_code == 400 and "only workspace" in r.json()["detail"]
+
+        await owner.post("/api/members/workspaces", json={"name": "Keeper", "activate": False})
+        code = (await owner.get("/api/members/workspace")).json()["join_code"]
+        await _signup(member, "del-member@example.com", join_code=code, approve_by=owner)
+        r = await owner.delete("/api/members/workspace")
+        assert r.status_code == 400 and "Remove the other members" in r.json()["detail"]
+        # Nothing happened to anyone.
+        assert (await member.get("/api/auth/check")).json()["authenticated"] is True
+        assert {w["name"] for w in await _workspaces(owner)} == {"Doomed", "Keeper"}
+
+
+@pytest.mark.asyncio
+async def test_delete_workspace_takes_its_data_and_lands_the_owner_elsewhere(authed_client):
+    first = (await _workspaces(authed_client))[0]
+    await authed_client.post("/api/notebook/notes", json={"title": "Goes with the workspace"})
+    await authed_client.post("/api/members/workspaces", json={"name": "Keeper", "activate": False})
+    async with AsyncSessionLocal() as session:
+        orgs_before = (await session.execute(select(Organization.id))).scalars().all()
+
+    r = await authed_client.delete("/api/members/workspace")
+    assert r.status_code == 200, r.text
+    assert r.json()["deleted"] is True
+
+    # Still signed in, now looking at the other workspace, which is empty.
+    me = (await authed_client.get("/api/auth/check")).json()
+    assert me["authenticated"] is True and me["member"]["role"] == "owner"
+    ws = await _workspaces(authed_client)
+    assert [(w["name"], w["is_active"]) for w in ws] == [("Keeper", True)]
+    assert r.json()["active_workspace_id"] == ws[0]["id"]
+    assert (await authed_client.get("/api/notebook/notes")).json()["notes"] == []
+
+    async with AsyncSessionLocal() as session:
+        orgs_after = (await session.execute(select(Organization.id))).scalars().all()
+        assert len(orgs_after) == len(orgs_before) - 1
+        assert uuid.UUID(first["id"]) not in orgs_after
+        assert (await session.execute(
+            select(Membership).where(Membership.organization_id == uuid.UUID(first["id"])))).scalars().all() == []
+    assert (await authed_client.post(f"/api/members/workspaces/{first['id']}/activate")).status_code in (403, 404)

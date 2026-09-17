@@ -21,7 +21,12 @@ from app.models.database import Organization, User
 from app.models.schemas import ActionItemUpdate
 
 
-async def _signup(client, email, *, workspace=None, join_code=None):
+async def _signup(client, email, *, workspace=None, join_code=None, approve_by=None):
+    """
+    Create an account and sign it in. A join by code is only a *request*;
+    pass the owner's client as approve_by to have them let the person in,
+    which is what every "member of the workspace" scenario wants.
+    """
     body = {"name": email.split("@")[0], "email": email, "password": "correct-horse-battery"}
     if workspace:
         body["workspace_name"] = workspace
@@ -29,9 +34,23 @@ async def _signup(client, email, *, workspace=None, join_code=None):
         body["join_code"] = join_code
     resp = await client.post("/api/members", json=body)
     assert resp.status_code == 200, resp.text
+    if approve_by is not None:
+        await _approve(approve_by, resp.json()["id"])
     login = await client.post("/api/auth/login", json={"email": email, "password": "correct-horse-battery"})
     assert login.status_code == 200, login.text
     return resp.json()
+
+
+async def _approve(owner_client, member_id):
+    r = await owner_client.post(f"/api/members/{member_id}/approve")
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+async def _pending_id(owner_client, email):
+    """The id of the person with this email waiting to join the owner's workspace."""
+    listing = (await owner_client.get("/api/members")).json()
+    return next(m["id"] for m in listing["pending"] if m["email"] == email)
 
 
 def _client(cookies=None):
@@ -110,7 +129,7 @@ async def test_workspace_creator_is_owner_and_joiner_is_member():
         owner = await _signup(a, f"o-{uuid.uuid4().hex[:6]}@example.com", workspace="Gamma")
         assert owner["role"] == "owner"
         code = (await a.get("/api/members/workspace")).json()["join_code"]
-        member = await _signup(b, f"m-{uuid.uuid4().hex[:6]}@example.com", join_code=code)
+        member = await _signup(b, f"m-{uuid.uuid4().hex[:6]}@example.com", join_code=code, approve_by=a)
         assert member["role"] == "member"
         assert (await b.get("/api/auth/check")).json()["member"]["role"] == "member"
 
@@ -128,7 +147,7 @@ async def test_member_cannot_change_server_configuration(tmp_path, monkeypatch):
     async with _client() as a, _client() as b:
         await _signup(a, f"o-{uuid.uuid4().hex[:6]}@example.com", workspace="Delta")
         code = (await a.get("/api/members/workspace")).json()["join_code"]
-        await _signup(b, f"m-{uuid.uuid4().hex[:6]}@example.com", join_code=code)
+        await _signup(b, f"m-{uuid.uuid4().hex[:6]}@example.com", join_code=code, approve_by=a)
 
         for path, body in (
             ("/api/setup/complete", {"llm": {"provider": "ollama", "model": "llama3.1"}}),
@@ -207,7 +226,7 @@ async def test_member_can_only_remove_self_and_last_owner_is_protected():
     async with _client() as a, _client() as b:
         owner = await _signup(a, f"o-{uuid.uuid4().hex[:6]}@example.com", workspace="Epsilon")
         code = (await a.get("/api/members/workspace")).json()["join_code"]
-        member = await _signup(b, f"m-{uuid.uuid4().hex[:6]}@example.com", join_code=code)
+        member = await _signup(b, f"m-{uuid.uuid4().hex[:6]}@example.com", join_code=code, approve_by=a)
 
         assert (await b.delete(f"/api/members/{owner['id']}")).status_code == 403
         assert (await b.post(f"/api/members/{owner['id']}/role", json={"role": "member"})).status_code == 403

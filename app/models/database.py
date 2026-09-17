@@ -109,6 +109,10 @@ class Membership(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     organization_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     role: Mapped[str] = mapped_column(String(50), default="member")
+    # 'pending' until an owner approves: joining by code is a *request*. A
+    # pending row grants nothing - it is not listed, cannot be switched to and
+    # does not count toward any guard - it only records who asked.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active", server_default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     user: Mapped["User"] = relationship("User", back_populates="memberships")

@@ -117,7 +117,7 @@ async def workspaces_on(entry: ConnectionSettings) -> Dict[str, Any]:
                 return {"reachable": True, "signed_in": False, "workspaces": []}
             rows = (
                 await db.execute(
-                    select(Organization, Membership.role)
+                    select(Organization, Membership.role, Membership.status)
                     .join(Membership, Membership.organization_id == Organization.id)
                     .where(Membership.user_id == user.id)
                     .order_by(Membership.created_at)
@@ -128,13 +128,48 @@ async def workspaces_on(entry: ConnectionSettings) -> Dict[str, Any]:
                 "signed_in": True,
                 "email": user.email,
                 "workspaces": [
-                    {"id": str(org.id), "name": org.name, "role": role, "is_active": org.id == user.organization_id}
-                    for org, role in rows
+                    {
+                        "id": str(org.id), "name": org.name, "role": role, "status": status,
+                        "is_active": status == "active" and org.id == user.organization_id,
+                    }
+                    for org, role, status in rows
                 ],
             }
     except Exception as exc:  # noqa: BLE001 - one bad connection must not break the picker
         logger.info("Connection %s unreachable: %s", entry.label, type(exc).__name__)
         return {"reachable": False, "signed_in": bool(entry.user_id), "workspaces": [], "error": type(exc).__name__}
+    finally:
+        if engine is not None:
+            await engine.dispose()
+
+
+async def workspace_for_code(url: Optional[str], code: str) -> Optional[str]:
+    """
+    The name of the workspace this join code opens on that database, or None
+    if there is no such workspace there. Read-only, on a throwaway
+    connection: nothing is saved and the live database is not switched.
+
+    This is what lets the UI say "that code is not on that database" *before*
+    switching to it - a failed join used to leave the app pointed at a
+    database the person had no account on.
+    """
+    from app.database.connection import dialect_of
+    from app.models.database import Organization
+
+    if not url or url == current_url():
+        from app.database.connection import AsyncSessionLocal
+
+        factory = AsyncSessionLocal
+        engine = None
+    else:
+        connect_args = {"timeout": 5} if dialect_of(url) == "postgresql" else {}
+        engine = create_async_engine(url, connect_args=connect_args, pool_pre_ping=True)
+        factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with factory() as db:
+            return (
+                await db.execute(select(Organization.name).where(Organization.join_code == code))
+            ).scalar_one_or_none()
     finally:
         if engine is not None:
             await engine.dispose()

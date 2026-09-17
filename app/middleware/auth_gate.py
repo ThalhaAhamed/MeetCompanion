@@ -28,7 +28,11 @@ COOKIE_NAME = "hub_session"
 DEVICE_COOKIE_NAME = "mc_device"
 SESSION_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
 
-EXEMPT_PREFIXES = ("/api/auth/", "/api/members", "/api/agent/chat-relay", "/api/webhooks", "/mcp", "/health", "/docs", "/openapi.json", "/redoc")
+#: /api/connections is the desktop app's own: every route there demands the
+#: device key (see require_device), which is a stronger local proof than a
+#: session and has to work while signed out - the sign-in screen itself asks
+#: which database a join code belongs to.
+EXEMPT_PREFIXES = ("/api/auth/", "/api/members", "/api/connections", "/api/agent/chat-relay", "/api/webhooks", "/mcp", "/health", "/docs", "/openapi.json", "/redoc")
 
 #: Setup runs before any account exists, so it cannot require a session - but
 #: only until the application is configured. Leaving it open afterwards would
