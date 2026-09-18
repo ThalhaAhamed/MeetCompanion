@@ -459,3 +459,24 @@
 .mc-prose th, .mc-prose td { border: 1px solid var(--border-subtle); padding: 0.35rem 0.6rem; text-align: left; }
 .mc-prose th { background: var(--surface-raised); color: var(--text-strong); }
 .mc-prose img { border-radius: 0.5rem; }
+
+/* --------------------------------------------------------------------------
+   Progress animations
+   -------------------------------------------------------------------------- */
+
+@keyframes mc-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(70%);
+  }
+  100% {
+    transform: translateX(240%);
+  }
+}
+
+.mc-progress-bar-indeterminate {
+  width: 50%;
+  animation: mc-indeterminate 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}

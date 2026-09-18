@@ -33,7 +33,7 @@ beforeEach(() => {
 })
 
 describe('workspace switcher across databases', () => {
-  it('single database: a flat list, activateWorkspace on click', async () => {
+  it('single database: a flat list, activateWorkspace on click with switching overlay', async () => {
     listMyWorkspaces.mockResolvedValue({ workspaces: [
       { id: 'w1', name: 'Mine', role: 'owner', is_active: true },
       { id: 'w2', name: 'Second', role: 'owner', is_active: false },
@@ -44,6 +44,8 @@ describe('workspace switcher across databases', () => {
     fireEvent.click(await screen.findByRole('menuitemradio', { name: /Second/ }))
     await waitFor(() => expect(activateWorkspace).toHaveBeenCalledWith('w2'))
     expect(activateConnection).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: /Switching workspace/ })).toBeInTheDocument()
+    expect(window.sessionStorage.getItem('mc_switching_workspace')).toBe('Second')
   })
 
   it('two databases: workspaces grouped by connection, foreign switch goes through activateConnection', async () => {
@@ -181,5 +183,33 @@ describe('joining a workspace from the picker', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
     expect(await screen.findByText(/No workspace found with that join code/)).toBeInTheDocument()
     expect(window.location.reload).not.toHaveBeenCalled()
+  })
+
+  it('cancel button dismisses the create workspace form and returns to the switcher list', async () => {
+    listConnections.mockResolvedValue(oneDb)
+    renderShell()
+    fireEvent.click(await screen.findByTitle('Switch workspace'))
+    fireEvent.click(await screen.findByRole('button', { name: /Create a workspace/ }))
+    expect(screen.getByLabelText('New workspace name')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByLabelText('New workspace name')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Create a workspace/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Join a workspace/ })).toBeInTheDocument()
+  })
+
+  it('cancel button dismisses the join workspace form and clears errors', async () => {
+    listConnections.mockResolvedValue(oneDb)
+    joinWorkspace.mockRejectedValue(new Error('Invalid code'))
+    await openJoinForm()
+    fireEvent.change(await screen.findByLabelText('Workspace join code'), { target: { value: 'bad' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+    expect(await screen.findByText('Invalid code')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByLabelText('Workspace join code')).not.toBeInTheDocument()
+    expect(screen.queryByText('Invalid code')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Join a workspace/ })).toBeInTheDocument()
   })
 })

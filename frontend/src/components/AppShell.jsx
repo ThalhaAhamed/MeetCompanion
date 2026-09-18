@@ -3,6 +3,7 @@ import { PENDING_JOIN_KEY } from '../pendingJoin'
 import { useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import Logo from './Logo'
+import WorkspaceSwitchOverlay from './WorkspaceSwitchOverlay'
 import {
   AskAiIcon,
   ChevronDownIcon,
@@ -117,6 +118,7 @@ function WorkspaceSwitcher() {
   const [connections, setConnections] = useState(null)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [switchingTo, setSwitchingTo] = useState(null)
   const [mode, setMode] = useState(null)  // 'join' | 'create'
   const [error, setError] = useState(null)
   // "Request sent" after a join: nothing switches until an owner approves,
@@ -153,21 +155,46 @@ function WorkspaceSwitcher() {
 
   // An empty list (an account with no membership row) must not take the
   // whole shell down with it - the rest of the app still works.
-  if (!workspaces || workspaces.length === 0) return null
+  if (!workspaces || workspaces.length === 0) {
+    return switchingTo ? (
+      <WorkspaceSwitchOverlay
+        name={switchingTo.name}
+        action={switchingTo.action}
+        subtitle={switchingTo.subtitle}
+      />
+    ) : null
+  }
   const active = workspaces.find((w) => w.is_active) || workspaces[0]
 
   async function choose(workspace, connectionId) {
     if (busy || workspace.status === 'pending') return
+    if (!connectionId && workspace.is_active) {
+      setOpen(false)
+      return
+    }
+    const targetName = workspace.name || 'Workspace'
     setBusy(true)
+    setSwitchingTo({
+      name: targetName,
+      action: connectionId ? 'Connecting database & workspace…' : 'Switching workspace…',
+    })
+    try {
+      window.sessionStorage.setItem('mc_switching_workspace', targetName)
+    } catch {
+      // Non-critical session preference.
+    }
     try {
       if (connectionId) {
         await activateConnection(connectionId, workspace.id)
       } else {
-        if (workspace.is_active) { setBusy(false); return }
         await activateWorkspace(workspace.id)
       }
       window.location.reload()
     } catch (err) {
+      try {
+        window.sessionStorage.removeItem('mc_switching_workspace')
+      } catch {}
+      setSwitchingTo(null)
       setError(err.message)
       setBusy(false)
     }
@@ -178,7 +205,15 @@ function WorkspaceSwitcher() {
   const multiDb = Array.isArray(connections) && (connections.length > 1 || connections.some((c) => !c.active && c.workspaces.length))
 
   return (
-    <div className="relative" ref={box}>
+    <>
+      {switchingTo && (
+        <WorkspaceSwitchOverlay
+          name={switchingTo.name}
+          action={switchingTo.action}
+          subtitle={switchingTo.subtitle}
+        />
+      )}
+      <div className="relative" ref={box}>
       <button
         type="button"
         className="mc-btn mc-btn-ghost"
@@ -228,7 +263,7 @@ function WorkspaceSwitcher() {
                         disabled={busy || conn.reachable === false}
                         className="mc-nav-item w-full px-3 py-2 text-left text-sm"
                         style={{ color: 'var(--text-muted)' }}
-                        onClick={() => choose({ id: null }, conn.id)}
+                        onClick={() => choose({ id: null, name: conn.label }, conn.id)}
                       >
                         {conn.reachable === false ? 'Unreachable' : 'Sign in on this database…'}
                       </button>
@@ -268,6 +303,13 @@ function WorkspaceSwitcher() {
                   setNotice(null)
                   try {
                     if (mode === 'create') {
+                      setSwitchingTo({
+                        name: value,
+                        action: 'Creating workspace…',
+                      })
+                      try {
+                        window.sessionStorage.setItem('mc_switching_workspace', value)
+                      } catch {}
                       await createWorkspace(value)
                     } else if (!dburl) {
                       // A workspace on the database we are already on: the
@@ -282,6 +324,13 @@ function WorkspaceSwitcher() {
                         setBusy(false)
                         return
                       }
+                      setSwitchingTo({
+                        name: result.name || value,
+                        action: 'Joining workspace…',
+                      })
+                      try {
+                        window.sessionStorage.setItem('mc_switching_workspace', result.name || value)
+                      } catch {}
                     } else {
                       // Another database. Make sure the code is actually on
                       // it *before* switching - a wrong code used to leave
@@ -292,6 +341,13 @@ function WorkspaceSwitcher() {
                       // visit to someone else's database goes.
                       await checkJoin({ url: dburl, join_code: value })
                       const conn = await addConnection({ url: dburl })
+                      setSwitchingTo({
+                        name: value,
+                        action: 'Connecting database…',
+                      })
+                      try {
+                        window.sessionStorage.setItem('mc_switching_workspace', value)
+                      } catch {}
                       const result = await activateConnection(conn.id, null)
                       if (result.signed_in) {
                         await joinWorkspace(value)
@@ -305,6 +361,10 @@ function WorkspaceSwitcher() {
                     }
                     window.location.reload()
                   } catch (err) {
+                    try {
+                      window.sessionStorage.removeItem('mc_switching_workspace')
+                    } catch {}
+                    setSwitchingTo(null)
                     setError(err.message)
                     setBusy(false)
                   }
@@ -327,7 +387,6 @@ function WorkspaceSwitcher() {
                     </p>
                   </>
                 )}
-                <div className="flex items-center gap-1">
                 <input
                   name="value"
                   className="mc-input py-1 text-xs"
@@ -336,9 +395,26 @@ function WorkspaceSwitcher() {
                   autoFocus={mode !== 'join' || !Array.isArray(connections)}
                   disabled={busy}
                 />
-                <button type="submit" className="mc-btn mc-btn-primary px-2 py-1 text-xs" disabled={busy}>
-                  {mode === 'join' ? 'Join' : 'Create'}
-                </button>
+                <div className="flex items-center justify-end gap-1.5 pt-1">
+                  <button
+                    type="button"
+                    className="mc-btn mc-btn-ghost px-2.5 py-1 text-xs"
+                    disabled={busy}
+                    onClick={() => {
+                      setMode(null)
+                      setError(null)
+                      setNotice(null)
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="mc-btn mc-btn-primary px-3 py-1 text-xs"
+                    disabled={busy}
+                  >
+                    {mode === 'join' ? 'Join' : 'Create'}
+                  </button>
                 </div>
               </form>
             ) : (
@@ -373,6 +449,7 @@ function WorkspaceSwitcher() {
         </div>
       )}
     </div>
+    </>
   )
 }
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import AppShell from './components/AppShell'
+import WorkspaceSwitchOverlay from './components/WorkspaceSwitchOverlay'
 import { Loading } from './components/ui'
 import Onboarding from './pages/Onboarding'
 import SignIn from './pages/SignIn'
@@ -26,6 +27,13 @@ export default function App() {
   const [phase, setPhase] = useState('loading')
   const [user, setUser] = useState(null)
   const [hasMembers, setHasMembers] = useState(true)
+  const [switchingTarget, setSwitchingTarget] = useState(() => {
+    try {
+      return window.sessionStorage.getItem('mc_switching_workspace')
+    } catch {
+      return null
+    }
+  })
 
   const boot = useCallback(async () => {
     setPhase('loading')
@@ -59,6 +67,17 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (phase !== 'loading') {
+      try {
+        window.sessionStorage.removeItem('mc_switching_workspace')
+      } catch {
+        // Non-critical session preference.
+      }
+      setSwitchingTarget(null)
+    }
+  }, [phase])
+
+  useEffect(() => {
     boot()
   }, [boot])
 
@@ -78,6 +97,15 @@ export default function App() {
   }
 
   if (phase === 'loading') {
+    if (switchingTarget) {
+      return (
+        <WorkspaceSwitchOverlay
+          name={switchingTarget}
+          action="Opening workspace…"
+          subtitle="Loading your meetings, notes, and AI workspace…"
+        />
+      )
+    }
     return (
       <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: 'var(--surface-page)' }}>
         <Loading label="Starting Meet Companion…" />

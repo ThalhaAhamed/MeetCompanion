@@ -1,7 +1,7 @@
 {
   "name": "meet-companion",
   "productName": "Meet Companion",
-  "version": "0.2.0",
+  "version": "0.5.2",
   "description": "Make meeting data smarter. Open-source meeting memory, notebook and AI assistant built on MeetStream.",
   "main": "main.js",
   "private": true,
