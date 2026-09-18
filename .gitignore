@@ -71,3 +71,4 @@ frontend/dist/
 # Local tool configuration
 .claude/
 .cloudflared*.log
+.tmp/
