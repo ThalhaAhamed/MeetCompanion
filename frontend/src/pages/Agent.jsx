@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Page, PageHeader } from '../components/AppShell'
-import { AskAiIcon, CheckIcon, PlusIcon, RobotIcon } from '../components/Icons'
+import { AskAiIcon, CheckIcon, PlusIcon, RobotIcon, TrashIcon } from '../components/Icons'
 import {
   Badge,
   Card,
@@ -15,6 +15,7 @@ import {
 import {
   activateAgent,
   createAgent,
+  deleteAgent,
   getAgent,
   getAgentCredentials,
   getAgentTemplate,
@@ -369,6 +370,7 @@ export default function Agent() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [activatingId, setActivatingId] = useState(null)
+  const [deletingId, setDeletingId] = useState(null)
   const [newOpen, setNewOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
 
@@ -379,7 +381,10 @@ export default function Agent() {
       setAgents(data.agent_configs || [])
     } catch (err) {
       setAgents([])
-      setAgentsError(err.message)
+      // A 400 means the member has no MeetStream API key yet — expected on a
+      // new account, not an error worth showing (the empty-state UI already
+      // guides them to create or import an agent).
+      if (err.status !== 400) setAgentsError(err.message)
     }
   }, [])
 
@@ -404,6 +409,13 @@ export default function Agent() {
       })
     } catch (err) {
       setConfig(null)
+      // A 404 for the default active agent means no agent exists yet — on a
+      // new account this is the normal state, not a failure. Show the
+      // template editor instead of a red error panel.
+      if (!agentConfigId && err.status === 404) {
+        setSelected('template')
+        return
+      }
       setConfigError(err.message)
     }
   }, [])
@@ -513,6 +525,22 @@ export default function Agent() {
     }
   }
 
+  async function remove(agent) {
+    const name = agent.AgentName || 'this agent'
+    if (!window.confirm(`Delete ${name}? It is removed from your MeetStream account too. Bots already in calls keep running; new ones cannot use it.`)) return
+    setDeletingId(agent.AgentConfigID)
+    setAgentsError(null)
+    try {
+      const result = await deleteAgent(agent.AgentConfigID)
+      if (selected === agent.AgentConfigID || (result.was_active && selected === 'active')) setSelected('template')
+      await Promise.all([loadAgents(), loadConfig()])
+    } catch (err) {
+      setAgentsError(err.message)
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   const refreshAll = () => Promise.all([loadAgents(), loadConfig()])
 
   return (
@@ -613,18 +641,32 @@ export default function Agent() {
                       {agent.Model?.provider && <Badge>{agent.Model.provider}</Badge>}
                     </div>
                   </button>
-                  {agent.IsActive ? (
-                    <Badge tone="brand"><CheckIcon size={12} /> Active</Badge>
-                  ) : canManage && (
-                    <button
-                      type="button"
-                      className="mc-btn mc-btn-secondary"
-                      onClick={() => activate(agent.AgentConfigID)}
-                      disabled={activatingId === agent.AgentConfigID}
-                    >
-                      {activatingId === agent.AgentConfigID ? <Spinner size={13} /> : null} Use
-                    </button>
-                  )}
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    {agent.IsActive ? (
+                      <Badge tone="brand"><CheckIcon size={12} /> Active</Badge>
+                    ) : canManage && (
+                      <button
+                        type="button"
+                        className="mc-btn mc-btn-secondary"
+                        onClick={() => activate(agent.AgentConfigID)}
+                        disabled={activatingId === agent.AgentConfigID || deletingId === agent.AgentConfigID}
+                      >
+                        {activatingId === agent.AgentConfigID ? <Spinner size={13} /> : null} Use
+                      </button>
+                    )}
+                    {canManage && (
+                      <button
+                        type="button"
+                        className="mc-btn mc-btn-ghost px-2"
+                        onClick={() => remove(agent)}
+                        disabled={deletingId === agent.AgentConfigID || activatingId === agent.AgentConfigID}
+                        title="Delete this agent"
+                        aria-label={`Delete ${agent.AgentName || 'agent'}`}
+                      >
+                        {deletingId === agent.AgentConfigID ? <Spinner size={13} /> : <TrashIcon size={14} />}
+                      </button>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>

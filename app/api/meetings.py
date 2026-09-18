@@ -2,10 +2,11 @@
 Meeting Management Endpoints.
 Allows creating meetings, triggering MeetStream bot deployment, and retrieving meeting data.
 """
+import re
 import uuid
 from datetime import date, datetime, timezone
 import httpx
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from app import permissions as perms
 from pydantic import BaseModel, Field
@@ -218,8 +219,13 @@ async def list_meetings(
     return meetings
 
 
+_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
 @router.get("/importable")
 async def list_importable_bots(
+    date_from: Optional[str] = Query(default=None, alias="from"),
+    date_to: Optional[str] = Query(default=None, alias="to"),
     user: User = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_current_org_id),
     db: AsyncSession = Depends(get_db),
@@ -230,10 +236,16 @@ async def list_importable_bots(
     this app (its own dashboard, another integration, or before this
     workspace started using it) that never got tracked, transcribed, or
     indexed here. The candidate list for the "import old bot data" feature.
+
+    from/to (YYYY-MM-DD) narrow the listing to a period; every page of
+    MeetStream's paginated answer is fetched either way.
     """
+    for label, value in (("from", date_from), ("to", date_to)):
+        if value and not _DATE.match(value):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"'{label}' must be a date in YYYY-MM-DD form.")
     own_key = await require_meetstream_api_key(db, user.id)
     try:
-        bots = await meetstream_client.list_bots(api_key=own_key)
+        bots = await meetstream_client.list_bots(api_key=own_key, date_from=date_from, date_to=date_to)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
 
@@ -292,14 +304,33 @@ async def import_bot(
     if body.bot_id in await meeting_repo.get_all_existing_bot_ids():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This bot is already imported (possibly under a different workspace).")
 
+    # The detail call is the nice-to-have here (real start/end times, the
+    # transcript id); the listing already gave us what the row needs. A bot
+    # MeetStream cannot describe - some answer 500 - is still importable.
+    details: Dict[str, Any] = {}
+    detail_error: Optional[str] = None
     try:
         bot_resp = await meetstream_client.get_bot(body.bot_id, api_key=own_key)
+        details = bot_resp.get("bot_details", bot_resp) or {}
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
+        detail_error = str(e)
+        logger.warning(f"Bot detail unavailable for {body.bot_id}, importing from the listing: {e}")
 
-    details = bot_resp.get("bot_details", bot_resp)
     meeting_url = details.get("MeetingLink") or body.meeting_url
     transcript_id = details.get("transcript_id")
+    if not transcript_id:
+        # Not every detail payload carries it; the bot's transcription runs do.
+        try:
+            runs = await meetstream_client.list_bot_transcriptions(body.bot_id, api_key=own_key)
+            done = [r for r in runs if str(r.get("status", "")).lower() in ("completed", "complete", "done", "ready")]
+            chosen = (done or runs)[0] if (done or runs) else None
+            transcript_id = (chosen or {}).get("transcript_id")
+        except Exception as e:
+            logger.warning(f"Transcriptions lookup failed for {body.bot_id}: {e}")
+    if not transcript_id and detail_error and not meeting_url:
+        # Nothing at all to go on: neither MeetStream call worked and the
+        # listing had no URL either. Say so rather than file an empty row.
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {detail_error}")
     platform_raw = body.platform or ""
     platform = _PLATFORM_MAP.get(platform_raw.lower(), platform_raw.lower() or None)
 
@@ -336,7 +367,12 @@ async def import_bot(
         ended_at=ended_at,
         meetstream_transcript_id=transcript_id,
         processing_status="queued_for_processing" if transcript_id else "failed",
-        processing_error=None if transcript_id else "No transcript available for this bot (it wasn't recorded with transcription enabled).",
+        processing_error=None if transcript_id else (
+            "MeetStream could not describe this bot and no transcript was found for it. "
+            "It may still be processing on their side - use Reprocess to try again later."
+            if detail_error else
+            "No transcript available for this bot (it wasn't recorded with transcription enabled)."
+        ),
     )
     await db.commit()
     await db.refresh(meeting)

@@ -202,8 +202,12 @@ export function getKnowledgeGraph() {
   return req('/graph')
 }
 
-export function listImportableBots() {
-  return req('/meetings/importable')
+export function listImportableBots({ from, to } = {}) {
+  const query = new URLSearchParams()
+  if (from) query.set('from', from)
+  if (to) query.set('to', to)
+  const qs = query.toString()
+  return req(`/meetings/importable${qs ? `?${qs}` : ''}`)
 }
 
 export function importBot({ bot_id, title, platform, meeting_url }) {
@@ -292,6 +296,10 @@ export function createAgent(payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   })
+}
+
+export function deleteAgent(agent_config_id) {
+  return req(`/agent?agent_config_id=${encodeURIComponent(agent_config_id)}`, { method: 'DELETE' })
 }
 
 export function activateAgent(agent_config_id) {

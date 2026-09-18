@@ -104,16 +104,27 @@ function LaunchBotModal({ open, onClose, onLaunched }) {
 function ImportBotsModal({ open, onClose, onImported }) {
   const [candidates, setCandidates] = useState(null)
   const [error, setError] = useState(null)
+  // The bot whose import just failed, so "Try again" can retry that one.
+  const [failedBot, setFailedBot] = useState(null)
   const [importingId, setImportingId] = useState(null)
   const [search, setSearch] = useState('')
+  // MeetStream lists bots by date range; the whole account's history is
+  // long, so a period keeps the list short and puts old calls in reach.
+  const [range, setRange] = useState({ from: '', to: '' })
+
+  const load = useCallback(() => {
+    setCandidates(null)
+    setError(null)
+    setFailedBot(null)
+    listImportableBots(range)
+      .then((data) => setCandidates(data.importable || []))
+      .catch((err) => setError(err.message))
+  }, [range])
 
   useEffect(() => {
     if (!open) return
-    setCandidates(null)
-    listImportableBots()
-      .then((data) => setCandidates(data.importable || []))
-      .catch((err) => setError(err.message))
-  }, [open])
+    load()
+  }, [open, load])
 
   const filtered = (candidates || []).filter((bot) => {
     if (!search.trim()) return true
@@ -123,6 +134,8 @@ function ImportBotsModal({ open, onClose, onImported }) {
 
   async function handleImport(bot) {
     setImportingId(bot.bot_id)
+    setError(null)
+    setFailedBot(null)
     try {
       const meeting = await importBot({
         bot_id: bot.bot_id,
@@ -134,6 +147,7 @@ function ImportBotsModal({ open, onClose, onImported }) {
       setCandidates((current) => current.filter((c) => c.bot_id !== bot.bot_id))
     } catch (err) {
       setError(err.message)
+      setFailedBot(bot)
     } finally {
       setImportingId(null)
     }
@@ -146,12 +160,53 @@ function ImportBotsModal({ open, onClose, onImported }) {
         and runs it through the same memory extraction as any other meeting.
       </p>
 
-      {error && <div className="mb-4"><ErrorMessage title="Import failed" detail={error} /></div>}
+      {error && (
+        <div className="mb-4">
+          <ErrorMessage
+            title={failedBot ? 'Import failed' : 'Could not list bots'}
+            detail={error}
+            onRetry={failedBot ? () => handleImport(failedBot) : load}
+          />
+        </div>
+      )}
+
+      <div className="mb-3 flex flex-wrap items-end gap-2">
+        <label className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          From
+          <input
+            type="date"
+            className="mc-input mt-1 py-1 text-sm"
+            aria-label="From date"
+            value={range.from}
+            max={range.to || undefined}
+            onChange={(event) => setRange((current) => ({ ...current, from: event.target.value }))}
+          />
+        </label>
+        <label className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          To
+          <input
+            type="date"
+            className="mc-input mt-1 py-1 text-sm"
+            aria-label="To date"
+            value={range.to}
+            min={range.from || undefined}
+            onChange={(event) => setRange((current) => ({ ...current, to: event.target.value }))}
+          />
+        </label>
+        {(range.from || range.to) && (
+          <button type="button" className="mc-btn mc-btn-ghost py-1 text-xs" onClick={() => setRange({ from: '', to: '' })}>
+            Clear dates
+          </button>
+        )}
+      </div>
 
       {candidates === null ? (
         <Loading />
       ) : candidates.length === 0 ? (
-        <EmptyState title="Nothing to import" description="Every bot on this account is already tracked here." />
+        <EmptyState
+          title="Nothing to import"
+          description={range.from || range.to ? 'No untracked bots in that period. Widen the dates to see more.' : 'Every bot on this account is already tracked here.'}
+        />
       ) : (
         <>
           <div className="relative mb-3">

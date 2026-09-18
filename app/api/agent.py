@@ -454,6 +454,43 @@ async def activate_agent(body: ActivateRequest, user: User = Depends(get_current
     return {"active_agent_config_id": body.agent_config_id}
 
 
+@router.delete("", dependencies=[Depends(perms.require("manage_agents"))])
+async def delete_agent(
+    agent_config_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Delete one of this member's agents - on MeetStream, and from this
+    member's owned list. Only an agent they own (or nobody has claimed):
+    the same rule that guards activating or editing one, so a member
+    cannot remove a colleague's agent by knowing its id. If it was the
+    active one, no agent is active afterwards until they pick another.
+    """
+    await require_claimable_agent(db, user.id, agent_config_id)
+    own_key = await require_meetstream_api_key(db, user.id)
+    try:
+        await meetstream_client.delete_mia_agent(agent_config_id, api_key=own_key)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code != 404:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
+        # Already gone on their side; finish tidying ours.
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
+
+    user_repo = UserRepository(db)
+    fresh = await user_repo.get_by_id(user.id)
+    settings = dict(fresh.settings or {})
+    owned = [i for i in (settings.get("agent_config_ids") or []) if i != agent_config_id]
+    changes: Dict[str, Any] = {"agent_config_ids": owned}
+    was_active = settings.get("active_agent_config_id") == agent_config_id
+    if was_active:
+        changes["active_agent_config_id"] = None
+    await user_repo.update_settings(user.id, changes)
+    await db.commit()
+    return {"deleted": True, "agent_config_id": agent_config_id, "was_active": was_active}
+
+
 class AgentUpdateRequest(BaseModel):
     agent_config_id: Optional[str] = None
     system_prompt: Optional[str] = None

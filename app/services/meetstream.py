@@ -136,27 +136,96 @@ class MeetStreamClient:
             return resp.json()
 
     async def get_bot(self, bot_id: str, api_key: Optional[str] = None) -> Dict[str, Any]:
-        """Retrieve the status and metadata for a specific bot."""
+        """
+        Retrieve the metadata for a specific bot: {"bot_details": {...}}.
+
+        GET /bots/{id}/detail - the documented path. The bare /bots/{id}
+        this used to call is not in MeetStream's API and answers 500 for
+        some bots, which surfaced as "Import failed ... 500" in the UI.
+        """
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
-                f"{self.base_url}/api/v1/bots/{bot_id}",
+                f"{self.base_url}/api/v1/bots/{bot_id}/detail",
                 headers=self._headers(api_key),
             )
             resp.raise_for_status()
             return resp.json()
 
-    async def list_bots(self, api_key: Optional[str] = None) -> Dict[str, Any]:
-        """List every bot ever deployed on this MeetStream account - includes
-        ones launched outside this app (its own dashboard, another
-        integration), which is how the import-old-bot-data feature finds
-        candidates that have no matching row in our own meetings table."""
-        async with httpx.AsyncClient(timeout=20.0) as client:
+    async def list_bot_transcriptions(self, bot_id: str, api_key: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Every transcription run for a bot, newest first as MeetStream
+        returns them. The way to find a transcript_id when the bot's detail
+        payload does not carry one (MeetStream's own client treats this as
+        one of the canonical sources).
+        """
+        async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
-                f"{self.base_url}/api/v1/bots",
+                f"{self.base_url}/api/v1/bots/{bot_id}/transcriptions",
                 headers=self._headers(api_key),
             )
             resp.raise_for_status()
-            return resp.json()
+            return resp.json().get("transcriptions", []) or []
+
+    async def list_bots(
+        self,
+        api_key: Optional[str] = None,
+        *,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        status: Optional[str] = None,
+        max_pages: int = 25,
+    ) -> Dict[str, Any]:
+        """
+        List the bots deployed on this MeetStream account - including ones
+        launched outside this app (its own dashboard, another integration),
+        which is how the import-old-bot-data feature finds candidates that
+        have no matching row in our own meetings table.
+
+        The endpoint is paginated (hasNextPage / nextCursor) and returns one
+        page per call; without following the cursor the import list stopped
+        at whatever the first page covered, which read as "only up to some
+        date". Every page is fetched here, and the documented from/to
+        (YYYY-MM-DD) filters are passed through so a person can narrow to a
+        period instead of scrolling a whole account's history.
+        """
+        params: Dict[str, str] = {}
+        if date_from:
+            params["from"] = date_from
+        if date_to:
+            params["to"] = date_to
+        if status:
+            params["status"] = status
+
+        bots: List[Dict[str, Any]] = []
+        seen: set = set()
+        cursor: Optional[str] = None
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            for _ in range(max_pages):
+                page_params = dict(params)
+                if cursor:
+                    page_params["cursor"] = cursor
+                resp = await client.get(
+                    f"{self.base_url}/api/v1/bots",
+                    params=page_params,
+                    headers=self._headers(api_key),
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                new = 0
+                for b in data.get("bots", []) or []:
+                    bid = b.get("bot_id")
+                    if bid and bid in seen:
+                        continue
+                    if bid:
+                        seen.add(bid)
+                    bots.append(b)
+                    new += 1
+                cursor = data.get("nextCursor")
+                # Stop on the last page - or if the server ignored the cursor
+                # and handed back the same page, which would loop forever.
+                if not data.get("hasNextPage") or not cursor or new == 0:
+                    break
+        return {"bots": bots}
 
     async def send_bot_message(self, bot_id: str, message: str, api_key: Optional[str] = None) -> Dict[str, Any]:
         """Post a message into the live meeting chat as the bot."""
@@ -206,6 +275,17 @@ class MeetStreamClient:
             )
             resp.raise_for_status()
             return resp.json()
+
+    async def delete_mia_agent(self, agent_config_id: str, api_key: Optional[str] = None) -> Dict[str, Any]:
+        """Delete a MIA agent config on MeetStream: DELETE /mia?agent_config_id=..."""
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.delete(
+                f"{self.base_url}/api/v1/mia",
+                params={"agent_config_id": agent_config_id},
+                headers=self._headers(api_key),
+            )
+            resp.raise_for_status()
+            return resp.json() if resp.content else {}
 
     async def list_mia_agents(self, api_key: Optional[str] = None) -> Dict[str, Any]:
         """List all MIA agent configs on this account."""
