@@ -19,7 +19,7 @@
 <img src="docs/media/meeting-to-note.gif" alt="A transcript is pasted, processed, and becomes a summary, action items, memories and a note" width="900" />
 </div>
 
-The bot comes from [MeetStream](https://meetstream.ai) (Google Meet, Zoom, Teams); paste a transcript instead and no account is needed. Everything after the transcript runs here, on infrastructure you own. Meetings become **Markdown notes with live action-item checkboxes**, searchable **semantically**, answerable with **Ask AI** — and the in-call agent can recall "what did we decide last time?" *during* the next meeting. Built for people who run their own tools and want meeting notes that stay theirs.
+Send a bot into your call via **[MeetStream](https://meetstream.ai)** (Google Meet, Zoom, Teams) — as soon as the meeting finishes, Meet Companion **automatically retrieves the transcript**, runs it through your chosen LLM to extract summaries, key decisions, and action items with deadlines, and files everything into organized Markdown notes. You can also paste or import existing transcripts directly without needing an account. Everything after the call runs on infrastructure you own: meetings become **Markdown notes with live action-item checkboxes**, searchable **semantically**, and answerable with **Ask AI** — plus an in-call agent that can recall "what did we decide last time?" *during* your next meeting. Built for teams and individuals who run their own tools and want meeting intelligence that stays completely theirs.
 
 ## 🚀 Quick start
 
@@ -51,7 +51,7 @@ docker compose up -d      # self-hosted instead → http://localhost:8000
 
 ## ✨ Features
 
-- 🎥 **Meeting capture** — a bot in Google Meet, Zoom or Teams; paste a transcript; import past bots.
+- 🎥 **Meeting capture** — automatic bot joining for Google Meet, Zoom, or Teams with instant transcript retrieval and processing; or manually paste/import transcripts anytime.
 - 🧠 **Memory extraction** — decisions, commitments, requirements, concerns, open questions, action items with owners and due dates.
 - 📓 **Notebook** — folders, tags, favourites, search; rendered Markdown with an editor behind it.
 - ✅ **Action items in sync** — tick a box in a note and the task completes; `- [ ] call Bob` in any note becomes a real task.
