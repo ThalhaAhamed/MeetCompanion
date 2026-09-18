@@ -92,6 +92,20 @@ async def get_agent_credentials(user: User = Depends(get_current_user), org_id: 
     mcp_token = org.mcp_token if org else None
     own_key = await get_meetstream_api_key(db, user.id)
     effective_key = own_key or settings.MEETSTREAM_API_KEY
+    from app.services.llm import build_llm_config, workspace_llm, LLMConfigError
+    llm_configured = False
+    llm_label = None
+    llm_provider = None
+    llm_model = None
+    try:
+        llm_cfg = build_llm_config(workspace_llm(org))
+        llm_provider = llm_cfg.provider
+        llm_model = llm_cfg.model
+        llm_label = f"{llm_cfg.provider} ({llm_cfg.model})" if llm_cfg.model else llm_cfg.provider
+        llm_configured = True
+    except LLMConfigError:
+        pass
+
     return {
         "meetstream_api_key": {
             "configured": bool(effective_key),
@@ -99,25 +113,10 @@ async def get_agent_credentials(user: User = Depends(get_current_user), org_id: 
             "is_personal": bool(own_key),
         },
         "memory_extraction_llm": {
-            "provider": settings.LLM_PROVIDER,
-            "model": {
-                "openai": settings.OPENAI_MODEL,
-                "groq": settings.GROQ_MODEL,
-                "xai": settings.XAI_MODEL,
-                "anthropic": settings.ANTHROPIC_MODEL,
-            }.get(settings.LLM_PROVIDER),
-            "api_key_configured": bool({
-                "openai": settings.OPENAI_API_KEY,
-                "groq": settings.GROQ_API_KEY,
-                "xai": settings.XAI_API_KEY,
-                "anthropic": settings.ANTHROPIC_API_KEY,
-            }.get(settings.LLM_PROVIDER)),
-            "masked_api_key": _mask_secret({
-                "openai": settings.OPENAI_API_KEY,
-                "groq": settings.GROQ_API_KEY,
-                "xai": settings.XAI_API_KEY,
-                "anthropic": settings.ANTHROPIC_API_KEY,
-            }.get(settings.LLM_PROVIDER)),
+            "configured": llm_configured,
+            "masked_value": llm_label,
+            "provider": llm_provider,
+            "model": llm_model,
         },
         "mcp_auth_token": {
             "configured": bool(mcp_token),

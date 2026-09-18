@@ -24,7 +24,7 @@ import {
   updateAgent,
   updateAgentTemplate,
 } from '../api'
-import { useCan, useIsOwner } from '../user'
+import { useCan, useIsOwner, useUser } from '../user'
 
 const MODES = ['realtime', 'pipeline']
 const MODALITIES = ['text', 'audio', 'chat']
@@ -356,6 +356,7 @@ function AgentForm({ form, update, onSubmit, saving, saved, error, submitLabel, 
 export default function Agent() {
   const canManage = useCan('manage_agents')
   const isOwner = useIsOwner()
+  const user = useUser()
   const [agents, setAgents] = useState(null)
   const [agentsError, setAgentsError] = useState(null)
   const [config, setConfig] = useState(null)
@@ -750,16 +751,39 @@ export default function Agent() {
                 What this workspace's agent is wired to. Secrets are shown masked.
               </p>
               <dl className="divide-y text-sm" style={{ borderColor: 'var(--border-subtle)' }}>
-                {Object.entries(credentials).map(([key, value]) => (
-                  <div key={key} className="flex flex-wrap justify-between gap-3 py-2.5">
-                    <dt style={{ color: 'var(--text-muted)' }}>{key.replace(/_/g, ' ')}</dt>
-                    <dd className="font-mono text-xs" style={{ color: 'var(--text-strong)' }}>
-                      {typeof value === 'object' && value !== null
-                        ? value.masked_value || (value.configured ? 'configured' : 'not set')
-                        : String(value ?? '—')}
-                    </dd>
-                  </div>
-                ))}
+                {Object.entries(credentials).map(([key, value]) => {
+                  let display = '—'
+                  if (typeof value === 'object' && value !== null) {
+                    if (key === 'memory_extraction_llm') {
+                      if (value.masked_value) {
+                        display = value.masked_value
+                      } else if (value.provider) {
+                        display = value.model ? `${value.provider} (${value.model})` : value.provider
+                      } else if (user?.workspace_ai?.mode === 'workspace' && user.workspace_ai.provider) {
+                        display = user.workspace_ai.model
+                          ? `${user.workspace_ai.provider} (${user.workspace_ai.model})`
+                          : user.workspace_ai.provider
+                      } else if (value.configured || value.api_key_configured) {
+                        display = 'configured'
+                      } else {
+                        display = 'not set'
+                      }
+                    } else {
+                      display = value.masked_value || (value.configured ? 'configured' : 'not set')
+                    }
+                  } else {
+                    display = String(value ?? '—')
+                  }
+
+                  return (
+                    <div key={key} className="flex flex-wrap justify-between gap-3 py-2.5">
+                      <dt style={{ color: 'var(--text-muted)' }}>{key.replace(/_/g, ' ')}</dt>
+                      <dd className="font-mono text-xs" style={{ color: 'var(--text-strong)' }}>
+                        {display}
+                      </dd>
+                    </div>
+                  )
+                })}
               </dl>
             </Card>
           )}
