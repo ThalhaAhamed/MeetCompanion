@@ -13,12 +13,13 @@ import ProviderFields from '../components/ProviderFields'
  * PostgreSQL where the join code lives - then the account, then their
  * MeetStream key, which belongs to the account.
  */
-const STEPS = ['Workspace', 'Account', 'Storage', 'AI model', 'Review']
+const DEFAULT_STEPS = ['Workspace', 'Account', 'Storage', 'AI model', 'Review']
+const RECONNECT_STEPS = ['Connection', 'Account', 'Storage', 'AI model', 'Review']
 
-function StepRail({ current }) {
+function StepRail({ current, steps }) {
   return (
     <ol className="flex flex-wrap items-center justify-center gap-2 text-xs font-medium" aria-label="Setup progress">
-      {STEPS.map((label, index) => {
+      {steps.map((label, index) => {
         const done = index < current
         const active = index === current
         return (
@@ -33,7 +34,7 @@ function StepRail({ current }) {
               {done ? <CheckIcon size={13} /> : index + 1}
             </span>
             <span style={{ color: active ? 'var(--text-strong)' : 'var(--text-faint)' }}>{label}</span>
-            {index < STEPS.length - 1 && (
+            {index < steps.length - 1 && (
               <ChevronRightIcon size={14} style={{ color: 'var(--text-faint)' }} />
             )}
           </li>
@@ -117,7 +118,7 @@ export default function Onboarding({ onComplete }) {
   const [loadError, setLoadError] = useState(null)
 
   // Step 0 - workspace
-  const [mode, setMode] = useState('start') // 'start' | 'join'
+  const [mode, setMode] = useState('start') // 'start' | 'join' | 'reconnect'
   const [workspaceName, setWorkspaceName] = useState('')
   const [joinCode, setJoinCode] = useState('')
 
@@ -174,12 +175,14 @@ export default function Onboarding({ onComplete }) {
   // never contain the workspace the join code refers to.
   const databases = useMemo(() => {
     if (!catalog) return []
-    return mode === 'join' ? catalog.databases.filter((d) => d.name !== 'sqlite') : catalog.databases
+    // Reconnecting to an existing account or joining a team: a local SQLite
+    // could never contain the workspace the user refers to.
+    return mode === 'join' || mode === 'reconnect' ? catalog.databases.filter((d) => d.name !== 'sqlite') : catalog.databases
   }, [catalog, mode])
 
   function chooseMode(next) {
     setMode(next)
-    if (next === 'join' && storage === 'sqlite') {
+    if ((next === 'join' || next === 'reconnect') && storage === 'sqlite') {
       setStorage('postgres-url')
       setDbValues({})
       setDbTest(null)
@@ -226,7 +229,9 @@ export default function Onboarding({ onComplete }) {
         })
         setProgress((p) => ({ ...p, setup: true }))
       }
-      if (!progress.account) {
+      // Reconnect mode: the account already exists on the target database;
+      // skip creation and sign in directly.
+      if (mode !== 'reconnect' && !progress.account) {
         await addMember({
           name: account.name.trim(),
           email,
@@ -282,15 +287,19 @@ export default function Onboarding({ onComplete }) {
     return <Loading label="Preparing setup…" />
   }
 
+  const steps = mode === 'reconnect' ? RECONNECT_STEPS : DEFAULT_STEPS
   const canLeaveWorkspace = mode === 'start' ? workspaceName.trim().length > 0 : true
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account.email.trim())
-  const canLeaveAccount = account.name.trim().length > 0 && emailOk && account.password.length >= 8
+  const canLeaveAccount = mode === 'reconnect'
+    ? emailOk && account.password.length >= 8
+    : account.name.trim().length > 0 && emailOk && account.password.length >= 8
   const dbEntry = databases.find((item) => item.name === storage)
   const canLeaveStorage =
-    Boolean(dbEntry) && isDatabaseFormComplete(dbEntry, dbValues) && (mode === 'start' || joinCode.trim().length > 0)
+    Boolean(dbEntry) && isDatabaseFormComplete(dbEntry, dbValues) && (mode === 'start' || mode === 'reconnect' || joinCode.trim().length > 0)
 
   async function leaveStorage() {
     if (mode !== 'join') {
+      // 'start' and 'reconnect' have nothing to check against the database.
       setStep(3)
       return
     }
@@ -316,7 +325,7 @@ export default function Onboarding({ onComplete }) {
     <div className="min-h-screen" style={{ backgroundColor: 'var(--surface-page)' }}>
       <div className="mx-auto w-full max-w-2xl px-5 py-12">
         <div className="mb-8 flex justify-center">
-          <StepRail current={step} />
+          <StepRail current={step} steps={steps} />
         </div>
 
         {step === 0 && (
@@ -336,6 +345,12 @@ export default function Onboarding({ onComplete }) {
               </OptionCard>
               <OptionCard selected={mode === 'join'} onSelect={() => chooseMode('join')} title="Join my team's workspace">
                 Someone gave you a join code. Next you connect to the team's database and enter the code there.
+              </OptionCard>
+            </div>
+
+            <div className="mt-2">
+              <OptionCard selected={mode === 'reconnect'} onSelect={() => chooseMode('reconnect')} title="Already have an account?">
+                You set up Meet Companion before and already have an account on a database — this system just needs to be pointed at it.
               </OptionCard>
             </div>
 
@@ -366,38 +381,46 @@ export default function Onboarding({ onComplete }) {
 
         {step === 1 && (
           <Card>
-            <h2 className="text-lg font-semibold">Your account</h2>
+            <h2 className="text-lg font-semibold">
+              {mode === 'reconnect' ? 'Sign in to your existing account' : 'Your account'}
+            </h2>
             <p className="mt-1 mb-5 text-sm" style={muted}>
-              {mode === 'start'
-                ? 'This account owns the workspace: it configures the server and invites others.'
-                : 'This is you inside the team workspace.'}
+              {mode === 'reconnect'
+                ? 'Enter the credentials of the account you already have on the database you will connect to next.'
+                : mode === 'start'
+                  ? 'This account owns the workspace: it configures the server and invites others.'
+                  : 'This is you inside the team workspace.'}
             </p>
 
-            <Field label="Name" htmlFor="ob-name">
-              <input id="ob-name" className="mc-input" autoComplete="name" value={account.name}
-                onChange={(e) => setAccount({ ...account, name: e.target.value })} autoFocus />
-            </Field>
+            {mode !== 'reconnect' && (
+              <Field label="Name" htmlFor="ob-name">
+                <input id="ob-name" className="mc-input" autoComplete="name" value={account.name}
+                  onChange={(e) => setAccount({ ...account, name: e.target.value })} autoFocus />
+              </Field>
+            )}
             <Field label="Email" htmlFor="ob-email">
               <input id="ob-email" type="email" className="mc-input" autoComplete="email" value={account.email}
-                onChange={(e) => setAccount({ ...account, email: e.target.value })} />
+                onChange={(e) => setAccount({ ...account, email: e.target.value })} autoFocus={mode === 'reconnect'} />
             </Field>
-            <Field label="Password" htmlFor="ob-password" hint="At least 8 characters.">
-              <input id="ob-password" type="password" className="mc-input" autoComplete="new-password" value={account.password}
+            <Field label="Password" htmlFor="ob-password" hint={mode === 'reconnect' ? 'The password for your existing account.' : 'At least 8 characters.'}>
+              <input id="ob-password" type="password" className="mc-input" autoComplete={mode === 'reconnect' ? 'current-password' : 'new-password'} value={account.password}
                 onChange={(e) => setAccount({ ...account, password: e.target.value })} />
             </Field>
 
-            <div className="mt-6 border-t pt-5" style={{ borderColor: 'var(--border-subtle)' }}>
-              <Field
-                label="MeetStream API key"
-                htmlFor="ob-meetstream"
-                hint="Lets Meet Companion send a bot into your calls. Optional - skip it if you only upload transcripts; you can add it any time in Settings → Meetings."
-              >
-                <input id="ob-meetstream" type="password" className="mc-input font-mono" autoComplete="off"
-                  value={account.meetstream_api_key}
-                  onChange={(e) => setAccount({ ...account, meetstream_api_key: e.target.value })}
-                  placeholder="ms_…" />
-              </Field>
-            </div>
+            {mode !== 'reconnect' && (
+              <div className="mt-6 border-t pt-5" style={{ borderColor: 'var(--border-subtle)' }}>
+                <Field
+                  label="MeetStream API key"
+                  htmlFor="ob-meetstream"
+                  hint="Lets Meet Companion send a bot into your calls. Optional - skip it if you only upload transcripts; you can add it any time in Settings → Meetings."
+                >
+                  <input id="ob-meetstream" type="password" className="mc-input font-mono" autoComplete="off"
+                    value={account.meetstream_api_key}
+                    onChange={(e) => setAccount({ ...account, meetstream_api_key: e.target.value })}
+                    placeholder="ms_…" />
+                </Field>
+              </div>
+            )}
 
             <StepButtons onBack={() => setStep(0)} onNext={() => setStep(2)} nextDisabled={!canLeaveAccount} />
           </Card>
@@ -406,12 +429,14 @@ export default function Onboarding({ onComplete }) {
         {step === 2 && (
           <Card>
             <h2 className="text-lg font-semibold">
-              {mode === 'join' ? "Connect to your team's database" : 'Where should Meet Companion store your data?'}
+              {mode === 'join' ? "Connect to your team's database" : mode === 'reconnect' ? 'Connect to your database' : 'Where should Meet Companion store your data?'}
             </h2>
             <p className="mt-1 mb-5 text-sm" style={muted}>
-              {mode === 'join'
-                ? 'Meetings, notes and memory are shared through it. Paste the connection string your workspace owner gave you.'
-                : 'Meetings, notes and memory all live here. Local SQLite needs nothing installed; pick a hosted Postgres to share the workspace with others.'}
+              {mode === 'reconnect'
+                ? 'Point this system at the database where your account and data live.'
+                : mode === 'join'
+                  ? 'Meetings, notes and memory are shared through it. Paste the connection string your workspace owner gave you.'
+                  : 'Meetings, notes and memory all live here. Local SQLite needs nothing installed; pick a hosted Postgres to share the workspace with others.'}
             </p>
 
             <DatabasePicker
@@ -499,9 +524,9 @@ export default function Onboarding({ onComplete }) {
             </p>
 
             <dl className="divide-y" style={{ borderColor: 'var(--border-subtle)' }}>
-              <Row label="Workspace">{mode === 'start' ? `${workspaceName.trim()} (new - you own it)` : `Joining ${joinCheck.workspace || 'with code ' + joinCode.trim()} - an owner approves your request`}</Row>
+              <Row label="Workspace">{mode === 'start' ? `${workspaceName.trim()} (new - you own it)` : mode === 'reconnect' ? 'Signing in to existing account' : `Joining ${joinCheck.workspace || 'with code ' + joinCode.trim()} - an owner approves your request`}</Row>
               <Row label="Account">{account.name.trim()} · {account.email.trim()}</Row>
-              <Row label="MeetStream">{account.meetstream_api_key.trim() ? 'API key provided' : 'Not now'}</Row>
+              {mode !== 'reconnect' && <Row label="MeetStream">{account.meetstream_api_key.trim() ? 'API key provided' : 'Not now'}</Row>}
               <Row label="Storage">{dbEntry?.label || storage}</Row>
               <Row label="AI provider">{descriptor?.label}</Row>
               <Row label="Model">{values.model || '—'}</Row>

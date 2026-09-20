@@ -153,4 +153,52 @@ describe('Onboarding wizard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue to the app' }))
     expect(onComplete).toHaveBeenCalled()
   })
+
+  it('Reconnect: skips addMember and signs in with existing credentials after configuring the server', async () => {
+    const onComplete = vi.fn()
+    render(<Onboarding onComplete={onComplete} />)
+    await screen.findByText('Welcome to Meet Companion')
+
+    // Step 0: choose reconnect
+    fireEvent.click(screen.getByText('Already have an account?'))
+    // No workspace name required - can proceed immediately.
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+
+    // Step 1: only email + password, no Name or MeetStream key
+    await screen.findByText('Sign in to your existing account')
+    expect(screen.queryByLabelText('Name')).toBeNull()
+    expect(screen.queryByLabelText('MeetStream API key')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ada@x.test' } })
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct-horse-battery' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+
+    // Step 2: SQLite is hidden, pick Postgres
+    await screen.findByText('Connect to your database')
+    expect(screen.queryByText('Local SQLite')).toBeNull()
+    fireEvent.click(screen.getByText('Other PostgreSQL'))
+    fireEvent.change(await screen.findByLabelText('Connection string'), { target: { value: 'postgresql://u:p@h/db' } })
+    // No join code field in reconnect mode.
+    expect(screen.queryByLabelText('Join code')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+
+    // Step 3: AI model
+    await screen.findByText('Choose your AI model')
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+
+    // Step 4: Review
+    await screen.findByRole('heading', { name: 'Review' })
+    expect(screen.getByText('Signing in to existing account')).toBeInTheDocument()
+    // MeetStream row is hidden in reconnect mode.
+    expect(screen.queryByText('Not now')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Finish setup' }))
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalled())
+    expect(completeSetup).toHaveBeenCalledWith({
+      llm: { provider: 'ollama', model: 'llama3.1', api_key: null, base_url: null, temperature: null },
+      database: { provider: 'postgres-url', values: { url: 'postgresql://u:p@h/db' } },
+    })
+    // The key assertion: addMember is never called in reconnect mode.
+    expect(addMember).not.toHaveBeenCalled()
+    expect(login).toHaveBeenCalledWith('ada@x.test', 'correct-horse-battery')
+  })
 })
