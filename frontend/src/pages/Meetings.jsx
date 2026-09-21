@@ -7,6 +7,7 @@ import {
   createMeeting,
   deleteMeeting,
   exportMeetingUrl,
+  getAgent,
   getMeeting,
   getTranscript,
   importBot,
@@ -39,11 +40,24 @@ function statusTone(status) {
   return 'neutral'
 }
 
+const MODE_BLURB = {
+  voice: 'answers by voice when spoken to by name.',
+  chat: 'stays silent and answers questions typed in the meeting chat (start with @name or /ask).',
+  both: 'answers by voice when spoken to, and in the chat when typed to (@name or /ask).',
+}
+
 function LaunchBotModal({ open, onClose, onLaunched }) {
   const [url, setUrl] = useState('')
   const [title, setTitle] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  // Which agent will join, and how - so nobody launches a silent bot by surprise.
+  const [agent, setAgent] = useState(null)
+
+  useEffect(() => {
+    if (!open) return
+    getAgent().then(setAgent).catch(() => setAgent(null))
+  }, [open])
 
   async function submit(event) {
     event.preventDefault()
@@ -90,6 +104,13 @@ function LaunchBotModal({ open, onClose, onLaunched }) {
             onChange={(event) => setTitle(event.target.value)}
           />
         </Field>
+
+        {agent?.AgentName && (
+          <p className="mb-4 rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: 'var(--surface-sunken)', color: 'var(--text-muted)' }}>
+            <strong style={{ color: 'var(--text-strong)' }}>{agent.AgentName}</strong> joins and{' '}
+            {MODE_BLURB[agent.InteractionMode] || MODE_BLURB.voice} Change this on the Agent page.
+          </p>
+        )}
 
         {error && <div className="mb-4"><ErrorMessage title="Could not deploy the bot" detail={error} /></div>}
 

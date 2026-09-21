@@ -298,6 +298,14 @@ export function createAgent(payload) {
   })
 }
 
+export function setAgentMode(agent_config_id, mode) {
+  return req('/agent/mode', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agent_config_id, mode }),
+  })
+}
+
 export function deleteAgent(agent_config_id) {
   return req(`/agent?agent_config_id=${encodeURIComponent(agent_config_id)}`, { method: 'DELETE' })
 }

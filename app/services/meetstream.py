@@ -227,6 +227,16 @@ class MeetStreamClient:
                     break
         return {"bots": bots}
 
+    async def get_chats(self, bot_id: str, api_key: Optional[str] = None) -> Dict[str, Any]:
+        """The in-meeting chat the bot has captured so far: {"chatMessages": [...], ...}."""
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{self.base_url}/api/v1/bots/{bot_id}/get_chats",
+                headers=self._headers(api_key),
+            )
+            resp.raise_for_status()
+            return resp.json()
+
     async def send_bot_message(self, bot_id: str, message: str, api_key: Optional[str] = None) -> Dict[str, Any]:
         """Post a message into the live meeting chat as the bot."""
         async with httpx.AsyncClient(timeout=15.0) as client:

@@ -55,8 +55,24 @@ async def lifespan(app: FastAPI):
     # cost (and blocking the event loop while it loads).
     import asyncio
     asyncio.create_task(embedding_service.warmup_async())
+    # Calls that were live when the server last stopped: keep answering their chat.
+    asyncio.create_task(_resume_chat_listeners())
     yield
+    from app.services import meeting_chat
+
+    meeting_chat.stop_all()
     logger.info("%s shutting down", settings.APP_NAME)
+
+
+async def _resume_chat_listeners() -> None:
+    from app.services import meeting_chat
+
+    try:
+        n = await meeting_chat.resume_live_meetings()
+        if n:
+            logger.info("Resumed chat listeners for %d live meeting(s)", n)
+    except Exception as exc:  # noqa: BLE001 - startup must not fail over this
+        logger.warning("Could not resume chat listeners: %s", exc)
 
 
 # Interactive API docs are a development convenience; on a reachable server

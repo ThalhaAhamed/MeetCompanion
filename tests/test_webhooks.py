@@ -108,7 +108,7 @@ async def _launch(authed_client, monkeypatch):
     from app.api import meetings as meetings_api
     from app.api import webhooks as webhooks_api
 
-    async def list_mia_agents(api_key=None):
+    async def list_mia_agents(self, api_key=None):
         return {"agent_configs": []}
 
     async def create_bot(**kwargs):
@@ -120,7 +120,9 @@ async def _launch(authed_client, monkeypatch):
         assert transcript_id == "tr-123"
         return _TRANSCRIPT
 
-    monkeypatch.setattr(agent_api.meetstream_client, "list_mia_agents", list_mia_agents)
+    # The class, not the shared instance: undoing an instance patch leaves a
+    # bound method in the instance's __dict__ that shadows later class patches.
+    monkeypatch.setattr(type(agent_api.meetstream_client), "list_mia_agents", list_mia_agents)
     monkeypatch.setattr(meetings_api.meetstream_client, "create_bot", create_bot)
     monkeypatch.setattr("app.services.processing.processing_pipeline.meetstream_client.get_transcript", get_transcript)
     monkeypatch.setattr("app.services.memory.try_get_llm_provider", lambda workspace=None: None)  # rule-based extraction

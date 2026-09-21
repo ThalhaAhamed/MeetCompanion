@@ -37,6 +37,8 @@ from app.services.agents import (  # noqa: F401 - re-exported for existing impor
     get_owned_agent_ids,
     render_template_text,
     require_claimable_agent,
+    get_agent_interaction_mode,
+    set_agent_interaction_mode,
     require_meetstream_api_key,
 )
 
@@ -242,7 +244,14 @@ async def get_current_agent(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active agent configured")
     try:
         cfg = await meetstream_client.get_mia_agent(agent_config_id, api_key=await get_meetstream_api_key(db, user.id))
-        return _redact_secrets(cfg)
+        out = _redact_secrets(cfg)
+        mode = await get_agent_interaction_mode(db, user.id, agent_config_id)
+        # MeetStream nests the config under "agent_config"; the UI reads
+        # whichever level it finds, so the mode goes on both.
+        out["InteractionMode"] = mode
+        if isinstance(out.get("agent_config"), dict):
+            out["agent_config"]["InteractionMode"] = mode
+        return out
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404 and agent_config_id == await get_active_agent_config_id(db, user.id):
             # The agent config this member had marked active no longer exists on
@@ -291,8 +300,31 @@ async def list_agents(user: User = Depends(get_current_user), db: AsyncSession =
     all_configs = [cfg for cfg in result.get("agent_configs", []) if cfg.get("AgentConfigID") in owned_ids]
     for cfg in all_configs:
         cfg["IsActive"] = cfg.get("AgentConfigID") == active_id
+        cfg["InteractionMode"] = await get_agent_interaction_mode(db, user.id, cfg.get("AgentConfigID"))
     result["agent_configs"] = all_configs
     return result
+
+
+class InteractionModeRequest(BaseModel):
+    agent_config_id: str
+    mode: str
+
+
+@router.put("/mode", dependencies=[Depends(perms.require("manage_agents"))])
+async def set_interaction_mode(body: InteractionModeRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """
+    How this agent takes part in calls the member launches:
+    "voice" - the MeetStream voice agent only;
+    "chat"  - no voice; questions typed in the meeting chat are answered in the chat;
+    "both"  - the voice agent, and chat questions answered in the chat.
+    """
+    from app.services.meeting_chat import INTERACTION_MODES
+
+    if body.mode not in INTERACTION_MODES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"mode must be one of {', '.join(INTERACTION_MODES)}.")
+    await require_claimable_agent(db, user.id, body.agent_config_id)
+    await set_agent_interaction_mode(db, user.id, body.agent_config_id, body.mode)
+    return {"agent_config_id": body.agent_config_id, "mode": body.mode}
 
 
 @router.get("/importable")

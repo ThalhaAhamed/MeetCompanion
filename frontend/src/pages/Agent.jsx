@@ -16,6 +16,7 @@ import {
   activateAgent,
   createAgent,
   deleteAgent,
+  setAgentMode,
   getAgent,
   getAgentCredentials,
   getAgentTemplate,
@@ -242,6 +243,71 @@ function ImportAgentsModal({ open, onClose, onImported }) {
     </Modal>
   )
 }
+
+const INTERACTION_MODES = [
+  ['voice', 'Voice', 'Joins the call and answers when spoken to by name.'],
+  ['chat', 'Chat', 'Stays silent. Answers questions typed in the meeting chat.'],
+  ['both', 'Voice and chat', 'Answers by voice when spoken to, and in the chat when typed to.'],
+]
+
+/**
+ * How this agent takes part in a call. Chat questions are read by this
+ * server (MeetStream's agents cannot read the chat panel), answered from the
+ * workspace, and posted back through the bot.
+ */
+function InteractionModePicker({ agentConfigId, agentName, mode, readOnly, onChanged }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  async function choose(next) {
+    if (next === mode || readOnly) return
+    setBusy(true)
+    setError(null)
+    try {
+      await setAgentMode(agentConfigId, next)
+      onChanged?.(next)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mb-5">
+      <div className="mc-label">In the call</div>
+      <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="How the agent takes part">
+        {INTERACTION_MODES.map(([value, title, blurb]) => (
+          <button
+            key={value}
+            type="button"
+            role="radio"
+            aria-checked={mode === value}
+            disabled={busy || readOnly}
+            onClick={() => choose(value)}
+            className="rounded-xl border p-3 text-left"
+            style={{
+              borderColor: mode === value ? 'var(--brand-ring)' : 'var(--border-subtle)',
+              backgroundColor: mode === value ? 'var(--brand-soft)' : 'transparent',
+              cursor: readOnly ? 'default' : 'pointer',
+            }}
+          >
+            <div className="text-sm font-medium" style={{ color: 'var(--text-strong)' }}>{title}</div>
+            <p className="mt-0.5 text-xs" style={{ color: 'var(--text-muted)' }}>{blurb}</p>
+          </button>
+        ))}
+      </div>
+      {mode !== 'voice' && (
+        <p className="mt-2 text-xs" style={{ color: 'var(--text-faint)' }}>
+          In the meeting chat, start a message with <code>@{agentName}</code> or <code>/ask</code> — for example{' '}
+          <code>/ask what did we decide about pricing?</code>. The bot posts the answer in the chat.
+        </p>
+      )}
+      {error && <p className="mt-2 text-xs" style={{ color: 'var(--color-rose-700)' }}>{error}</p>}
+    </div>
+  )
+}
+
 
 function AgentForm({ form, update, onSubmit, saving, saved, error, submitLabel, promptHint, readOnly = false }) {
   return (
@@ -729,6 +795,17 @@ export default function Agent() {
                   </button>
                 )}
               </div>
+
+              <InteractionModePicker
+                agentConfigId={config.AgentConfigID}
+                agentName={config.AgentName || 'Meet Companion'}
+                mode={config.InteractionMode || 'voice'}
+                readOnly={!canManage}
+                onChanged={(mode) => {
+                  setConfig((current) => ({ ...current, InteractionMode: mode }))
+                  loadAgents()
+                }}
+              />
 
               <AgentForm
                 form={form}

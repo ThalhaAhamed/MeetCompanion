@@ -160,6 +160,32 @@ async def claim_agent(db: AsyncSession, user_id: uuid.UUID, agent_config_id: str
         await db.commit()
 
 
+async def get_agent_interaction_mode(db: AsyncSession, user_id: uuid.UUID, agent_config_id: Optional[str]) -> str:
+    """
+    How this member's agent takes part in a call: "voice" (default), "chat"
+    or "both" - see services.meeting_chat. Ours, not MeetStream's: their
+    agent config has no notion of reading the chat.
+    """
+    from app.services.meeting_chat import INTERACTION_MODES, MODE_VOICE
+
+    if not agent_config_id:
+        return MODE_VOICE
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_id(user_id)
+    modes = ((user.settings or {}).get("agent_modes") or {}) if user else {}
+    mode = modes.get(agent_config_id, MODE_VOICE)
+    return mode if mode in INTERACTION_MODES else MODE_VOICE
+
+
+async def set_agent_interaction_mode(db: AsyncSession, user_id: uuid.UUID, agent_config_id: str, mode: str) -> None:
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_id(user_id)
+    modes = dict(((user.settings or {}).get("agent_modes") or {}) if user else {})
+    modes[agent_config_id] = mode
+    await user_repo.update_settings(user_id, {"agent_modes": modes})
+    await db.commit()
+
+
 async def get_all_claimed_agent_ids(db: AsyncSession) -> set:
     """Every agent_config_id any member across the whole account has already
     claimed - used to find the leftover unclaimed ones for the import list."""

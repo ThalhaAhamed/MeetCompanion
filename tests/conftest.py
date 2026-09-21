@@ -47,6 +47,26 @@ def isolated_config(tmp_path, monkeypatch):
     reset_config()
 
 
+@pytest.fixture(autouse=True)
+def unshadow_meetstream_client():
+    """
+    Undo the damage a monkeypatch on the shared MeetStream client leaves.
+
+    Several tests patch a method on `meetstream_client` (the instance). When
+    monkeypatch restores it, it writes the *bound original* into the
+    instance's __dict__ - which then shadows any class-level patch a later
+    test makes, so that test silently talks to the real method. Strip such
+    entries after every test so ordering cannot matter.
+    """
+    yield
+    from app.services.meetstream import meetstream_client
+
+    cls = type(meetstream_client)
+    for name in list(vars(meetstream_client)):
+        if callable(getattr(cls, name, None)):
+            delattr(meetstream_client, name)
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def database_schema():
     """
