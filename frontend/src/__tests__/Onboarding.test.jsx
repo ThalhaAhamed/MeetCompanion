@@ -64,7 +64,7 @@ describe('Onboarding wizard', () => {
     fireEvent.click(next())
 
     await screen.findByRole('heading', { name: 'Review' })
-    expect(screen.getByText('Acme (new - you own it)')).toBeInTheDocument()
+    expect(screen.getByText('Acme (new — you own it)')).toBeInTheDocument()
     expect(screen.getByText('Not now')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Finish setup' }))
 

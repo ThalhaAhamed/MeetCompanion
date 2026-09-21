@@ -139,7 +139,7 @@ export default function SignIn({ onSignedIn, hasMembers = true }) {
                 className="mb-4 rounded-lg px-3 py-2 text-xs"
                 style={{ backgroundColor: 'var(--brand-soft)', color: 'var(--brand-soft-text)' }}
               >
-                Connected to that database. Create your account on it to join the workspace -
+                Connected to that database. Create your account on it to join the workspace —
                 the join code is filled in below.
               </p>
             )}
@@ -240,7 +240,7 @@ export default function SignIn({ onSignedIn, hasMembers = true }) {
                         />
                       </Field>
                     )}
-                    <Field label="Join code" hint="Ask a workspace owner - it is on their Members page. They approve your request before you can get in." htmlFor="join">
+                    <Field label="Join code" hint="Ask a workspace owner — it is on their Members page. They approve your request before you can get in." htmlFor="join">
                       <input
                         id="join"
                         className="mc-input"

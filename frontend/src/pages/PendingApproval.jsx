@@ -35,7 +35,7 @@ export default function PendingApproval({ user, onCheckAgain, onSignOut }) {
         <Card>
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
             Your request to join <strong style={{ color: 'var(--text-strong)' }}>{workspace || 'the workspace'}</strong>{' '}
-            has been sent. An owner has to approve it from their Members page before you can get in -
+            has been sent. An owner has to approve it from their Members page before you can get in —
             ask them if it is taking a while.
           </p>
           <p className="mt-3 text-xs" style={{ color: 'var(--text-faint)' }}>

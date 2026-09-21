@@ -305,7 +305,7 @@ def _friendly_db_error(exc: Exception, url: str) -> str:
     is_supabase = "supabase" in url.lower()
 
     if "getaddrinfo failed" in text or "name or service not known" in text or "could not translate host name" in text:
-        msg = "Could not resolve the database host - check the hostname in the connection string."
+        msg = "Could not resolve the database host — check the hostname in the connection string."
         if is_supabase:
             msg += (
                 " Supabase's direct connection (db.<project>.supabase.co) is IPv6-only; on a network"
@@ -318,7 +318,7 @@ def _friendly_db_error(exc: Exception, url: str) -> str:
         return "The database rejected the username or password. Check the credentials in the connection string."
     if "timeout" in text or "timed out" in text:
         return (
-            "Timed out reaching the database host - it may be unreachable, paused, or blocked by a firewall."
+            "Timed out reaching the database host — it may be unreachable, paused, or blocked by a firewall."
             + (" A paused Supabase project must be resumed from the dashboard first." if is_supabase else "")
         )
     if "does not exist" in text and "database" in text:
@@ -326,7 +326,7 @@ def _friendly_db_error(exc: Exception, url: str) -> str:
     # Windows words it "[WinError 1225] The remote computer refused the
     # network connection"; POSIX says "connection refused".
     if "connection refused" in text or "refused the network connection" in text or "winerror 1225" in text:
-        return "Connection refused - nothing is listening on that host and port."
+        return "Connection refused — nothing is listening on that host and port."
     return raw
 
 

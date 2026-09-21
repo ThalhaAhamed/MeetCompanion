@@ -165,7 +165,7 @@ DESCRIPTORS: Dict[str, ProviderDescriptor] = {
     "ollama": ProviderDescriptor(
         name="ollama",
         label="Ollama (local)",
-        summary="Run models entirely on your own machine. No API key, no data leaves your computer.",
+        summary="Runs models on this computer. Ollama is a separate install from ollama.com; no API key, nothing leaves your machine.",
         local=True,
         fields=[
             ProviderField(
@@ -175,6 +175,7 @@ DESCRIPTORS: Dict[str, ProviderDescriptor] = {
                 required=True,
                 placeholder="http://localhost:11434",
                 default="http://localhost:11434",
+                help="Where Ollama is listening. Leave as is unless you changed its port or run it on another machine.",
             ),
             _model_field("llama3.1", "llama3.1"),
             _TEMPERATURE_FIELD,

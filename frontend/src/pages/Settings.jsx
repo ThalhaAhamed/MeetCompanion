@@ -472,7 +472,7 @@ export default function Settings() {
                     MeetStream signs every webhook it sends with this secret, and the server rejects
                     deliveries that do not match. Set the same value in your MeetStream webhook
                     settings.{' '}
-                    {status.meetstream?.webhook_secret_configured ? 'A secret is currently set.' : 'No secret is set yet - unsigned deliveries are accepted only for bots this server launched.'}
+                    {status.meetstream?.webhook_secret_configured ? 'A secret is currently set.' : 'No secret is set yet — unsigned deliveries are accepted only for bots this server launched.'}
                   </p>
                   <Field label="Webhook secret" htmlFor="ms-webhook">
                     <input

@@ -8,13 +8,18 @@ embedded with sentence-transformers keep working, while the dependency is
 tens of megabytes instead of the two gigabytes PyTorch needs - which is what
 makes a downloadable desktop build possible.
 
-The model weights (~90 MB) are fetched on first use into EMBEDDING_CACHE_DIR
-and reused from then on. Without them the service falls back to a
-deterministic hash embedding so the application still runs.
+The model weights (~90 MB) live in EMBEDDING_CACHE_DIR. The desktop build
+ships them (see scripts/fetch_embedding_model.py) and copies them there on
+first start; a server install fetches them on first use. Without them the
+service falls back to a deterministic hash embedding so the application
+still runs.
 """
 import asyncio
+import os
+import shutil
 import threading
 import numpy as np
+from pathlib import Path
 from typing import List, Union
 from app.config import settings
 import logging
@@ -27,6 +32,34 @@ def _fastembed_name(model_name: str) -> str:
     if "/" in model_name:
         return model_name
     return f"sentence-transformers/{model_name}"
+
+
+def seed_cache_from_bundle(cache_dir: str | None, bundle_dir: str | None) -> bool:
+    """
+    Copy bundled model weights into the cache directory if it has none yet.
+
+    The desktop app ships the weights inside its (read-only) install and
+    points MEET_COMPANION_BUNDLED_MODELS at them; fastembed wants a writable
+    cache, so they are copied once into the data directory rather than read
+    in place. Returns True when a copy happened.
+    """
+    if not cache_dir or not bundle_dir:
+        return False
+    src, dst = Path(bundle_dir), Path(cache_dir)
+    if not src.is_dir() or not any(src.iterdir()):
+        return False
+    if dst.is_dir() and any(dst.glob("models--*")):
+        return False
+    dst.mkdir(parents=True, exist_ok=True)
+    for entry in src.iterdir():
+        if entry.name.startswith("."):
+            continue  # hub lock files are not part of the model
+        target = dst / entry.name
+        if entry.is_dir():
+            shutil.copytree(entry, target, dirs_exist_ok=True)
+        else:
+            shutil.copy2(entry, target)
+    return True
 
 
 class EmbeddingService:
@@ -49,6 +82,8 @@ class EmbeddingService:
             try:
                 from fastembed import TextEmbedding
 
+                if seed_cache_from_bundle(settings.EMBEDDING_CACHE_DIR, os.environ.get("MEET_COMPANION_BUNDLED_MODELS")):
+                    logger.info("Copied the bundled embedding model into %s", settings.EMBEDDING_CACHE_DIR)
                 self._model = TextEmbedding(
                     model_name=_fastembed_name(self.model_name),
                     cache_dir=str(settings.EMBEDDING_CACHE_DIR) if settings.EMBEDDING_CACHE_DIR else None,

@@ -263,7 +263,7 @@ export default function Onboarding({ onComplete }) {
       const notFound = mode === 'join' && /No workspace found with that join code/i.test(error.message)
       setSaveError(
         notFound
-          ? 'No workspace with that join code exists in the database you connected to. Check the code, and that the connection string is the one your workspace owner shared - a workspace lives in one database, and every member must use that one.'
+          ? 'No workspace with that join code exists in the database you connected to. Check the code, and that the connection string is the one your workspace owner shared — a workspace lives in one database, and every member must use that one.'
           : error.message,
       )
     } finally {
@@ -334,7 +334,7 @@ export default function Onboarding({ onComplete }) {
               <Logo variant="icon" size={64} />
               <h1 className="mt-4 text-2xl font-semibold">Welcome to Meet Companion</h1>
               <p className="mt-2 max-w-md text-sm leading-relaxed" style={muted}>
-                Your own AI meeting companion - your models, your storage, your data. First: is
+                Your own AI meeting companion — your models, your storage, your data. First: is
                 this a workspace of your own, or are you joining one?
               </p>
             </div>
@@ -356,7 +356,7 @@ export default function Onboarding({ onComplete }) {
 
             <div className="mt-6">
               {mode === 'start' ? (
-                <Field label="Workspace name" htmlFor="ob-workspace" hint="Your team or company - shown in the top bar. You can rename it later.">
+                <Field label="Workspace name" htmlFor="ob-workspace" hint="Your team or company — shown in the top bar. You can rename it later.">
                   <input
                     id="ob-workspace"
                     className="mc-input"
@@ -412,7 +412,7 @@ export default function Onboarding({ onComplete }) {
                 <Field
                   label="MeetStream API key"
                   htmlFor="ob-meetstream"
-                  hint="Lets Meet Companion send a bot into your calls. Optional - skip it if you only upload transcripts; you can add it any time in Settings → Meetings."
+                  hint="Lets Meet Companion send a bot into your calls. Optional — skip it if you only upload transcripts; you can add it any time in Settings → Meetings."
                 >
                   <input id="ob-meetstream" type="password" className="mc-input font-mono" autoComplete="off"
                     value={account.meetstream_api_key}
@@ -524,7 +524,7 @@ export default function Onboarding({ onComplete }) {
             </p>
 
             <dl className="divide-y" style={{ borderColor: 'var(--border-subtle)' }}>
-              <Row label="Workspace">{mode === 'start' ? `${workspaceName.trim()} (new - you own it)` : mode === 'reconnect' ? 'Signing in to existing account' : `Joining ${joinCheck.workspace || 'with code ' + joinCode.trim()} - an owner approves your request`}</Row>
+              <Row label="Workspace">{mode === 'start' ? `${workspaceName.trim()} (new — you own it)` : mode === 'reconnect' ? 'Signing in to existing account' : `Joining ${joinCheck.workspace || 'with code ' + joinCode.trim()} - an owner approves your request`}</Row>
               <Row label="Account">{account.name.trim()} · {account.email.trim()}</Row>
               {mode !== 'reconnect' && <Row label="MeetStream">{account.meetstream_api_key.trim() ? 'API key provided' : 'Not now'}</Row>}
               <Row label="Storage">{dbEntry?.label || storage}</Row>

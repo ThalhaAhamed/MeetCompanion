@@ -35,6 +35,11 @@ def main() -> None:
     os.chdir(data_dir)
     os.environ.setdefault("MEET_COMPANION_CONFIG", str(data_dir / "data" / "config.json"))
     os.environ.setdefault("MEET_COMPANION_STATIC_DIR", str(_bundle_root() / "static"))
+    # Embedding weights shipped with the build; copied into the data directory
+    # on first start so search works without a download (see services/embedding).
+    bundled_models = _bundle_root() / "models"
+    if bundled_models.is_dir():
+        os.environ.setdefault("MEET_COMPANION_BUNDLED_MODELS", str(bundled_models))
     os.environ.setdefault("APP_ENV", "desktop")
     # No .env in a packaged install: one shipped by accident must not override
     # what the person configured in Settings.

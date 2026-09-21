@@ -72,3 +72,4 @@ frontend/dist/
 .claude/
 .cloudflared*.log
 .tmp/
+desktop/models/

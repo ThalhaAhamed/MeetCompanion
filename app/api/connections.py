@@ -80,7 +80,7 @@ async def check_join(body: CheckJoinIn) -> Dict[str, Any]:
         raise HTTPException(
             status_code=404,
             detail="No workspace with that join code exists on that database. Check the code, and that the "
-                   "connection string is the one your workspace owner shared - a workspace lives in one database.",
+                   "connection string is the one your workspace owner shared — a workspace lives in one database.",
         )
     return {"workspace": name, "same_database": url is None or url == current_url()}
 

@@ -37,7 +37,7 @@ Setup is five short steps:
 3. **Storage** — local SQLite by default; a hosted Postgres to share the
    workspace with others. Joining a team means pasting the team's connection
    string here.
-4. **AI model** — Ollama locally, or any supported provider with your key.
+4. **AI model** — Ollama on this machine (a separate install from [ollama.com](https://ollama.com/download); pull a model first), or any supported provider with your key. The embedding model that powers search ships with the desktop app; a server install fetches it (~90 MB) on first use.
 5. **Review** — one click, and you are in.
 
 <div align="center">

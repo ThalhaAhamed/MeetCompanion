@@ -98,6 +98,18 @@ export default function ProviderFields({ descriptor, values, onChange, discovere
 
   return (
     <>
+      {descriptor.local && (
+        <div
+          className="mb-4 rounded-lg px-3 py-2.5 text-xs leading-relaxed"
+          style={{ backgroundColor: 'var(--brand-soft)', color: 'var(--brand-soft-text)' }}
+        >
+          <strong>{descriptor.label.replace(/\s*\(local\)$/, '')} is installed separately.</strong> Meet Companion
+          does not include it. Install it from{' '}
+          <a href="https://ollama.com/download" target="_blank" rel="noreferrer" className="underline">ollama.com</a>,
+          then pull a model, for example <code>ollama pull {values.model || descriptor.suggested_models?.[0] || 'llama3.1'}</code>.
+          Test connection checks that it is running.
+        </div>
+      )}
       {basic.map(renderField)}
 
       {advanced.length > 0 && (

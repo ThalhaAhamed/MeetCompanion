@@ -506,7 +506,7 @@ function WorkspaceAIPanel({ workspace, onSaved }) {
   }
 
   const choices = [
-    ['member', 'Each member uses their own', 'Whatever each person set in their Settings - their key, their bill, their model.'],
+    ['member', 'Each member uses their own', 'Whatever each person set in their Settings — their key, their bill, their model.'],
     ['workspace', 'One provider for everyone', 'Set it here; every member uses it in this workspace, so summaries read the same whoever imported the meeting.'],
   ]
 

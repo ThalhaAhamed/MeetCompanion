@@ -24,6 +24,13 @@ datas = [
 ]
 binaries = []
 
+# Embedding model weights, pre-fetched by scripts/fetch_embedding_model.py so
+# a fresh install can search without downloading anything. Optional: a build
+# without them still works, it just fetches on first use like a server does.
+MODELS = ROOT / "desktop" / "models"
+if MODELS.is_dir() and any(MODELS.iterdir()):
+    datas.append((str(MODELS), "models"))
+
 # fastembed/onnxruntime/tokenizers ship native libraries and data files that
 # static analysis does not find on its own.
 for package in ("fastembed", "onnxruntime", "tokenizers"):

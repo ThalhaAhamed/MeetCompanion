@@ -286,7 +286,7 @@ function UploadTranscriptModal({ open, onClose, onUploaded }) {
   return (
     <Modal open={open} onClose={onClose} title="Upload a transcript" width="38rem">
       <p className="mb-4 text-sm" style={{ color: 'var(--text-muted)' }}>
-        Paste a transcript from anywhere - another recorder, meeting notes, a call you transcribed
+        Paste a transcript from anywhere — another recorder, meeting notes, a call you transcribed
         yourself. One line per utterance, <code>Name: what they said</code>. It goes through the same
         extraction as a recorded call.
       </p>
@@ -460,7 +460,7 @@ function MeetingDetail({ meetingId, onChanged, onDeleted }) {
             {!isLive && canDelete && (
               <button
                 type="button"
-                className="mc-btn mc-btn-secondary"
+                className="mc-btn mc-btn-danger"
                 onClick={remove}
                 disabled={deleting}
                 title="Delete this meeting and everything extracted from it"

@@ -369,7 +369,7 @@ async def import_bot(
         processing_status="queued_for_processing" if transcript_id else "failed",
         processing_error=None if transcript_id else (
             "MeetStream could not describe this bot and no transcript was found for it. "
-            "It may still be processing on their side - use Reprocess to try again later."
+            "It may still be processing on their side — use Reprocess to try again later."
             if detail_error else
             "No transcript available for this bot (it wasn't recorded with transcription enabled)."
         ),
@@ -633,7 +633,7 @@ async def stop_meeting_bot(
     except httpx.TimeoutException:
         # str() of an httpx timeout is empty - "MeetStream API error: " told
         # the user nothing.
-        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="MeetStream did not confirm the bot left in time. Check the meeting - it may still be leaving - and try again.")
+        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="MeetStream did not confirm the bot left in time. Check the meeting — it may still be leaving — and try again.")
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
 
