@@ -20,7 +20,7 @@ import { getAgent, getAgentCredentials, getAgentTemplate, listAgents, setAgentMo
 import Agent from '../pages/Agent'
 import { UserContext } from '../user'
 
-const config = { AgentConfigID: 'ag-1', AgentName: 'Ada', Mode: 'realtime', InteractionMode: 'voice', Model: { provider: 'openai', model: 'gpt-4.1' } }
+const config = { AgentConfigID: 'ag-1', AgentName: 'Ada', Mode: 'realtime', InteractionMode: 'voice', Model: { provider: 'openai', model: 'gpt-4.1' }, Agent: { response_modality: 'audio' } }
 
 function renderAs(user) {
   return render(
@@ -40,27 +40,30 @@ beforeEach(() => {
   getAgentTemplate.mockResolvedValue({ provider: 'openai' })
 })
 
-describe('how the agent takes part in a call', () => {
-  it('shows the three modes, voice selected, and saves a change', async () => {
-    setAgentMode.mockResolvedValue({ agent_config_id: 'ag-1', mode: 'chat' })
+describe('how the agent answers in a call', () => {
+  it('offers voice and chat, voice selected, and a change is saved then re-read', async () => {
+    setAgentMode.mockResolvedValue({ agent_config_id: 'ag-1', mode: 'chat', response_modality: 'chat' })
     renderAs({ id: 'u1', role: 'owner', permissions: { manage_agents: true } })
-    const voice = await screen.findByRole('radio', { name: /^Voice Joins/ })
+    const voice = await screen.findByRole('radio', { name: /^Voice Answers out loud/ })
     expect(voice).toHaveAttribute('aria-checked', 'true')
-    expect(screen.queryByText(/start a message with/)).toBeNull()
+    expect(screen.queryByRole('radio', { name: /both/i })).toBeNull()
+    // There is no typed-question mode, and the page says so.
+    expect(screen.getByText(/typed into the chat cannot be read/)).toBeInTheDocument()
+    // The raw modality select belongs to the template, not an agent.
+    expect(screen.queryByLabelText('Response modality')).toBeNull()
 
-    fireEvent.click(screen.getByRole('radio', { name: /^Chat Stays/ }))
+    getAgent.mockResolvedValue({ ...config, InteractionMode: 'chat', Agent: { response_modality: 'chat' } })
+    fireEvent.click(screen.getByRole('radio', { name: /^Chat Stays silent/ }))
     await waitFor(() => expect(setAgentMode).toHaveBeenCalledWith('ag-1', 'chat'))
-    await waitFor(() => expect(screen.getByRole('radio', { name: /^Chat Stays/ })).toHaveAttribute('aria-checked', 'true'))
-    // How to ask, with the agent's own name.
-    expect(screen.getByText(/start a message with/)).toBeInTheDocument()
-    expect(screen.getByText('@Ada')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('radio', { name: /^Chat Stays silent/ })).toHaveAttribute('aria-checked', 'true'))
+    expect(screen.getByText(/appears in the meeting chat instead/)).toBeInTheDocument()
   })
 
   it('a member without manage_agents can see the mode but not change it', async () => {
     renderAs({ id: 'u2', role: 'member', permissions: { manage_agents: false } })
-    const voice = await screen.findByRole('radio', { name: /^Voice Joins/ })
+    const voice = await screen.findByRole('radio', { name: /^Voice Answers out loud/ })
     expect(voice).toBeDisabled()
-    fireEvent.click(screen.getByRole('radio', { name: /Voice and chat/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /^Chat Stays silent/ }))
     expect(setAgentMode).not.toHaveBeenCalled()
   })
 })

@@ -37,8 +37,9 @@ from app.services.agents import (  # noqa: F401 - re-exported for existing impor
     get_owned_agent_ids,
     render_template_text,
     require_claimable_agent,
-    get_agent_interaction_mode,
-    set_agent_interaction_mode,
+    INTERACTION_MODES,
+    MODALITY_FOR_MODE,
+    interaction_mode_of,
     require_meetstream_api_key,
 )
 
@@ -245,7 +246,7 @@ async def get_current_agent(
     try:
         cfg = await meetstream_client.get_mia_agent(agent_config_id, api_key=await get_meetstream_api_key(db, user.id))
         out = _redact_secrets(cfg)
-        mode = await get_agent_interaction_mode(db, user.id, agent_config_id)
+        mode = interaction_mode_of(out)
         # MeetStream nests the config under "agent_config"; the UI reads
         # whichever level it finds, so the mode goes on both.
         out["InteractionMode"] = mode
@@ -300,7 +301,7 @@ async def list_agents(user: User = Depends(get_current_user), db: AsyncSession =
     all_configs = [cfg for cfg in result.get("agent_configs", []) if cfg.get("AgentConfigID") in owned_ids]
     for cfg in all_configs:
         cfg["IsActive"] = cfg.get("AgentConfigID") == active_id
-        cfg["InteractionMode"] = await get_agent_interaction_mode(db, user.id, cfg.get("AgentConfigID"))
+        cfg["InteractionMode"] = interaction_mode_of(cfg)
     result["agent_configs"] = all_configs
     return result
 
@@ -313,18 +314,33 @@ class InteractionModeRequest(BaseModel):
 @router.put("/mode", dependencies=[Depends(perms.require("manage_agents"))])
 async def set_interaction_mode(body: InteractionModeRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """
-    How this agent takes part in calls the member launches:
-    "voice" - the MeetStream voice agent only;
-    "chat"  - no voice; questions typed in the meeting chat are answered in the chat;
-    "both"  - the voice agent, and chat questions answered in the chat.
-    """
-    from app.services.meeting_chat import INTERACTION_MODES
+    How this agent answers in a call: "voice" (spoken, MeetStream's
+    response_modality "audio") or "chat" (silent - the answer is posted in
+    the meeting chat, response_modality "chat"). Either way the agent hears
+    the room and is addressed by name; MeetStream cannot read typed chat
+    during a call, so there is no typed-question mode.
 
+    Saved on the agent config at MeetStream: it is the same setting the
+    agent's own Response modality field exposes, presented as a choice.
+    """
     if body.mode not in INTERACTION_MODES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"mode must be one of {', '.join(INTERACTION_MODES)}.")
     await require_claimable_agent(db, user.id, body.agent_config_id)
-    await set_agent_interaction_mode(db, user.id, body.agent_config_id, body.mode)
-    return {"agent_config_id": body.agent_config_id, "mode": body.mode}
+    own_key = await require_meetstream_api_key(db, user.id)
+    try:
+        current = await meetstream_client.get_mia_agent(body.agent_config_id, api_key=own_key)
+        current_cfg = current.get("agent_config", current)
+        # MeetStream replaces the block wholesale: merge into what is there.
+        agent_block = {**(current_cfg.get("Agent") or {}), "response_modality": MODALITY_FOR_MODE[body.mode]}
+        await meetstream_client.update_mia_agent_settings(
+            agent_config_id=body.agent_config_id,
+            agent=agent_block,
+            model=dict(current_cfg.get("Model") or {}),
+            api_key=own_key,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
+    return {"agent_config_id": body.agent_config_id, "mode": body.mode, "response_modality": MODALITY_FOR_MODE[body.mode]}
 
 
 @router.get("/importable")

@@ -160,30 +160,22 @@ async def claim_agent(db: AsyncSession, user_id: uuid.UUID, agent_config_id: str
         await db.commit()
 
 
-async def get_agent_interaction_mode(db: AsyncSession, user_id: uuid.UUID, agent_config_id: Optional[str]) -> str:
-    """
-    How this member's agent takes part in a call: "voice" (default), "chat"
-    or "both" - see services.meeting_chat. Ours, not MeetStream's: their
-    agent config has no notion of reading the chat.
-    """
-    from app.services.meeting_chat import INTERACTION_MODES, MODE_VOICE
-
-    if not agent_config_id:
-        return MODE_VOICE
-    user_repo = UserRepository(db)
-    user = await user_repo.get_by_id(user_id)
-    modes = ((user.settings or {}).get("agent_modes") or {}) if user else {}
-    mode = modes.get(agent_config_id, MODE_VOICE)
-    return mode if mode in INTERACTION_MODES else MODE_VOICE
+#: How an agent takes part in a call - MeetStream's response_modality, in
+#: our words. "chat" is theirs verbatim; "voice" covers audio and the older
+#: aliases. Typed chat cannot be read live (MeetStream exposes the chat only
+#: after the call), so there is no typed-input mode.
+MODE_VOICE = "voice"
+MODE_CHAT = "chat"
+INTERACTION_MODES = (MODE_VOICE, MODE_CHAT)
+#: What each mode is on MeetStream's side.
+MODALITY_FOR_MODE = {MODE_VOICE: "audio", MODE_CHAT: "chat"}
 
 
-async def set_agent_interaction_mode(db: AsyncSession, user_id: uuid.UUID, agent_config_id: str, mode: str) -> None:
-    user_repo = UserRepository(db)
-    user = await user_repo.get_by_id(user_id)
-    modes = dict(((user.settings or {}).get("agent_modes") or {}) if user else {})
-    modes[agent_config_id] = mode
-    await user_repo.update_settings(user_id, {"agent_modes": modes})
-    await db.commit()
+def interaction_mode_of(agent_config: Optional[Dict[str, Any]]) -> str:
+    """The mode implied by a MeetStream agent config (either nesting level)."""
+    cfg = (agent_config or {}).get("agent_config", agent_config) or {}
+    modality = str(((cfg.get("Agent") or {}).get("response_modality")) or "").lower()
+    return MODE_CHAT if modality == MODE_CHAT else MODE_VOICE
 
 
 async def get_all_claimed_agent_ids(db: AsyncSession) -> set:

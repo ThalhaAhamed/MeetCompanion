@@ -20,8 +20,7 @@ from app.models.schemas import (
 )
 from app.services.meetstream import meetstream_client
 from app.api.agent import get_active_agent_config_id, _DEFAULT_FIRST_MESSAGE, _require_claimable_agent, get_meetstream_api_key, require_meetstream_api_key
-from app.services import meeting_chat
-from app.services.agents import get_agent_interaction_mode
+from app.services.agents import MODE_CHAT, MODE_VOICE, interaction_mode_of
 from app.api.deps import get_current_org_id, get_current_user
 from app.models.database import User
 import logging
@@ -112,19 +111,16 @@ async def create_meeting(
             # matter what anyone said. The title field is purely our own
             # dashboard label now; it never reaches MeetStream as bot_name.
             bot_name = "Meet Companion"
+            mode = MODE_VOICE
             if active_agent_config_id:
                 try:
                     agent_cfg = await meetstream_client.get_mia_agent(active_agent_config_id, api_key=own_meetstream_key)
                     bot_name = agent_cfg.get("agent_config", agent_cfg).get("AgentName") or bot_name
+                    # Answers spoken, or posted in the chat: the agent's
+                    # response_modality on MeetStream (see /api/agent/mode).
+                    mode = interaction_mode_of(agent_cfg)
                 except Exception:
                     pass
-
-            # How the agent takes part: by voice (MeetStream's agent), by chat
-            # (our listener answers typed questions; no voice agent joins),
-            # or both. See services/meeting_chat.
-            mode = await get_agent_interaction_mode(db, user.id, active_agent_config_id)
-            voice_agent_id = None if mode == meeting_chat.MODE_CHAT else active_agent_config_id
-            listens_to_chat = mode in (meeting_chat.MODE_CHAT, meeting_chat.MODE_BOTH)
 
             # Posted to the meeting chat the instant the bot joins - reliable
             # and independent of the realtime model's own behavior, unlike
@@ -134,7 +130,7 @@ async def create_meeting(
 
             bot_resp = await meetstream_client.create_bot(
                 meeting_link=meeting.meeting_url,
-                agent_config_id=voice_agent_id,
+                agent_config_id=active_agent_config_id,
                 callback_url=f"{settings.MCP_SERVER_URL.replace('/mcp', '')}/api/webhooks/meetstream",
                 bot_message=bot_message,
                 custom_attributes={
@@ -155,20 +151,8 @@ async def create_meeting(
                     meetstream_transcript_id=transcript_id,
                 )
                 meeting.meetstream_bot_id = bot_id
-                # Remembered on the row so a restarted server can pick the
-                # listener back up for a call still in progress.
-                meeting.custom_attributes = {
-                    **(meeting.custom_attributes or {}),
-                    "interaction_mode": mode,
-                    "bot_name": bot_name,
-                }
                 await db.commit()
                 await db.refresh(meeting)
-                if listens_to_chat:
-                    meeting_chat.start(
-                        bot_id=bot_id, meeting_id=meeting.id, org_id=org_id,
-                        bot_name=bot_name, api_key_owner_id=user.id,
-                    )
         except Exception as e:
             # The record stays so the reason is visible, but it is a failed
             # launch - not a live call.
@@ -187,16 +171,13 @@ async def create_meeting(
 
 def _first_message(bot_name: str, mode: str) -> str:
     """The chat message posted as the bot joins, for the mode it is in."""
-    if mode == meeting_chat.MODE_CHAT:
+    if mode == MODE_CHAT:
         return (
-            f"Hi, I'm {bot_name}. I answer questions here in the chat: start a message with "
-            f"\"@{bot_name}\" or \"/ask\" - for example, \"/ask what did we decide about pricing?\" "
-            "I can tell you who attended a meeting, what was discussed, and what was agreed."
+            f"Hi, I'm {bot_name}, your meeting companion. I'll stay quiet and answer here in the chat: "
+            f"say my name and then your question - like, \"{bot_name}, what did we decide last time?\" "
+            "I can tell you who attended a meeting, summarize what was discussed, and track action items."
         )
-    voice = _DEFAULT_FIRST_MESSAGE.format(agent_name=bot_name)
-    if mode == meeting_chat.MODE_BOTH:
-        return voice + f" You can also type a question here in the chat - start it with \"@{bot_name}\" or \"/ask\"."
-    return voice
+    return _DEFAULT_FIRST_MESSAGE.format(agent_name=bot_name)
 
 
 #: Hosts a bot can actually be sent to. Anything else is almost certainly a
@@ -663,7 +644,6 @@ async def stop_meeting_bot(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No bot deployed for this meeting")
 
     key_owner_id = meeting.created_by_user_id or user.id
-    meeting_chat.stop(meeting.meetstream_bot_id)
     try:
         result = await meetstream_client.remove_bot(meeting.meetstream_bot_id, api_key=await get_meetstream_api_key(db, key_owner_id))
     except httpx.TimeoutException:

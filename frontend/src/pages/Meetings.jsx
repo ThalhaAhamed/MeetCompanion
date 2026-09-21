@@ -41,9 +41,8 @@ function statusTone(status) {
 }
 
 const MODE_BLURB = {
-  voice: 'answers by voice when spoken to by name.',
-  chat: 'stays silent and answers questions typed in the meeting chat (start with @name or /ask).',
-  both: 'answers by voice when spoken to, and in the chat when typed to (@name or /ask).',
+  voice: 'answers out loud when someone says its name.',
+  chat: 'stays silent and posts its answers in the meeting chat when someone says its name.',
 }
 
 function LaunchBotModal({ open, onClose, onLaunched }) {

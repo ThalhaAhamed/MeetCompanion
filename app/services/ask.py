@@ -1,10 +1,10 @@
 """
 Answer a question from everything a workspace knows.
 
-One pipeline behind two front doors: the Ask AI page (POST /notebook/ask)
-and the in-meeting chat, where a participant types a question to the bot
-(services/meeting_chat). Retrieval - notes, meeting excerpts, uploaded
-documents - and the prompt are the same; only the answer style differs.
+The pipeline behind the Ask AI page (POST /notebook/ask), kept apart from
+the router so other callers can answer from the workspace the same way.
+chat_style asks for a short plain-text answer, for places without room for
+headings and lists.
 """
 from __future__ import annotations
 

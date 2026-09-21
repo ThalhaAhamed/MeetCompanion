@@ -245,15 +245,14 @@ function ImportAgentsModal({ open, onClose, onImported }) {
 }
 
 const INTERACTION_MODES = [
-  ['voice', 'Voice', 'Joins the call and answers when spoken to by name.'],
-  ['chat', 'Chat', 'Stays silent. Answers questions typed in the meeting chat.'],
-  ['both', 'Voice and chat', 'Answers by voice when spoken to, and in the chat when typed to.'],
+  ['voice', 'Voice', 'Answers out loud when someone says its name.'],
+  ['chat', 'Chat', 'Stays silent. When someone says its name, the answer is posted in the meeting chat.'],
 ]
 
 /**
- * How this agent takes part in a call. Chat questions are read by this
- * server (MeetStream's agents cannot read the chat panel), answered from the
- * workspace, and posted back through the bot.
+ * How this agent answers in a call - MeetStream's response_modality on the
+ * agent, as a two-way choice. In both modes the agent hears the room and is
+ * addressed by name: MeetStream does not deliver typed chat during a call.
  */
 function InteractionModePicker({ agentConfigId, agentName, mode, readOnly, onChanged }) {
   const [busy, setBusy] = useState(false)
@@ -275,8 +274,8 @@ function InteractionModePicker({ agentConfigId, agentName, mode, readOnly, onCha
 
   return (
     <div className="mb-5">
-      <div className="mc-label">In the call</div>
-      <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="How the agent takes part">
+      <div className="mc-label">How it answers in a call</div>
+      <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="How the agent answers">
         {INTERACTION_MODES.map(([value, title, blurb]) => (
           <button
             key={value}
@@ -297,19 +296,19 @@ function InteractionModePicker({ agentConfigId, agentName, mode, readOnly, onCha
           </button>
         ))}
       </div>
-      {mode !== 'voice' && (
-        <p className="mt-2 text-xs" style={{ color: 'var(--text-faint)' }}>
-          In the meeting chat, start a message with <code>@{agentName}</code> or <code>/ask</code> — for example{' '}
-          <code>/ask what did we decide about pricing?</code>. The bot posts the answer in the chat.
-        </p>
-      )}
+      <p className="mt-2 text-xs" style={{ color: 'var(--text-faint)' }}>
+        Either way, ask by voice: say <code>{agentName}</code> and then the question — for example{' '}
+        <code>{agentName}, what did we decide about pricing?</code>
+        {mode === 'chat' ? ' The answer appears in the meeting chat instead of being spoken.' : ''}
+        {' '}Questions typed into the chat cannot be read during a call.
+      </p>
       {error && <p className="mt-2 text-xs" style={{ color: 'var(--color-rose-700)' }}>{error}</p>}
     </div>
   )
 }
 
 
-function AgentForm({ form, update, onSubmit, saving, saved, error, submitLabel, promptHint, readOnly = false }) {
+function AgentForm({ form, update, onSubmit, saving, saved, error, submitLabel, promptHint, readOnly = false, showModality = true }) {
   return (
     // readOnly: a member who may look at the agent but not change it - the
     // fields stay visible, the inputs are disabled and there is no Save.
@@ -372,19 +371,21 @@ function AgentForm({ form, update, onSubmit, saving, saved, error, submitLabel, 
             onChange={(event) => update('temperature', event.target.value)}
           />
         </Field>
-        <Field label="Response modality" htmlFor="cfg-modality">
-          <select
-            id="cfg-modality"
-            className="mc-input"
-            value={form.response_modality}
-            onChange={(event) => update('response_modality', event.target.value)}
-          >
-            <option value="">unchanged</option>
-            {MODALITIES.map((value) => (
-              <option key={value} value={value}>{value}</option>
-            ))}
-          </select>
-        </Field>
+        {showModality && (
+          <Field label="Response modality" htmlFor="cfg-modality" hint="How new agents made from this template answer.">
+            <select
+              id="cfg-modality"
+              className="mc-input"
+              value={form.response_modality}
+              onChange={(event) => update('response_modality', event.target.value)}
+            >
+              <option value="">unchanged</option>
+              {MODALITIES.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
+          </Field>
+        )}
       </div>
 
       <label className="mb-5 flex items-center gap-2 text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -801,9 +802,11 @@ export default function Agent() {
                 agentName={config.AgentName || 'Meet Companion'}
                 mode={config.InteractionMode || 'voice'}
                 readOnly={!canManage}
-                onChanged={(mode) => {
-                  setConfig((current) => ({ ...current, InteractionMode: mode }))
+                onChanged={() => {
+                  // The modality changed on MeetStream: reload so the form
+                  // and the list both show what is now saved there.
                   loadAgents()
+                  loadConfig(viewingId || undefined)
                 }}
               />
 
@@ -817,6 +820,7 @@ export default function Agent() {
                 submitLabel="Save agent"
                 promptHint="Controls when the agent speaks and how it answers."
                 readOnly={!canManage}
+                showModality={false}
               />
             </Card>
           )}

@@ -163,7 +163,6 @@ async def process_webhook_event_async(
     Background worker for webhook event state transitions and pipeline triggering.
     """
     from app.services.processing import processing_pipeline
-    from app.services import meeting_chat
     from app.services.meetstream import meetstream_client
 
     async with get_db_context() as db:
@@ -190,7 +189,6 @@ async def process_webhook_event_async(
                     await meeting_repo.update_status(meeting.id, status="recording")
 
             elif event_type in ("bot.stopped", "bot.kicked"):
-                meeting_chat.stop(bot_id)
                 if meeting:
                     await meeting_repo.update_status(
                         meeting.id,
@@ -199,7 +197,6 @@ async def process_webhook_event_async(
                     )
 
             elif event_type in ("bot.failed", "bot.denied", "bot.notallowed"):
-                meeting_chat.stop(bot_id)
                 error_msg = payload.get("message") or f"Bot terminated with status: {event_type}"
                 if meeting:
                     await meeting_repo.update_status(
@@ -252,7 +249,6 @@ async def process_webhook_event_async(
                     )
 
             elif event_type == "bot.done":
-                meeting_chat.stop(bot_id)
                 if meeting:
                     await meeting_repo.update_status(meeting.id, status="completed")
 
