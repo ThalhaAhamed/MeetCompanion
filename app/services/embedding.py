@@ -84,7 +84,7 @@ class EmbeddingService:
 
                 if seed_cache_from_bundle(settings.EMBEDDING_CACHE_DIR, os.environ.get("MEET_COMPANION_BUNDLED_MODELS")):
                     logger.info("Copied the bundled embedding model into %s", settings.EMBEDDING_CACHE_DIR)
-                self._model = TextEmbedding(
+                kwargs = dict(
                     model_name=_fastembed_name(self.model_name),
                     cache_dir=str(settings.EMBEDDING_CACHE_DIR) if settings.EMBEDDING_CACHE_DIR else None,
                     # One thread: on shared-vCPU hosts more threads contend
@@ -92,8 +92,18 @@ class EmbeddingService:
                     # peg every core while a meeting is being indexed.
                     threads=1,
                 )
+                # fastembed asks the hub before using its cache, and with no
+                # network it gives up after minutes of retries - even when
+                # every file is already on disk. Local first, download only
+                # when there is nothing local.
+                try:
+                    self._model = TextEmbedding(local_files_only=True, **kwargs)
+                    source = "local"
+                except Exception:
+                    self._model = TextEmbedding(**kwargs)
+                    source = "downloaded"
                 self._initialized = True
-                logger.info(f"Loaded embedding model: {self.model_name} (ONNX)")
+                logger.info(f"Loaded embedding model: {self.model_name} (ONNX, {source})")
             except Exception as e:
                 logger.warning(f"Embedding model unavailable ({e}). Using deterministic fallback embedding.")
                 self._initialized = True
