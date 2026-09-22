@@ -1,8 +1,106 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Logo from '../components/Logo'
+import { ChevronDownIcon } from '../components/icons'
 import { Card, ErrorMessage, Field, Spinner } from '../components/ui'
 import { activateConnection, addConnection, addMember, checkJoin, joinWorkspace, listConnections, login } from '../api'
 import { takePendingJoin } from '../pendingJoin'
+
+/**
+ * Which database this sign-in goes against.
+ *
+ * Everything else that switches database - the header's workspace switcher,
+ * Settings - is behind the sign-in wall, so someone who signed out while the
+ * app pointed at one database and whose account is on another had no way
+ * back: they could not sign in (no account here) and could not switch (no
+ * session). Activating is device-gated, not session-gated, and already signs
+ * this machine's person in when the database it switches to knows them, so
+ * choosing one here either lands them straight in the app or returns this
+ * same page pointed at the right database.
+ */
+function DatabaseSwitch({ connections, disabled }) {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const box = useRef(null)
+
+  useEffect(() => {
+    if (!open) return undefined
+    const close = (event) => !box.current?.contains(event.target) && setOpen(false)
+    const onKey = (event) => event.key === 'Escape' && setOpen(false)
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const active = connections.find((conn) => conn.active)
+
+  async function choose(conn) {
+    if (busy) return
+    if (conn.active) {
+      setOpen(false)
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await activateConnection(conn.id, null)
+      // The database changed underneath the app: reload rather than patch
+      // this page's state. Signed in on it already? The reload lands in the
+      // app; otherwise here, now asking for an account on that database.
+      window.location.reload()
+    } catch (err) {
+      setError(err.message)
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mb-4">
+      <div className="relative flex justify-center" ref={box}>
+        <button
+          type="button"
+          className="mc-btn mc-btn-ghost text-xs"
+          onClick={() => setOpen((v) => !v)}
+          disabled={disabled || busy}
+          aria-haspopup="menu"
+          aria-expanded={open}
+        >
+          {busy ? <Spinner size={13} /> : null}
+          <span className="max-w-[14rem] truncate">Database: {active?.label || 'Unknown'}</span>
+          <ChevronDownIcon size={14} />
+        </button>
+        {open && (
+          <div role="menu" className="mc-panel absolute top-full z-40 mt-1 min-w-[15rem] overflow-hidden p-1">
+            {connections.map((conn) => (
+              <button
+                key={conn.id}
+                type="button"
+                role="menuitemradio"
+                aria-checked={Boolean(conn.active)}
+                disabled={busy || conn.reachable === false}
+                className="mc-nav-item flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm"
+                onClick={() => choose(conn)}
+              >
+                <span className="truncate">{conn.label}</span>
+                <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
+                  {conn.active ? 'Current' : conn.reachable === false ? 'Unreachable' : conn.signed_in ? 'Signs you in' : 'Switch'}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {error && (
+        <p className="mt-2 text-center text-xs" style={{ color: 'var(--danger-fg)' }}>
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
 
 export default function SignIn({ onSignedIn, hasMembers = true }) {
   // A join code carried over from the workspace picker: the person asked to
@@ -29,13 +127,20 @@ export default function SignIn({ onSignedIn, hasMembers = true }) {
   // necessarily the one this app is on, so joining asks which. On a shared
   // server everyone is on the same database and a code is enough.
   const [desktop, setDesktop] = useState(false)
+  // The databases this machine knows, for DatabaseSwitch. Only worth showing
+  // when there is somewhere else to go.
+  const [connections, setConnections] = useState([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
   useEffect(() => {
     let cancelled = false
     listConnections()
-      .then(() => !cancelled && setDesktop(true))
+      .then((data) => {
+        if (cancelled) return
+        setDesktop(true)
+        setConnections(data.connections || [])
+      })
       .catch(() => !cancelled && setDesktop(false))
     return () => {
       cancelled = true
@@ -108,6 +213,10 @@ export default function SignIn({ onSignedIn, hasMembers = true }) {
             Make meeting data smarter.
           </p>
         </div>
+
+        {desktop && connections.length > 1 && (
+          <DatabaseSwitch connections={connections} disabled={busy} />
+        )}
 
         <Card>
           <div

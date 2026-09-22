@@ -189,3 +189,67 @@ describe('creating an account', () => {
     expect(screen.getByLabelText(/Join code/i)).toHaveValue('nope')
   })
 })
+
+describe('choosing the database from the sign-in page', () => {
+  // Signing out while the app points at one database, with your account on
+  // another, used to be a dead end: no account to sign in with here, and
+  // every database switcher was behind the sign-in wall.
+  const TWO = {
+    connections: [
+      { id: 'c1', label: 'Local (SQLite)', active: true, signed_in: true, reachable: true, workspaces: [] },
+      { id: 'c2', label: 'Team Postgres', active: false, signed_in: true, reachable: true, workspaces: [] },
+    ],
+  }
+
+  it('is absent on a shared server and on a desktop with one database', async () => {
+    render(<SignIn onSignedIn={vi.fn()} hasMembers />)
+    await waitFor(() => expect(listConnections).toHaveBeenCalled())
+    expect(screen.queryByText(/^Database:/)).toBeNull()
+
+    listConnections.mockResolvedValue({ connections: [TWO.connections[0]] })
+    render(<SignIn onSignedIn={vi.fn()} hasMembers />)
+    await waitFor(() => expect(listConnections).toHaveBeenCalledTimes(2))
+    expect(screen.queryByText(/^Database:/)).toBeNull()
+  })
+
+  it('names the live database and switches to the one picked', async () => {
+    listConnections.mockResolvedValue(TWO)
+    render(<SignIn onSignedIn={vi.fn()} hasMembers />)
+
+    fireEvent.click(await screen.findByText('Database: Local (SQLite)'))
+    // The one it is already on says so rather than offering a pointless switch.
+    expect(screen.getByRole('menuitemradio', { name: /Local \(SQLite\)/ })).toHaveAttribute('aria-checked', 'true')
+
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /Team Postgres/ }))
+    await waitFor(() => expect(activateConnection).toHaveBeenCalledWith('c2', null))
+    // Activating signs this machine in where the database knows them, so the
+    // reload lands either in the app or back here on the right database.
+    await waitFor(() => expect(window.location.reload).toHaveBeenCalled())
+  })
+
+  it('keeps you here and says why when the database cannot be switched to', async () => {
+    listConnections.mockResolvedValue(TWO)
+    activateConnection.mockRejectedValue(new Error('Could not switch to Team Postgres: connection refused'))
+    render(<SignIn onSignedIn={vi.fn()} hasMembers />)
+
+    fireEvent.click(await screen.findByText('Database: Local (SQLite)'))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /Team Postgres/ }))
+
+    expect(await screen.findByText(/connection refused/)).toBeInTheDocument()
+    expect(window.location.reload).not.toHaveBeenCalled()
+    // Still usable: the form was never taken away.
+    expect(submitButton('Sign in')).toBeTruthy()
+  })
+
+  it('does not offer a database it cannot reach', async () => {
+    listConnections.mockResolvedValue({
+      connections: [TWO.connections[0], { ...TWO.connections[1], reachable: false }],
+    })
+    render(<SignIn onSignedIn={vi.fn()} hasMembers />)
+
+    fireEvent.click(await screen.findByText('Database: Local (SQLite)'))
+    const unreachable = screen.getByRole('menuitemradio', { name: /Team Postgres/ })
+    expect(unreachable).toBeDisabled()
+    expect(unreachable).toHaveTextContent('Unreachable')
+  })
+})

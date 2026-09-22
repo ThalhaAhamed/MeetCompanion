@@ -38,6 +38,13 @@ network without IPv6 → use the pooler connection string instead.
 That happens only when the workspace has more than one owner - the device key
 signs in *the* owner and refuses to guess between several. Sign in normally.
 
+**Signed out, and your account is on a different database.** On the desktop
+app the sign-in page names the database it is about to sign you in to, with
+the other saved ones underneath it — pick one and it switches there. If that
+database already knows this machine, you land straight in the app; otherwise
+you get the sign-in form again, now on the right database. The control only
+appears when more than one database is saved.
+
 **"Incorrect email or password" right after switching databases.** Accounts
 live in the database, so on a database that already has people in it your
 old account does not exist — sign in with an account from *that* database,
