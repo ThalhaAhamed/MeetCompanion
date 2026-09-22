@@ -151,6 +151,22 @@ class MeetStreamClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def get_bot_status(self, bot_id: str, api_key: Optional[str] = None) -> str:
+        """
+        The bot's current lifecycle state, as MeetStream spells it: Scheduled,
+        Joining, InWaitingRoom, InMeeting, Recording, Leaving, Stopped,
+        MediaProcessing, Done - or Failed / Denied / NotAllowed. Cheaper than
+        the detail call, and answers for every bot.
+        """
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{self.base_url}/api/v1/bots/{bot_id}/status",
+                headers=self._headers(api_key),
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            return str((body.get("status") if isinstance(body, dict) else body) or "")
+
     async def list_bot_transcriptions(self, bot_id: str, api_key: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Every transcription run for a bot, newest first as MeetStream

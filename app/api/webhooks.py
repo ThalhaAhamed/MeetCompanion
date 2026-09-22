@@ -223,12 +223,10 @@ async def process_webhook_event_async(
                     except Exception as e:
                         logger.warning(f"Failed to fetch bot details for transcript_id lookup: {e}")
 
-                if meeting and transcript_id:
-                    await meeting_repo.update_status(
-                        meeting.id,
-                        meetstream_transcript_id=transcript_id,
-                        processing_status="queued_for_processing",
-                    )
+                # The bot watcher (app.services.bot_watch) may already have
+                # picked this transcript up by polling; the claim is a
+                # conditional update, so the pipeline runs exactly once.
+                if meeting and transcript_id and await meeting_repo.claim_for_processing(meeting.id, transcript_id):
                     # Commit and release the row lock on `meetings` before calling
                     # into the pipeline - it opens its own separate DB session and
                     # updates this same row, which would otherwise deadlock against

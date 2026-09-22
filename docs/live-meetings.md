@@ -29,11 +29,15 @@ call.
    into it. **Re-activate the agent whenever the URL changes** — that is
    what re-points its wiring at the new host.
 
-Without a reachable URL a bot still joins and records, and **Stop** and
-**Reprocess** still work (the transcript is fetched by id), but nothing
-happens automatically after the call and the voice agent cannot reach
-memory. A call in which nobody speaks produces no transcript on
-MeetStream's side; the meeting is marked failed with that reason.
+Without a reachable URL a bot still joins and records, and the meeting still
+follows it: the server asks MeetStream for the bot's state every 20 seconds
+while a call is live (Joining → In the call → Recording → Left the call), and
+once MeetStream has finished the transcript it fetches it and runs the
+summary, memory and action-item extraction by itself — the webhooks are the
+faster path, not the only one. What a tunnel-less install does lose is the
+agent: it cannot reach memory during the call. A call in which nobody speaks
+produces no transcript on MeetStream's side; the meeting is marked failed
+with that reason.
 
 ## Answering by voice or in the chat
 

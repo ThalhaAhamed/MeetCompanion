@@ -23,6 +23,7 @@ import {
 import { listActionItems, listFolders, listMeetings, listNotes, updateActionItem } from '../api'
 import ActionItemEditor from '../components/ActionItemEditor'
 import { useCan } from '../user'
+import { isLiveMeeting } from '../meetingStatus'
 
 function today() {
   return new Date().toISOString().slice(0, 10)
@@ -62,7 +63,7 @@ export default function Dashboard() {
       setMeetingCount(meetings.length)
       // A bot is only "in a call" once MeetStream has accepted it; a
       // meeting that never got a bot (no key, bad link) is not live.
-      setLive(meetings.filter((m) => ['joining', 'recording', 'in_progress'].includes(m.status) && m.meetstream_bot_id))
+      setLive(meetings.filter(isLiveMeeting))
       setNotes(noteList.notes || [])
       setCounts({ ...(folderData.counts || {}), notes: noteList.total || 0 })
       setActionItems(actions.action_items || [])

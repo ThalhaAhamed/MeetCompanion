@@ -19,10 +19,8 @@ import {
 } from '../api'
 import { useCan } from '../user'
 import ActionItemEditor from '../components/ActionItemEditor'
+import { LIVE_STATUSES, isLiveMeeting, statusLabel, statusTone } from '../meetingStatus'
 
-const LIVE_STATUSES = ['pending', 'joining', 'recording', 'in_progress']
-// Stop bot only makes sense once there is a bot to stop.
-const STOPPABLE_STATUSES = ['joining', 'recording', 'in_progress']
 
 /**
  * Some summaries were stored with escaped newlines rather than real ones, so
@@ -31,13 +29,6 @@ const STOPPABLE_STATUSES = ['joining', 'recording', 'in_progress']
  */
 function withRealNewlines(text) {
   return (text || '').replace(/\\r\\n|\\n/g, '\n')
-}
-
-function statusTone(status) {
-  if (['completed', 'done'].includes(status)) return 'success'
-  if (['failed', 'error'].includes(status)) return 'danger'
-  if (LIVE_STATUSES.includes(status)) return 'warning'
-  return 'neutral'
 }
 
 const MODE_BLURB = {
@@ -361,24 +352,34 @@ function MeetingDetail({ meetingId, onChanged, onDeleted }) {
   }, [meetingId])
 
   // Extraction runs in the background after upload/reprocess; keep the
-  // page current until it settles, then tell the list to refresh too.
+  // page current until it settles, then tell the list to refresh too. The
+  // same while a bot is in the call: the server follows the bot (webhooks,
+  // or by asking MeetStream) and starts extraction itself once the
+  // transcript is in, so the page only has to keep looking.
   const inFlight = meeting && ['queued_for_processing', 'processing'].includes(meeting.processing_status)
+  const awaitingBot = meeting && Boolean(meeting.meetstream_bot_id) && (
+    LIVE_STATUSES.includes(meeting.status) || (['stopped', 'completed'].includes(meeting.status) && meeting.processing_status === 'pending')
+  )
+  const watching = Boolean(inFlight || awaitingBot)
+  const shown = useRef(meeting)
+  shown.current = meeting
   useEffect(() => {
-    if (!inFlight) return undefined
+    if (!watching) return undefined
     const timer = setInterval(async () => {
       try {
         const fresh = await getMeeting(meetingId)
+        const before = shown.current
         setMeeting(fresh)
-        if (!['queued_for_processing', 'processing'].includes(fresh.processing_status)) {
+        if (before && (before.status !== fresh.status || before.processing_status !== fresh.processing_status)) {
           setTranscript(null)
           onChanged?.()
         }
       } catch {
         // Transient; the next tick retries.
       }
-    }, 2500)
+    }, inFlight ? 2500 : 5000)
     return () => clearInterval(timer)
-  }, [inFlight, meetingId, onChanged])
+  }, [watching, inFlight, meetingId, onChanged])
 
   useEffect(() => {
     if (tab !== 'transcript' || transcript !== null) return
@@ -430,7 +431,7 @@ function MeetingDetail({ meetingId, onChanged, onDeleted }) {
 
   const memories = meeting.memories || []
   const actionItems = meeting.action_items || []
-  const isLive = STOPPABLE_STATUSES.includes(meeting.status) && Boolean(meeting.meetstream_bot_id)
+  const isLive = isLiveMeeting(meeting)
 
   const tabs = [
     { id: 'summary', label: 'Summary' },
@@ -446,7 +447,7 @@ function MeetingDetail({ meetingId, onChanged, onDeleted }) {
           <div className="min-w-0">
             <h2 className="truncate text-lg font-semibold">{meeting.title || 'Untitled meeting'}</h2>
             <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-              <Badge tone={statusTone(meeting.status)}>{meeting.status}</Badge>
+              <Badge tone={statusTone(meeting.status)}>{statusLabel(meeting.status)}</Badge>
               {meeting.platform && <Badge>{meeting.platform}</Badge>}
               {meeting.created_by_name && <span>Started by {meeting.created_by_name}</span>}
             </div>
@@ -636,6 +637,17 @@ export default function Meetings() {
     refresh()
   }, [refresh])
 
+  // A bot in a call, or a call whose transcript is still on its way, changes
+  // state on the server without anyone clicking; keep the list current.
+  const anyAwaited = (meetings || []).some(
+    (m) => m.meetstream_bot_id && (LIVE_STATUSES.includes(m.status) || (['stopped', 'completed'].includes(m.status) && m.processing_status === 'pending')),
+  )
+  useEffect(() => {
+    if (!anyAwaited) return undefined
+    const timer = setInterval(refresh, 10000)
+    return () => clearInterval(timer)
+  }, [anyAwaited, refresh])
+
   // Opening on today is right for someone using this daily, but it strands
   // anyone returning after a gap on an empty page while meetings sit a few
   // days back. If today is empty, fall through to the most recent day that
@@ -746,7 +758,7 @@ export default function Meetings() {
                       {meeting.title || 'Untitled meeting'}
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                      <Badge tone={statusTone(meeting.status)}>{meeting.status}</Badge>
+                      <Badge tone={statusTone(meeting.status)}>{statusLabel(meeting.status)}</Badge>
                       {meeting.created_by_name && (
                         <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
                           {meeting.created_by_name}

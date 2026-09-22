@@ -20,6 +20,7 @@ from app.models.schemas import (
 )
 from app.services.meetstream import meetstream_client
 from app.api.agent import get_active_agent_config_id, _DEFAULT_FIRST_MESSAGE, _require_claimable_agent, get_meetstream_api_key, require_meetstream_api_key
+from app.services.bot_watch import ready_transcript_id
 from app.services.agents import MODE_CHAT, MODE_VOICE, interaction_mode_of
 from app.api.deps import get_current_org_id, get_current_user
 from app.models.database import User
@@ -338,9 +339,7 @@ async def import_bot(
         # Not every detail payload carries it; the bot's transcription runs do.
         try:
             runs = await meetstream_client.list_bot_transcriptions(body.bot_id, api_key=own_key)
-            done = [r for r in runs if str(r.get("status", "")).lower() in ("completed", "complete", "done", "ready")]
-            chosen = (done or runs)[0] if (done or runs) else None
-            transcript_id = (chosen or {}).get("transcript_id")
+            transcript_id = ready_transcript_id(runs) or ((runs or [{}])[0]).get("transcript_id")
         except Exception as e:
             logger.warning(f"Transcriptions lookup failed for {body.bot_id}: {e}")
     if not transcript_id and detail_error and not meeting_url:

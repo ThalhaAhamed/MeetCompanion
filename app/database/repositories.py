@@ -163,6 +163,43 @@ class MeetingRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    #: A bot that is (or may still be) in a call, as far as this install knows.
+    LIVE_STATUSES = ("joining", "in_meeting", "recording")
+
+    async def list_awaiting_bot(self) -> List[Meeting]:
+        """
+        Every meeting whose bot this install is still waiting on, across all
+        workspaces: the call is live, or it has ended and the transcript has
+        not been picked up yet (processing_status still "pending"). This is
+        the set the bot watcher polls MeetStream about - the same transitions
+        the webhooks drive, for installs the webhooks never reach.
+        """
+        stmt = select(Meeting).where(
+            Meeting.meetstream_bot_id.is_not(None),
+            or_(
+                Meeting.status.in_(self.LIVE_STATUSES),
+                and_(Meeting.status.in_(("stopped", "completed")), Meeting.processing_status == "pending"),
+            ),
+        ).order_by(Meeting.created_at)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def claim_for_processing(self, meeting_id: uuid.UUID, transcript_id: str) -> bool:
+        """
+        Move a meeting from "pending" to "queued_for_processing" in one
+        conditional UPDATE, recording the transcript id. False when someone
+        else got there first - the webhook and the bot watcher can both learn
+        that a transcript is ready, and the pipeline must run once.
+        """
+        stmt = (
+            update(Meeting)
+            .where(Meeting.id == meeting_id, Meeting.processing_status == "pending")
+            .values(processing_status="queued_for_processing", meetstream_transcript_id=transcript_id)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount == 1
+
     async def get_by_transcript_id(self, transcript_id: str) -> Optional[Meeting]:
         stmt = select(Meeting).where(Meeting.meetstream_transcript_id == transcript_id)
         result = await self.session.execute(stmt)

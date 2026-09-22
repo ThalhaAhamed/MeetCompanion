@@ -55,7 +55,13 @@ async def lifespan(app: FastAPI):
     # cost (and blocking the event loop while it loads).
     import asyncio
     asyncio.create_task(embedding_service.warmup_async())
+    # Keeps launched bots' meetings current by asking MeetStream, for the
+    # installs its webhooks cannot reach (see app.services.bot_watch).
+    from app.services.bot_watch import bot_watcher
+
+    bot_watcher.start()
     yield
+    await bot_watcher.stop()
     logger.info("%s shutting down", settings.APP_NAME)
 
 

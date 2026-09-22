@@ -1,10 +1,14 @@
 # Troubleshooting
 
-**A meeting sits at "Extracting…" / "joining" forever.** MeetStream cannot
-reach your server: its webhooks never arrive. Check `MCP_SERVER_URL` is a
-public URL (see [Live meetings](live-meetings.md)), that
-the tunnel is still running, and re-activate the agent after changing it.
-*Reprocess* on the meeting fetches the transcript by id without webhooks.
+**A meeting sits at "Joining" or "Left the call" for a long time.** The
+server asks MeetStream about the bot every 20 seconds, so the status should
+follow the call within half a minute and extraction should start on its own
+once MeetStream has the transcript (a few minutes after the call). If it
+does not move at all, the server cannot reach MeetStream (network, or the
+API key was changed after launch); the server log says why. *Reprocess*
+fetches the transcript by id at any time. The agent answering *in* the call
+is the part that needs a public `MCP_SERVER_URL` (see
+[Live meetings](live-meetings.md)).
 
 **"Processed without AI (…)"** on a meeting. The AI provider failed and the
 rule-based parser ran instead; the message in brackets is the provider's own
