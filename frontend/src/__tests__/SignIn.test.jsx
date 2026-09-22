@@ -9,8 +9,12 @@ vi.mock('../api', () => ({
   activateConnection: vi.fn(),
   joinWorkspace: vi.fn(),
   checkJoin: vi.fn(),
+  getProviderCatalog: vi.fn(),
+  testDatabase: vi.fn(),
 }))
-import { activateConnection, addConnection, addMember, checkJoin, joinWorkspace, listConnections, login } from '../api'
+import {
+  activateConnection, addConnection, addMember, checkJoin, getProviderCatalog, joinWorkspace, listConnections, login,
+} from '../api'
 import SignIn from '../pages/SignIn'
 
 /** Both the mode tabs and the submit button carry these names; we want the submit. */
@@ -37,6 +41,19 @@ beforeEach(() => {
   activateConnection.mockResolvedValue({ switched: true, signed_in: false })
   joinWorkspace.mockResolvedValue({ joined: true })
   checkJoin.mockResolvedValue({ workspace: 'Team Co', same_database: false })
+  getProviderCatalog.mockResolvedValue({
+    llm: [],
+    databases: [
+      { name: 'sqlite', label: 'Local file (SQLite)', summary: 'On this computer', available: true, fields: [] },
+      {
+        name: 'postgres',
+        label: 'PostgreSQL',
+        summary: 'Shared with your team',
+        available: true,
+        fields: [{ key: 'url', label: 'Connection string', required: true }],
+      },
+    ],
+  })
   Object.defineProperty(window, 'location', { value: { reload: vi.fn(), pathname: '/' }, writable: true })
 })
 
@@ -201,15 +218,16 @@ describe('choosing the database from the sign-in page', () => {
     ],
   }
 
-  it('is absent on a shared server and on a desktop with one database', async () => {
+  it('is absent on a shared server, and present on a desktop with only one database', async () => {
     render(<SignIn onSignedIn={vi.fn()} hasMembers />)
     await waitFor(() => expect(listConnections).toHaveBeenCalled())
     expect(screen.queryByText(/^Database:/)).toBeNull()
 
+    // One saved database is still worth the control: it is the way to reach
+    // "Connect another database".
     listConnections.mockResolvedValue({ connections: [TWO.connections[0]] })
     render(<SignIn onSignedIn={vi.fn()} hasMembers />)
-    await waitFor(() => expect(listConnections).toHaveBeenCalledTimes(2))
-    expect(screen.queryByText(/^Database:/)).toBeNull()
+    expect(await screen.findByText('Database: Local (SQLite)')).toBeInTheDocument()
   })
 
   it('names the live database and switches to the one picked', async () => {
@@ -251,5 +269,72 @@ describe('choosing the database from the sign-in page', () => {
     const unreachable = screen.getByRole('menuitemradio', { name: /Team Postgres/ })
     expect(unreachable).toBeDisabled()
     expect(unreachable).toHaveTextContent('Unreachable')
+  })
+})
+
+describe('connecting a database the machine has never seen', () => {
+  const ONE = {
+    connections: [
+      { id: 'c1', label: 'Local (SQLite)', active: true, signed_in: true, reachable: true, workspaces: [] },
+    ],
+  }
+
+  async function openConnectForm() {
+    listConnections.mockResolvedValue(ONE)
+    render(<SignIn onSignedIn={vi.fn()} hasMembers />)
+    fireEvent.click(await screen.findByText('Database: Local (SQLite)'))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Connect another database/ }))
+    return screen.findByRole('heading', { name: 'Connect to another database' })
+  }
+
+  it('offers the shared providers, not a local file, and hides the owner-only test', async () => {
+    await openConnectForm()
+    // The sign-in form is out of the way while connecting.
+    expect(screen.queryByLabelText('Password')).toBeNull()
+    expect(await screen.findByText('PostgreSQL')).toBeInTheDocument()
+    // A local SQLite file is what this machine starts on, not somewhere to
+    // connect to - onboarding's own join step hides it the same way.
+    expect(screen.queryByText('Local file (SQLite)')).toBeNull()
+    // /setup/test-database needs an owner's session, which this page lacks.
+    expect(screen.queryByRole('button', { name: /Test connection/ })).toBeNull()
+  })
+
+  it('saves the connection, switches to it, and reloads', async () => {
+    addConnection.mockResolvedValue({ id: 'c9' })
+    await openConnectForm()
+
+    fireEvent.click(await screen.findByText('PostgreSQL'))
+    fireEvent.change(await screen.findByLabelText(/Connection string/), {
+      target: { value: 'postgresql://user:pw@host/db' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^Connect$/ }))
+
+    await waitFor(() =>
+      expect(addConnection).toHaveBeenCalledWith({
+        provider: 'postgres',
+        values: { url: 'postgresql://user:pw@host/db' },
+      }),
+    )
+    await waitFor(() => expect(activateConnection).toHaveBeenCalledWith('c9', null))
+    await waitFor(() => expect(window.location.reload).toHaveBeenCalled())
+  })
+
+  it('reports a database it cannot reach and stays on the form', async () => {
+    addConnection.mockRejectedValue(new Error('could not connect to server: timed out'))
+    await openConnectForm()
+
+    fireEvent.click(await screen.findByText('PostgreSQL'))
+    fireEvent.change(await screen.findByLabelText(/Connection string/), { target: { value: 'postgresql://nope/db' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Connect$/ }))
+
+    expect(await screen.findByText(/timed out/)).toBeInTheDocument()
+    expect(activateConnection).not.toHaveBeenCalled()
+    expect(window.location.reload).not.toHaveBeenCalled()
+  })
+
+  it('goes back to the sign-in form', async () => {
+    await openConnectForm()
+    fireEvent.click(screen.getByRole('button', { name: /Back to sign in/ }))
+    expect(await screen.findByLabelText('Password')).toBeInTheDocument()
   })
 })

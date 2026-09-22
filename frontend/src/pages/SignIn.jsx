@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import Logo from '../components/Logo'
 import { ChevronDownIcon } from '../components/Icons'
-import { Card, ErrorMessage, Field, Spinner } from '../components/ui'
-import { activateConnection, addConnection, addMember, checkJoin, joinWorkspace, listConnections, login } from '../api'
+import DatabasePicker, { isDatabaseFormComplete } from '../components/DatabasePicker'
+import { Card, ErrorMessage, Field, Loading, Spinner } from '../components/ui'
+import {
+  activateConnection, addConnection, addMember, checkJoin, getProviderCatalog, joinWorkspace, listConnections, login,
+} from '../api'
 import { takePendingJoin } from '../pendingJoin'
 
 /**
@@ -17,7 +20,7 @@ import { takePendingJoin } from '../pendingJoin'
  * choosing one here either lands them straight in the app or returns this
  * same page pointed at the right database.
  */
-function DatabaseSwitch({ connections, disabled }) {
+function DatabaseSwitch({ connections, disabled, onConnectNew }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -69,7 +72,7 @@ function DatabaseSwitch({ connections, disabled }) {
           aria-expanded={open}
         >
           {busy ? <Spinner size={13} /> : null}
-          <span className="max-w-[14rem] truncate">Database: {active?.label || 'Unknown'}</span>
+          <span className="max-w-[14rem] truncate">Database: {active?.label || 'This computer'}</span>
           <ChevronDownIcon size={14} />
         </button>
         {open && (
@@ -90,6 +93,20 @@ function DatabaseSwitch({ connections, disabled }) {
                 </span>
               </button>
             ))}
+            <div style={{ borderTop: '1px solid var(--border-subtle)' }} className="mt-1 pt-1">
+              <button
+                type="button"
+                role="menuitem"
+                className="mc-nav-item w-full px-3 py-2 text-left text-sm"
+                disabled={busy}
+                onClick={() => {
+                  setOpen(false)
+                  onConnectNew()
+                }}
+              >
+                Connect another database…
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -101,6 +118,94 @@ function DatabaseSwitch({ connections, disabled }) {
     </div>
   )
 }
+
+/**
+ * Point this machine at a database it has never seen - the same thing the
+ * onboarding wizard's "connect to your team's database" step does, for
+ * someone who is already past onboarding and signed out.
+ *
+ * Saving tests the connection server-side (POST /api/connections refuses a
+ * URL it cannot reach), so there is no separate Test button here: this page
+ * has no session, and /setup/test-database needs an owner's one.
+ */
+function ConnectDatabase({ onCancel }) {
+  const [catalog, setCatalog] = useState(null)
+  const [provider, setProvider] = useState(null)
+  const [values, setValues] = useState({})
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getProviderCatalog()
+      .then((data) => !cancelled && setCatalog(data))
+      .catch((err) => !cancelled && setError(err.message))
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // A database that already holds your account is a shared one; a local
+  // SQLite file is what this machine starts with, not something to connect
+  // to. Onboarding's own "connect to your team's database" step hides it too.
+  const databases = (catalog?.databases || []).filter((entry) => entry.name !== 'sqlite')
+  const entry = databases.find((item) => item.name === provider) || null
+
+  async function connect() {
+    setBusy(true)
+    setError(null)
+    try {
+      const conn = await addConnection({ provider, values })
+      await activateConnection(conn.id, null)
+      // Signed in on it already? The reload lands in the app. Otherwise it
+      // returns this page, now pointed at the database just connected.
+      window.location.reload()
+    } catch (err) {
+      setError(err.message)
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card>
+      <h2 className="text-lg font-semibold">Connect to another database</h2>
+      <p className="mt-1 mb-5 text-sm" style={{ color: 'var(--text-muted)' }}>
+        Your account and your workspace live in a database. Paste the connection string for the
+        one you want to sign in to — it is saved on this computer, so you only do this once.
+      </p>
+
+      {error && <ErrorMessage title="Could not connect" detail={error} />}
+
+      {catalog ? (
+        <DatabasePicker
+          catalog={databases}
+          provider={provider}
+          values={values}
+          onProviderChange={setProvider}
+          onValuesChange={setValues}
+          showTest={false}
+        />
+      ) : (
+        !error && <Loading label="Loading database options…" />
+      )}
+
+      <div className="mt-6 flex items-center justify-between gap-3 border-t pt-5" style={{ borderColor: 'var(--border-subtle)' }}>
+        <button type="button" className="mc-btn mc-btn-ghost" onClick={onCancel} disabled={busy}>
+          Back to sign in
+        </button>
+        <button
+          type="button"
+          className="mc-btn mc-btn-primary"
+          onClick={connect}
+          disabled={busy || !isDatabaseFormComplete(entry, values)}
+        >
+          {busy ? <Spinner size={14} /> : null} Connect
+        </button>
+      </div>
+    </Card>
+  )
+}
+
 
 export default function SignIn({ onSignedIn, hasMembers = true }) {
   // A join code carried over from the workspace picker: the person asked to
@@ -130,6 +235,7 @@ export default function SignIn({ onSignedIn, hasMembers = true }) {
   // The databases this machine knows, for DatabaseSwitch. Only worth showing
   // when there is somewhere else to go.
   const [connections, setConnections] = useState([])
+  const [connectingDb, setConnectingDb] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
@@ -214,11 +320,15 @@ export default function SignIn({ onSignedIn, hasMembers = true }) {
           </p>
         </div>
 
-        {desktop && connections.length > 1 && (
-          <DatabaseSwitch connections={connections} disabled={busy} />
+        {desktop && !connectingDb && (
+          <DatabaseSwitch
+            connections={connections}
+            disabled={busy}
+            onConnectNew={() => setConnectingDb(true)}
+          />
         )}
 
-        <Card>
+        {connectingDb ? <ConnectDatabase onCancel={() => setConnectingDb(false)} /> : <Card>
           <div
             className="mb-5 grid grid-cols-2 gap-1 rounded-xl p-1"
             style={{ backgroundColor: 'var(--surface-raised)' }}
@@ -374,7 +484,7 @@ export default function SignIn({ onSignedIn, hasMembers = true }) {
               {mode === 'signin' ? 'Sign in' : 'Create account'}
             </button>
           </form>
-        </Card>
+        </Card>}
 
         <p className="mt-5 text-center text-xs" style={{ color: 'var(--text-faint)' }}>
           Forgot your password? A workspace owner can reset it from the Members page.

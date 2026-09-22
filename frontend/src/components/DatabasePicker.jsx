@@ -140,6 +140,10 @@ export default function DatabasePicker({
   onTestResult,
   current = null,
   connected = null,
+  // Testing a connection needs an owner's session (/setup/test-database);
+  // the sign-in page has none, and there the Connect button tests the URL
+  // server-side anyway, so it asks for the button to be left out.
+  showTest = true,
 }) {
   const [choosing, setChoosing] = useState(true)
   const entry = useMemo(() => catalog.find((item) => item.name === provider) || null, [catalog, provider])
@@ -209,10 +213,12 @@ export default function DatabasePicker({
       <ProviderFields fields={entry.fields || []} values={values} onChange={setValue} />
 
       <div className="flex flex-wrap items-center gap-3">
-        <button type="button" className="mc-btn mc-btn-secondary" onClick={runTest} disabled={testing || !complete}>
-          {testing ? <Spinner size={14} /> : null}
-          Test connection
-        </button>
+        {showTest && (
+          <button type="button" className="mc-btn mc-btn-secondary" onClick={runTest} disabled={testing || !complete}>
+            {testing ? <Spinner size={14} /> : null}
+            Test connection
+          </button>
+        )}
         {testResult && (
           <span
             className="text-sm"

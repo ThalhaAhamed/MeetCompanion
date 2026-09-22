@@ -42,8 +42,10 @@ signs in *the* owner and refuses to guess between several. Sign in normally.
 app the sign-in page names the database it is about to sign you in to, with
 the other saved ones underneath it — pick one and it switches there. If that
 database already knows this machine, you land straight in the app; otherwise
-you get the sign-in form again, now on the right database. The control only
-appears when more than one database is saved.
+you get the sign-in form again, now on the right database. The same menu's
+**Connect another database** takes a connection string for one this computer
+has never seen, saves it and switches to it - the onboarding wizard's
+"connect to your team's database" step, reachable after onboarding is done.
 
 **"Incorrect email or password" right after switching databases.** Accounts
 live in the database, so on a database that already has people in it your
