@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import Logo from '../components/Logo'
-import { ChevronDownIcon } from '../components/icons'
+import { ChevronDownIcon } from '../components/Icons'
 import { Card, ErrorMessage, Field, Spinner } from '../components/ui'
 import { activateConnection, addConnection, addMember, checkJoin, joinWorkspace, listConnections, login } from '../api'
 import { takePendingJoin } from '../pendingJoin'
