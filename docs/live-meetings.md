@@ -13,7 +13,9 @@ Fly, …) no tunnel is needed at all; on a laptop, some tunnel is unavoidable
 while a bot is in a call.
 
 **On a laptop, the easy way:** Settings → Meetings → Public address → *Start
-a tunnel automatically*. Meet Companion runs a Cloudflare quick tunnel
+a tunnel automatically*. It is switched on for you when an owner saves a
+MeetStream API key (onboarding or Settings), unless an address is already
+set or you have switched it on or off yourself. Meet Companion runs a Cloudflare quick tunnel
 (`cloudflared` ships in the desktop installer, checksum-pinned) for as long
 as it is open, waits until the address answers, and uses it — nothing to
 install, run or paste. Only MeetStream's paths answer through it (`/mcp`,

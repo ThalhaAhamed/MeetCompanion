@@ -282,7 +282,7 @@ async def set_tunnel(body: TunnelRequest) -> Dict[str, Any]:
             detail="MCP_SERVER_URL is set in this machine's environment, which takes precedence over a tunnel.",
         )
     current = load_config()
-    update_config(meetstream=replace(current.meetstream, auto_tunnel=body.enabled))
+    update_config(meetstream=replace(current.meetstream, auto_tunnel=body.enabled, auto_tunnel_chosen=True))
     tunnel_manager.poke()
     return await get_tunnel()
 

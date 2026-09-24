@@ -280,3 +280,75 @@ async def test_a_new_agent_on_a_quick_tunnel_is_created_then_wired(authed_client
     assert created["mcp_server_url"] == f"{FAKE_URL}/mcp"
     assert created["include_chat_function"] is False
     assert wired == ["ag-new"]
+
+
+# -- on by default for people who use MeetStream --------------------------------
+
+async def _save_key(authed_client, monkeypatch):
+    from app.services import meetstream as ms
+
+    async def list_mia_agents(self, api_key=None):
+        return {"agent_configs": []}
+
+    monkeypatch.setattr(ms.MeetStreamClient, "list_mia_agents", list_mia_agents)
+    return await authed_client.put("/api/agent/api-key", json={"meetstream_api_key": "ms_test"})
+
+
+@pytest.fixture
+def cloudflared_present(monkeypatch):
+    monkeypatch.delenv("MCP_SERVER_URL", raising=False)
+    monkeypatch.setattr(tunnel_manager, "_find_binary", lambda: "/usr/bin/cloudflared")
+    monkeypatch.setattr(tunnel_manager, "poke", lambda: None)
+
+
+@pytest.mark.asyncio
+async def test_saving_a_meetstream_key_switches_the_tunnel_on(authed_client, cloudflared_present, monkeypatch):
+    r = await _save_key(authed_client, monkeypatch)
+    assert r.status_code == 200, r.text
+    assert r.json()["tunnel_started"] is True
+    assert load_config().meetstream.auto_tunnel is True
+
+
+@pytest.mark.asyncio
+async def test_a_choice_made_with_the_switch_is_kept(authed_client, cloudflared_present, monkeypatch):
+    await authed_client.put("/api/setup/tunnel", json={"enabled": False})
+    r = await _save_key(authed_client, monkeypatch)
+    assert r.json()["tunnel_started"] is False
+    assert load_config().meetstream.auto_tunnel is False
+
+
+@pytest.mark.asyncio
+async def test_an_address_already_set_is_left_alone(authed_client, cloudflared_present, monkeypatch):
+    await authed_client.post("/api/setup/complete", json={"meetstream": {"public_url": "https://meet.example.com"}})
+    r = await _save_key(authed_client, monkeypatch)
+    assert r.json()["tunnel_started"] is False
+    assert load_config().meetstream.auto_tunnel is False
+
+
+@pytest.mark.asyncio
+async def test_not_without_cloudflared(authed_client, monkeypatch):
+    monkeypatch.delenv("MCP_SERVER_URL", raising=False)
+    monkeypatch.setattr(tunnel_manager, "_find_binary", lambda: None)
+    r = await _save_key(authed_client, monkeypatch)
+    assert r.json()["tunnel_started"] is False
+
+
+@pytest.mark.asyncio
+async def test_not_over_an_environment_address(authed_client, cloudflared_present, monkeypatch):
+    monkeypatch.setenv("MCP_SERVER_URL", "https://ops.example.com/mcp")
+    r = await _save_key(authed_client, monkeypatch)
+    assert r.json()["tunnel_started"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_members_key_does_not_decide_it_for_the_machine(authed_client, cloudflared_present, monkeypatch):
+    from app.database.connection import AsyncSessionLocal
+    from app.models.database import User
+
+    async with AsyncSessionLocal() as db:
+        me = await db.get(User, authed_client.user_id)
+        me.role = "member"
+        await db.commit()
+    r = await _save_key(authed_client, monkeypatch)
+    assert r.json()["tunnel_started"] is False
+    assert load_config().meetstream.auto_tunnel is False

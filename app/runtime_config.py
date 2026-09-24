@@ -77,6 +77,9 @@ class MeetStreamSettings:
     public_url: Optional[str] = None
     # Run a Cloudflare quick tunnel and use its address (app.services.tunnel).
     auto_tunnel: bool = False
+    # Someone switched the tunnel on or off themselves: saving a MeetStream
+    # key no longer decides it for them.
+    auto_tunnel_chosen: bool = False
 
 
 @dataclass

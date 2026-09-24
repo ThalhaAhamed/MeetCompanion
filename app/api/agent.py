@@ -212,10 +212,19 @@ async def set_meetstream_api_key(body: ApiKeyRequest, user: User = Depends(get_c
     user_repo = UserRepository(db)
     await user_repo.update_settings(user.id, {"meetstream_api_key": key})
     await db.commit()
+
+    # A key means bots are coming, and a bot's agent can only look anything
+    # up if MeetStream can reach this server: start the automatic tunnel
+    # unless an address is already set or someone chose otherwise. The
+    # tunnel is this machine's, so only an owner's key decides it.
+    from app.services.tunnel import switch_on_for_meetstream
+
+    tunnel_started = bool(user.role == "owner" and switch_on_for_meetstream())
     return {
         "meetstream_api_key": {"configured": True, "masked_value": _mask_secret(key)},
         "connected": connected,
         "connection_error": connection_error,
+        "tunnel_started": tunnel_started,
     }
 
 

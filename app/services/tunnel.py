@@ -275,6 +275,31 @@ def _enabled() -> bool:
 tunnel_manager = TunnelManager()
 
 
+def switch_on_for_meetstream() -> bool:
+    """
+    Turn the tunnel on because a MeetStream key was just saved - the sign
+    that bots will be sent into calls, where the agent is useless unless
+    MeetStream can reach this server. True when it switched it on.
+
+    Not when there is already an address (saved in Settings or set in the
+    environment), not when cloudflared is missing (it would only show an
+    error), and never over a choice someone made with the switch itself.
+    """
+    from dataclasses import replace
+
+    from app.runtime_config import env_override, load_config, update_config
+
+    meetstream = load_config().meetstream
+    if meetstream.auto_tunnel or meetstream.auto_tunnel_chosen or meetstream.public_url:
+        return False
+    if env_override("MCP_SERVER_URL") or not tunnel_manager.available:
+        return False
+    update_config(meetstream=replace(meetstream, auto_tunnel=True))
+    tunnel_manager.poke()
+    logger.info("MeetStream key saved: started the automatic tunnel")
+    return True
+
+
 # -- requests that came in through the tunnel ---------------------------------
 
 def via_tunnel(request) -> bool:

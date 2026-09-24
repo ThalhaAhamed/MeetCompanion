@@ -322,10 +322,13 @@ export default function Settings() {
     try {
       const result = await setMeetstreamApiKey(meetstreamKey.trim())
       setMeetstreamKey('')
+      const tunnelNote = result.tunnel_started
+        ? ' Also started a tunnel so the agent can reach this computer during calls — see Public address below.'
+        : ''
       setMeetstreamKeyStatus(
         result.connected
-          ? { ok: true, detail: 'Connected to MeetStream.' }
-          : { ok: false, detail: result.connection_error || 'Saved, but could not verify the connection.' },
+          ? { ok: true, detail: `Connected to MeetStream.${tunnelNote}` }
+          : { ok: false, detail: (result.connection_error || 'Saved, but could not verify the connection.') + tunnelNote },
       )
       await load()
     } catch (err) {
