@@ -20,8 +20,13 @@ call.
    another host, or use a named Cloudflare tunnel / ngrok. Quick-tunnel URLs
    also change on every launch; for anything beyond a one-off test use a
    fixed domain.
-2. Set `MCP_SERVER_URL` to `https://<that-host>/mcp` (in `.env` or the
-   environment) and restart. The webhook callback URL is derived from it.
+2. Enter that address in **Settings → Meetings → Public address**
+   (`https://<that-host>` is enough) and press **Save and check**: it is
+   probed through the address itself and says whether MeetStream can reach
+   this server. No restart; the next bot you launch uses it. The webhook
+   callback URL is derived from it. On a server you can set
+   `MCP_SERVER_URL=https://<that-host>/mcp` in the environment instead,
+   which takes precedence and locks the field.
 3. Add your MeetStream API key in **Settings → Meetings** and a webhook
    signing secret (the same value on both sides).
 4. Create or activate an agent in **Agent**; Meet Companion wires the MCP

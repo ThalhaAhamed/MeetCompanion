@@ -71,6 +71,10 @@ class MeetStreamSettings:
     base_url: Optional[str] = None
     # Shared secret MeetStream signs webhook deliveries with.
     webhook_secret: Optional[str] = None
+    # This server's public https address, as MeetStream reaches it: where
+    # the in-call agent's memory tools (…/mcp) and webhooks are sent. Saved
+    # from Settings; MCP_SERVER_URL in the environment still wins.
+    public_url: Optional[str] = None
 
 
 @dataclass
@@ -247,6 +251,7 @@ def describe_environment_managed() -> Dict[str, bool]:
         "database.url": is_env_managed("DATABASE_URL"),
         "meetstream.api_key": is_env_managed("MEETSTREAM_API_KEY"),
         "meetstream.webhook_secret": is_env_managed("MEETSTREAM_WEBHOOK_SECRET"),
+        "meetstream.public_url": is_env_managed("MCP_SERVER_URL"),
     }
 
 
@@ -277,3 +282,36 @@ def effective_meetstream_base_url() -> str:
 
 def effective_webhook_secret() -> Optional[str]:
     return resolve("MEETSTREAM_WEBHOOK_SECRET", load_config().meetstream.webhook_secret, settings.MEETSTREAM_WEBHOOK_SECRET)
+
+
+def effective_mcp_server_url() -> str:
+    """
+    The MCP endpoint MeetStream calls: environment, then the public address
+    saved in Settings, then .env / the built-in localhost default. The desktop
+    app had no way to set this at all, so every desktop agent was pointed at
+    http://localhost:8000/mcp - which MeetStream cannot reach.
+    """
+    return resolve("MCP_SERVER_URL", load_config().meetstream.public_url, settings.MCP_SERVER_URL) or ""
+
+
+def normalise_public_url(raw: str) -> str:
+    """
+    "x.trycloudflare.com", "https://x.com/", "https://x.com/mcp" all mean the
+    same server; store the MCP endpoint. Raises ValueError when it cannot be
+    a public https address.
+    """
+    from urllib.parse import urlparse
+
+    value = (raw or "").strip()
+    if value and "://" not in value:
+        value = "https://" + value
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or not host:
+        raise ValueError("Enter a public https address, like https://meet.example.com or your tunnel's https://….trycloudflare.com.")
+    if host in ("localhost", "127.0.0.1", "0.0.0.0", "::1") or host.endswith(".local"):
+        raise ValueError("That address only exists on this computer; MeetStream needs one it can reach from the internet (a tunnel or a real domain).")
+    path = parsed.path.rstrip("/")
+    if not path.endswith("/mcp"):
+        path = f"{path}/mcp"
+    return "https://" + parsed.netloc + path

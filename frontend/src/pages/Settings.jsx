@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Page, PageHeader } from '../components/AppShell'
 import { useTheme } from '../components/AppShell'
-import { Badge, Card, ConnectionBadge, ErrorMessage, Field, Loading, Spinner } from '../components/ui'
+import { Badge, Card, ConnectionBadge, ErrorMessage, Field, Loading, Notice, Spinner } from '../components/ui'
 import { useCan, useIsOwner, useUser } from '../user'
 import {
   clearMeetstreamApiKey,
@@ -42,7 +43,10 @@ export default function Settings() {
   const user = useUser()
   const isOwner = useIsOwner()
   const canExport = useCan('export_workspace')
-  const [section, setSection] = useState('ai')
+  // ?section=meetings opens straight on a section: the agent's "can't look
+  // anything up" warning links here.
+  const [searchParams] = useSearchParams()
+  const [section, setSection] = useState(() => searchParams.get('section') || 'ai')
   const [status, setStatus] = useState(null)
   const [catalog, setCatalog] = useState(null)
   const [error, setError] = useState(null)
@@ -58,6 +62,7 @@ export default function Settings() {
   const [credentials, setCredentials] = useState(null)
   const [writeTools, setWriteToolsState] = useState(null)
   const [webhookSecret, setWebhookSecret] = useState('')
+  const [publicUrl, setPublicUrl] = useState('')
 
   const [dbProvider, setDbProvider] = useState('')
   const [dbValues, setDbValues] = useState({})
@@ -80,6 +85,9 @@ export default function Settings() {
       setWriteToolsState(writeToolsData)
       setProvider(statusData.llm?.provider || 'ollama')
       setDbProvider(statusData.database?.provider || 'sqlite')
+      // Show the saved address, not the built-in localhost default nobody chose.
+      const current = statusData.meetstream?.public_url || ''
+      setPublicUrl(current.startsWith('https://') ? current.replace(/\/mcp$/, '') : '')
       setValues({
         model: statusData.llm?.model || '',
         base_url: statusData.llm?.base_url || '',
@@ -466,6 +474,68 @@ export default function Settings() {
 
               {isOwner && (
                 <>
+                  <hr className="my-6" style={{ borderColor: 'var(--border-subtle)' }} />
+                  <h3 className="mb-1 text-sm font-semibold">Public address</h3>
+                  <p className="mb-4 text-sm" style={{ color: 'var(--text-muted)' }}>
+                    How MeetStream reaches this computer during a call. The agent's memory lookups and the
+                    call's live updates are sent here, so it has to be a public https address — a tunnel
+                    (<code>cloudflared tunnel --url http://localhost:8000</code>, or ngrok) or a real domain.
+                    Without it the bot still joins, records and is summarised afterwards, but the agent cannot
+                    look anything up.
+                  </p>
+                  <Field
+                    label="Public address"
+                    htmlFor="ms-public-url"
+                    hint={status.environment_managed?.['meetstream.public_url']
+                      ? 'Set by the MCP_SERVER_URL environment variable on this machine.'
+                      : 'A quick Cloudflare tunnel gets a new address each time it starts; a named tunnel or an ngrok static domain keeps it.'}
+                  >
+                    <input
+                      id="ms-public-url"
+                      className="mc-input"
+                      value={publicUrl}
+                      onChange={(event) => setPublicUrl(event.target.value)}
+                      placeholder="https://your-tunnel.trycloudflare.com"
+                      autoComplete="off"
+                      spellCheck={false}
+                      disabled={status.environment_managed?.['meetstream.public_url']}
+                    />
+                  </Field>
+                  <div className="mb-4">
+                    {status.meetstream?.public_url_problem ? (
+                      <Notice title="MeetStream can't reach this server">{status.meetstream.public_url_problem}</Notice>
+                    ) : (
+                      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                        Reachable at {status.meetstream?.public_url} — the agent can look things up in a call.
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="mc-btn mc-btn-primary"
+                    disabled={busy || status.environment_managed?.['meetstream.public_url']}
+                    onClick={async () => {
+                      setBusy(true)
+                      setError(null)
+                      try {
+                        const updated = await completeSetup({ meetstream: { public_url: publicUrl.trim() } })
+                        setStatus(updated)
+                        // Show what was stored ("abc.trycloudflare.com" -> https://…).
+                        const saved = updated.meetstream?.public_url || ''
+                        setPublicUrl(saved.startsWith('https://') ? saved.replace(/\/mcp$/, '') : '')
+                      } catch (err) {
+                        setError(err.message)
+                      } finally {
+                        setBusy(false)
+                      }
+                    }}
+                  >
+                    {busy ? <Spinner size={14} /> : null} Save and check
+                  </button>
+                  <p className="mt-2 text-xs" style={{ color: 'var(--text-faint)' }}>
+                    Agents pick up a new address the next time you launch a bot — nothing to re-activate.
+                  </p>
+
                   <hr className="my-6" style={{ borderColor: 'var(--border-subtle)' }} />
                   <h3 className="mb-1 text-sm font-semibold">Webhook signing secret</h3>
                   <p className="mb-4 text-sm" style={{ color: 'var(--text-muted)' }}>

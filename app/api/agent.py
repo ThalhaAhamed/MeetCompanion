@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dataclasses import asdict
 
 from app.config import settings
-from app.runtime_config import AgentTemplateSettings, load_config, update_config
+from app.runtime_config import AgentTemplateSettings, effective_mcp_server_url, load_config, update_config
 from app.database.connection import get_db
 from app.database.repositories import OrganizationRepository, UserRepository, MeetingRepository
 from app.models.database import User
@@ -128,7 +128,7 @@ async def get_agent_credentials(user: User = Depends(get_current_user), org_id: 
             "configured": bool(mcp_token),
             "masked_value": _mask_secret(mcp_token),
         },
-        "mcp_server_url": settings.MCP_SERVER_URL,
+        "mcp_server_url": effective_mcp_server_url(),
     }
 
 
@@ -448,8 +448,8 @@ async def create_agent(body: AgentCreateRequest, user: User = Depends(get_curren
     """Create a brand new MIA agent, owned by you personally and pre-wired to
     your workspace's MCP token so it can recall your workspace's meeting
     memory immediately. Set activate=false to create without switching to it."""
-    if not settings.MCP_SERVER_URL:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="MCP_SERVER_URL is not configured on this deployment")
+    if not effective_mcp_server_url():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Set this server's public address in Settings → Meetings first.")
 
     org_repo = OrganizationRepository(db)
     org = await org_repo.get_by_id(user.organization_id)
@@ -470,7 +470,7 @@ async def create_agent(body: AgentCreateRequest, user: User = Depends(get_curren
             voice=merged["voice"],
             temperature=merged["temperature"],
             mode=merged["mode"],
-            mcp_server_url=settings.MCP_SERVER_URL,
+            mcp_server_url=effective_mcp_server_url(),
             mcp_auth_token=org.mcp_token,
             response_modality=merged["response_modality"],
             tool_results_to_chat=merged["tool_results_to_chat"],
