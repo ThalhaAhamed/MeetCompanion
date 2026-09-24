@@ -75,6 +75,8 @@ class MeetStreamSettings:
     # the in-call agent's memory tools (…/mcp) and webhooks are sent. Saved
     # from Settings; MCP_SERVER_URL in the environment still wins.
     public_url: Optional[str] = None
+    # Run a Cloudflare quick tunnel and use its address (app.services.tunnel).
+    auto_tunnel: bool = False
 
 
 @dataclass
@@ -284,13 +286,28 @@ def effective_webhook_secret() -> Optional[str]:
     return resolve("MEETSTREAM_WEBHOOK_SECRET", load_config().meetstream.webhook_secret, settings.MEETSTREAM_WEBHOOK_SECRET)
 
 
+#: The automatic tunnel's MCP endpoint while it is up (app.services.tunnel).
+_tunnel_url: Optional[str] = None
+
+
+def set_tunnel_url(url: Optional[str]) -> None:
+    global _tunnel_url
+    _tunnel_url = url
+
+
 def effective_mcp_server_url() -> str:
     """
-    The MCP endpoint MeetStream calls: environment, then the public address
-    saved in Settings, then .env / the built-in localhost default. The desktop
-    app had no way to set this at all, so every desktop agent was pointed at
+    The MCP endpoint MeetStream calls: the environment, then the automatic
+    tunnel while it is running, then the public address saved in Settings,
+    then .env / the built-in localhost default. The desktop app had no way to
+    set this at all, so every desktop agent was pointed at
     http://localhost:8000/mcp - which MeetStream cannot reach.
     """
+    override = env_override("MCP_SERVER_URL")
+    if override:
+        return override
+    if _tunnel_url and load_config().meetstream.auto_tunnel:
+        return _tunnel_url
     return resolve("MCP_SERVER_URL", load_config().meetstream.public_url, settings.MCP_SERVER_URL) or ""
 
 

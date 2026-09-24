@@ -6,6 +6,7 @@ accepted here but never returned: responses carry masked previews only.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Dict, Optional
 
 import logging
@@ -248,8 +249,42 @@ async def _full_status() -> Dict[str, Any]:
             # Where MeetStream reaches this server, and whether it can.
             "public_url": effective_mcp_server_url(),
             "public_url_problem": await _public_url_problem(),
+            "tunnel": _tunnel_status(),
         },
     }
+
+
+def _tunnel_status():
+    from app.services.tunnel import tunnel_manager
+
+    return tunnel_manager.describe()
+
+
+class TunnelRequest(BaseModel):
+    enabled: bool
+
+
+@router.get("/tunnel", dependencies=[Depends(require_setup_access)])
+async def get_tunnel() -> Dict[str, Any]:
+    """The automatic tunnel's state, for Settings to follow while it starts."""
+    return {**_tunnel_status(), "public_url": effective_mcp_server_url(), "public_url_problem": await _public_url_problem()}
+
+
+@router.put("/tunnel", dependencies=[Depends(require_setup_access)])
+async def set_tunnel(body: TunnelRequest) -> Dict[str, Any]:
+    """Switch the automatic tunnel on or off; it starts or stops within seconds."""
+    from app.runtime_config import env_override
+    from app.services.tunnel import tunnel_manager
+
+    if body.enabled and env_override("MCP_SERVER_URL"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="MCP_SERVER_URL is set in this machine's environment, which takes precedence over a tunnel.",
+        )
+    current = load_config()
+    update_config(meetstream=replace(current.meetstream, auto_tunnel=body.enabled))
+    tunnel_manager.poke()
+    return await get_tunnel()
 
 
 async def _public_url_problem():

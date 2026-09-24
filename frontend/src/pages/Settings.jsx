@@ -11,9 +11,11 @@ import {
   getAgentCredentials,
   getProviderCatalog,
   getSetupStatus,
+  getTunnel,
   getWriteTools,
   resetSetup,
   setMeetstreamApiKey,
+  setTunnel,
   setWriteTools,
   testLlmProvider,
 } from '../api'
@@ -36,6 +38,174 @@ function EnvManagedNotice() {
       Some of these values are set by environment variables on this deployment and cannot be
       changed here. Update your environment and restart to change them.
     </p>
+  )
+}
+
+const TUNNEL_STATE = {
+  off: 'Off',
+  starting: 'Starting the tunnel…',
+  verifying: 'Checking the address answers…',
+  running: 'Running',
+  error: 'Not running',
+}
+
+/**
+ * Where MeetStream reaches this computer: a tunnel the app runs itself, or an
+ * address someone set up. The agent can only look anything up in a call when
+ * one of them works.
+ */
+function PublicAddress({ status, onStatus, onError }) {
+  const saved = status.meetstream?.public_url || ''
+  const [publicUrl, setPublicUrl] = useState(() => (saved.startsWith('https://') ? saved.replace(/\/mcp$/, '') : ''))
+  const [busy, setBusy] = useState(false)
+  const [tunnel, setTunnelState] = useState(status.meetstream?.tunnel || null)
+  const envManaged = Boolean(status.environment_managed?.['meetstream.public_url'])
+  const settling = tunnel?.enabled && ['starting', 'verifying'].includes(tunnel.state)
+
+  // Follow the tunnel while it comes up; it reports within a few seconds.
+  useEffect(() => {
+    if (!settling) return undefined
+    const timer = setInterval(async () => {
+      try {
+        const fresh = await getTunnel()
+        setTunnelState(fresh)
+        if (!['starting', 'verifying'].includes(fresh.state)) {
+          onStatus((current) => ({
+            ...current,
+            meetstream: { ...current.meetstream, tunnel: fresh, public_url: fresh.public_url, public_url_problem: fresh.public_url_problem },
+          }))
+        }
+      } catch {
+        // The next tick retries.
+      }
+    }, 1500)
+    return () => clearInterval(timer)
+  }, [settling, onStatus])
+
+  async function switchTunnel(enabled) {
+    setBusy(true)
+    onError(null)
+    try {
+      setTunnelState(await setTunnel(enabled))
+    } catch (err) {
+      onError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function saveAddress() {
+    setBusy(true)
+    onError(null)
+    try {
+      const updated = await completeSetup({ meetstream: { public_url: publicUrl.trim() } })
+      onStatus(updated)
+      // Show what was stored ("abc.trycloudflare.com" -> https://…).
+      const stored = updated.meetstream?.public_url || ''
+      setPublicUrl(stored.startsWith('https://') ? stored.replace(/\/mcp$/, '') : '')
+    } catch (err) {
+      onError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const usingTunnel = Boolean(tunnel?.enabled)
+
+  return (
+    <>
+      <h3 className="mb-1 text-sm font-semibold">Public address</h3>
+      <p className="mb-4 text-sm" style={{ color: 'var(--text-muted)' }}>
+        How MeetStream reaches this computer during a call: the agent's memory lookups and the call's live
+        updates are sent here. Without it the bot still joins, records and is summarised afterwards, but the
+        agent cannot look anything up.
+      </p>
+
+      <div className="mb-5 rounded-xl p-4" style={{ border: '1px solid var(--border-subtle)' }}>
+        <label className="flex cursor-pointer items-start gap-3">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={usingTunnel}
+            disabled={busy || envManaged || (tunnel && !tunnel.available && !usingTunnel)}
+            onChange={(event) => switchTunnel(event.target.checked)}
+          />
+          <span>
+            <span className="block text-sm font-medium" style={{ color: 'var(--text-strong)' }}>
+              Start a tunnel automatically
+            </span>
+            <span className="block text-xs" style={{ color: 'var(--text-muted)' }}>
+              While Meet Companion is open it runs a Cloudflare tunnel and uses its address — nothing to install
+              or paste. Only MeetStream's traffic can use it: sign-in, your meetings and the rest of the app stay
+              on this computer.
+            </span>
+          </span>
+        </label>
+
+        {tunnel && !tunnel.available && (
+          <p className="mt-3 text-xs" style={{ color: 'var(--text-muted)' }}>
+            This build does not include cloudflared. Install it (<code>winget install Cloudflare.cloudflared</code>,
+            <code> brew install cloudflared</code>), or enter an address below.
+          </p>
+        )}
+
+        {usingTunnel && (
+          <div className="mt-3 text-xs">
+            {tunnel.state === 'running' ? (
+              <p style={{ color: 'var(--text-muted)' }}>
+                <Badge tone="success">Running</Badge>{' '}
+                at {tunnel.url} — the agent can look things up in a call. The address changes whenever the
+                tunnel restarts; bots you launch always get the current one.
+              </p>
+            ) : tunnel.state === 'error' ? (
+              <Notice title="The tunnel is not running">{tunnel.error}</Notice>
+            ) : (
+              <p className="flex items-center gap-2" style={{ color: 'var(--text-muted)' }}>
+                <Spinner size={13} /> {TUNNEL_STATE[tunnel.state] || tunnel.state}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {!usingTunnel && (
+        <>
+          <Field
+            label="Or use your own address"
+            htmlFor="ms-public-url"
+            hint={envManaged
+              ? 'Set by the MCP_SERVER_URL environment variable on this machine.'
+              : 'A tunnel you run (a named Cloudflare tunnel or an ngrok static domain keeps its address) or a real domain.'}
+          >
+            <input
+              id="ms-public-url"
+              className="mc-input"
+              value={publicUrl}
+              onChange={(event) => setPublicUrl(event.target.value)}
+              placeholder="https://meet.example.com"
+              autoComplete="off"
+              spellCheck={false}
+              disabled={envManaged}
+            />
+          </Field>
+          <div className="mb-4">
+            {status.meetstream?.public_url_problem ? (
+              <Notice title="MeetStream can't reach this server">{status.meetstream.public_url_problem}</Notice>
+            ) : (
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                Reachable at {status.meetstream?.public_url} — the agent can look things up in a call.
+              </p>
+            )}
+          </div>
+          <button type="button" className="mc-btn mc-btn-primary" disabled={busy || envManaged} onClick={saveAddress}>
+            {busy ? <Spinner size={14} /> : null} Save and check
+          </button>
+          <p className="mt-2 text-xs" style={{ color: 'var(--text-faint)' }}>
+            Agents pick up a new address the next time you launch a bot — nothing to re-activate.
+          </p>
+        </>
+      )}
+    </>
   )
 }
 
@@ -62,7 +232,6 @@ export default function Settings() {
   const [credentials, setCredentials] = useState(null)
   const [writeTools, setWriteToolsState] = useState(null)
   const [webhookSecret, setWebhookSecret] = useState('')
-  const [publicUrl, setPublicUrl] = useState('')
 
   const [dbProvider, setDbProvider] = useState('')
   const [dbValues, setDbValues] = useState({})
@@ -85,9 +254,7 @@ export default function Settings() {
       setWriteToolsState(writeToolsData)
       setProvider(statusData.llm?.provider || 'ollama')
       setDbProvider(statusData.database?.provider || 'sqlite')
-      // Show the saved address, not the built-in localhost default nobody chose.
-      const current = statusData.meetstream?.public_url || ''
-      setPublicUrl(current.startsWith('https://') ? current.replace(/\/mcp$/, '') : '')
+
       setValues({
         model: statusData.llm?.model || '',
         base_url: statusData.llm?.base_url || '',
@@ -475,66 +642,7 @@ export default function Settings() {
               {isOwner && (
                 <>
                   <hr className="my-6" style={{ borderColor: 'var(--border-subtle)' }} />
-                  <h3 className="mb-1 text-sm font-semibold">Public address</h3>
-                  <p className="mb-4 text-sm" style={{ color: 'var(--text-muted)' }}>
-                    How MeetStream reaches this computer during a call. The agent's memory lookups and the
-                    call's live updates are sent here, so it has to be a public https address — a tunnel
-                    (<code>cloudflared tunnel --url http://localhost:8000</code>, or ngrok) or a real domain.
-                    Without it the bot still joins, records and is summarised afterwards, but the agent cannot
-                    look anything up.
-                  </p>
-                  <Field
-                    label="Public address"
-                    htmlFor="ms-public-url"
-                    hint={status.environment_managed?.['meetstream.public_url']
-                      ? 'Set by the MCP_SERVER_URL environment variable on this machine.'
-                      : 'A quick Cloudflare tunnel gets a new address each time it starts; a named tunnel or an ngrok static domain keeps it.'}
-                  >
-                    <input
-                      id="ms-public-url"
-                      className="mc-input"
-                      value={publicUrl}
-                      onChange={(event) => setPublicUrl(event.target.value)}
-                      placeholder="https://your-tunnel.trycloudflare.com"
-                      autoComplete="off"
-                      spellCheck={false}
-                      disabled={status.environment_managed?.['meetstream.public_url']}
-                    />
-                  </Field>
-                  <div className="mb-4">
-                    {status.meetstream?.public_url_problem ? (
-                      <Notice title="MeetStream can't reach this server">{status.meetstream.public_url_problem}</Notice>
-                    ) : (
-                      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                        Reachable at {status.meetstream?.public_url} — the agent can look things up in a call.
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    className="mc-btn mc-btn-primary"
-                    disabled={busy || status.environment_managed?.['meetstream.public_url']}
-                    onClick={async () => {
-                      setBusy(true)
-                      setError(null)
-                      try {
-                        const updated = await completeSetup({ meetstream: { public_url: publicUrl.trim() } })
-                        setStatus(updated)
-                        // Show what was stored ("abc.trycloudflare.com" -> https://…).
-                        const saved = updated.meetstream?.public_url || ''
-                        setPublicUrl(saved.startsWith('https://') ? saved.replace(/\/mcp$/, '') : '')
-                      } catch (err) {
-                        setError(err.message)
-                      } finally {
-                        setBusy(false)
-                      }
-                    }}
-                  >
-                    {busy ? <Spinner size={14} /> : null} Save and check
-                  </button>
-                  <p className="mt-2 text-xs" style={{ color: 'var(--text-faint)' }}>
-                    Agents pick up a new address the next time you launch a bot — nothing to re-activate.
-                  </p>
+                  <PublicAddress status={status} onStatus={setStatus} onError={setError} />
 
                   <hr className="my-6" style={{ borderColor: 'var(--border-subtle)' }} />
                   <h3 className="mb-1 text-sm font-semibold">Webhook signing secret</h3>

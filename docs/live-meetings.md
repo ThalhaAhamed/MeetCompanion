@@ -5,11 +5,25 @@ Notes, search, Ask AI and transcript upload work entirely on your machine.
 things: webhook deliveries (`/api/webhooks/meetstream`) and the voice agent's
 tool calls (`/mcp`).
 
-This has nothing to do with which database you use — SQLite or your own
-Postgres only changes where data is stored. It is about where the *server*
-runs: on a host with a public address (a VPS, Railway, Fly, …) no tunnel is
-needed at all; on a laptop, some tunnel is unavoidable while a bot is in a
-call.
+This has nothing to do with which database you use — SQLite, Supabase or
+any other Postgres only changes where data is stored; MeetStream never
+talks to the database, it talks to the Meet Companion server. It is about
+where the *server* runs: on a host with a public address (a VPS, Railway,
+Fly, …) no tunnel is needed at all; on a laptop, some tunnel is unavoidable
+while a bot is in a call.
+
+**On a laptop, the easy way:** Settings → Meetings → Public address → *Start
+a tunnel automatically*. Meet Companion runs a Cloudflare quick tunnel
+(`cloudflared` ships in the desktop installer, checksum-pinned) for as long
+as it is open, waits until the address answers, and uses it — nothing to
+install, run or paste. Only MeetStream's paths answer through it (`/mcp`,
+`/api/webhooks/…`, the chat relay and `/health`); sign-in, the UI and the
+API return 404 there, so your install is not put on the internet. The
+address changes whenever the tunnel restarts; bots always get the current
+one. Quick tunnels come with no uptime guarantee, so for a team server
+prefer a fixed address (below).
+
+**Or set an address yourself:**
 
 1. Expose the server on a public URL — a real domain behind HTTPS, or during
    development a tunnel such as `cloudflared tunnel --url http://localhost:8000`

@@ -68,6 +68,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
           python scripts/fetch_embedding_model.py desktop/models
+          python scripts/fetch_cloudflared.py desktop/bin
           pyinstaller desktop/server.spec --noconfirm --distpath desktop/build --workpath desktop/work
 
       - name: Package desktop app

@@ -476,6 +476,9 @@ async def create_agent(body: AgentCreateRequest, user: User = Depends(get_curren
             tool_results_to_chat=merged["tool_results_to_chat"],
             api_key=own_key,
             extra_model=tuned_for_voice({"provider": merged["provider"]}, mode=merged["mode"], transcriber=None),
+            # MeetStream's create endpoint answers 500 when the chat function
+            # is on a quick tunnel; the wiring below adds it by update.
+            include_chat_function=".trycloudflare.com" not in effective_mcp_server_url(),
         )
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MeetStream API error: {e}")
@@ -483,6 +486,7 @@ async def create_agent(body: AgentCreateRequest, user: User = Depends(get_curren
     new_id = (result.get("agent_config") or result).get("AgentConfigID")
     if new_id:
         await claim_agent(db, user.id, new_id)
+        await ensure_mcp_wired(new_id, org.mcp_token, api_key=own_key)
         if body.activate:
             user_repo = UserRepository(db)
             await user_repo.update_settings(user.id, {"active_agent_config_id": new_id})
