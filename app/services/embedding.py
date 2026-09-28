@@ -159,7 +159,29 @@ class EmbeddingService:
         # cheap enough that contention here is never the bottleneck.
         with self._embed_lock:
             if self._model is not None:
-                return [np.asarray(vec, dtype=np.float32).tolist() for vec in self._model.embed(clean_texts)]
+                # One document per call to the model, not the whole list in
+                # one batch. Batching relies on fastembed padding every
+                # encoding in the call to one uniform length before handing
+                # them to numpy; that padding failed intermittently in CI for
+                # a batch of two pieces of a long note (different lengths
+                # came back for what should have been one padded length),
+                # and it reproduced on a CI Linux runner with a freshly
+                # downloaded model but not on this Windows machine with
+                # either a warm or a from-scratch cache - environment- or
+                # platform-dependent in fastembed/tokenizers/onnxruntime
+                # itself, not something this service can fix upstream. A
+                # single-document call has nothing to pad against, so it
+                # cannot produce this failure by construction, at the cost
+                # of the batching speedup (embedding is background work
+                # here, never a request's hot path).
+                vectors = [np.asarray(next(iter(self._model.embed([text]))), dtype=np.float32) for text in clean_texts]
+                lengths = {len(v) for v in vectors}
+                if len(lengths) > 1:
+                    # Would have been the same numpy crash one level up;
+                    # caught here with the actual shapes, for a log that
+                    # says something a stack trace from np.asarray would not.
+                    raise ValueError(f"embedding model returned mismatched vector lengths: {sorted(lengths)}")
+                return [v.tolist() for v in vectors]
 
             # Deterministic lightweight fallback (e.g. if PyTorch cannot load on low disk space)
             # Generates a normalized 384-dimensional vector based on token hashing
