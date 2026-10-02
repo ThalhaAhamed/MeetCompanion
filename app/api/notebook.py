@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_org_id, get_current_user
@@ -200,7 +200,11 @@ async def _embed_note(title: str, content: str) -> Optional[List[float]]:
     Keyword search runs alongside it, so precise wording is not lost either.
 
     Failure is non-fatal: the note still saves and stays findable by text
-    search, it simply will not surface through semantic retrieval.
+    search, it simply will not surface through semantic retrieval until
+    embed_missing_notes() gives it a vector. The same goes for the hash
+    fallback used while the model cannot load: its vectors share the
+    model's width but none of its meaning, and once stored they were
+    indistinguishable from real ones and never replaced.
     """
     pieces = _note_pieces(title, content)
     if not pieces:
@@ -209,6 +213,8 @@ async def _embed_note(title: str, content: str) -> Optional[List[float]]:
         import numpy as np
 
         vectors = np.asarray(await embedding_service.embed_batch_async(pieces), dtype=np.float32)
+        if embedding_service.using_fallback:
+            return None
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)
         vectors = np.divide(vectors, norms, out=np.zeros_like(vectors), where=norms > 0)
         centroid = vectors.mean(axis=0)
@@ -219,6 +225,38 @@ async def _embed_note(title: str, content: str) -> Optional[List[float]]:
     except Exception as exc:
         logger.warning(f"Could not embed note: {exc}")
         return None
+
+
+async def embed_missing_notes(limit: int = 500) -> int:
+    """
+    Give a vector to notes saved while the embedding model was unavailable.
+    Runs at startup once the model has loaded; returns how many were done.
+    """
+    from app.database.connection import get_db_context
+    from app.services.meeting_notes import _keep_timestamps
+
+    await embedding_service.warmup_async()
+    if embedding_service.using_fallback:
+        return 0
+    done = 0
+    async with get_db_context() as db:
+        missing = Note.embedding.is_(None)
+        if db.get_bind().dialect.name != "postgresql":
+            # The portable column is JSON, which stores None as the JSON
+            # literal null rather than SQL NULL.
+            missing = or_(missing, cast(Note.embedding, String) == "null")
+        notes = (await db.execute(select(Note).where(missing).limit(limit))).scalars().all()
+        for note in notes:
+            vector = await _embed_note(note.title, note.content)
+            if vector is None:
+                continue
+            note.embedding = vector
+            _keep_timestamps(note)  # a vector is not an edit
+            done += 1
+        await db.commit()
+    if done:
+        logger.info("Embedded %d note(s) saved while the embedding model was unavailable", done)
+    return done
 
 
 # ---------------------------------------------------------------------------
