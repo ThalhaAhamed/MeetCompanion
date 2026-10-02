@@ -445,6 +445,15 @@ async def update_note(
             body.content if body.content is not None else note.content,
         )
 
+    from app.services.meeting_notes import only_ticks_changed
+
+    # What makes a meeting's note "edited" (kept on Reprocess): a change to
+    # its words, not a tick, a favourite or a move.
+    if (body.title is not None and body.title != note.title) or (
+        body.content is not None and not only_ticks_changed(note.content, body.content)
+    ):
+        fields["edited_by_user"] = True
+
     previous_content = note.content
     note = await repo.update(note, **fields)
 

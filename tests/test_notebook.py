@@ -396,9 +396,8 @@ async def test_sync_is_idempotent_and_respects_edits(authed_client):
     notes = (await authed_client.get("/api/notebook/notes", params={"meeting_id": str(meeting_id)})).json()
     note_id = notes["notes"][0]["id"]
 
-    # A person edits the note; regeneration must not clobber it.
-    import asyncio
-    await asyncio.sleep(2.1)
+    # A person edits the note - straight away, which the old two-second rule
+    # missed - and regeneration must not clobber it.
     await authed_client.patch(f"/api/notebook/notes/{note_id}", json={"content": "my own words"})
     result = (await authed_client.post("/api/notebook/sync-meetings")).json()
     assert result["skipped"] == 1
